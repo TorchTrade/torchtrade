@@ -918,6 +918,15 @@ order. That last one matters — threading the position and price only fixes the
 balance too, and its cache is seeded from reset's confirmed read so a first trade during
 an outage is still possible.
 
+**One boundary the grace period does not cover.** On binance and bitget the SL/TP
+bracket price comes from a candle close, and that read only happens on a bar that
+actually trades — the hold path returns before it. So after a reset followed by nothing
+but HOLD actions, there is no confirmed close to serve, and the first *trading* bar of an
+outage raises instead of being ridden out. Closing it needs either an extra observer read
+per reset or an explicit change of price source; grace deliberately will not substitute
+the mark, because that silently changes where brackets are priced from. Tracked with the
+#288 parity work.
+
 **This trades on unconfirmed state, which is why it is opt-in.** During the grace period
 the env sizes orders against the last known account; it knows the position it *had*, not
 the one it *has*. `flatten` deliberately ignores the budget: it exists to get you out
