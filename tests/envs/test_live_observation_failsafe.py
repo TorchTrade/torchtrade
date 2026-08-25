@@ -601,3 +601,62 @@ def test_reset_halts_on_the_sentinel_venues_actually_return(venue, sltp):
     assert trader.close_position.called, (
         "FLATTEN did not act: the sentinel escaped as a bare PositionUnknownError"
     )
+
+
+@pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
+@pytest.mark.parametrize("venue", VENUES)
+def test_grace_covers_the_exception_the_adapters_actually_raise(venue, sltp):
+    """All four adapters wrap a failed balance read in `RuntimeError`, not ValueError.
+
+    `binance/order_executor.py`, `bitget`, `bybit`, `okx` all do
+    `raise RuntimeError(f"Failed to get account balance: {e}")`. `_halting` deliberately
+    did not catch RuntimeError, so the grace period never engaged for the failure mode
+    production actually produces -- every test here injected PositionUnknownError, which
+    only the STATUS path raises.
+
+    RuntimeError is grace-eligible ONLY. `test_a_non_terminal_failure_propagates_without
+    _halting` pins the other half: outside grace it still escapes untouched, because a
+    read timeout arrives as RuntimeError too and #394 refused to flatten on those.
+    """
+    import torch
+
+    env, trader = _real_futures_env(budget=3, venue=venue, sltp=sltp,
+                                    **({"trade_mode": "fractional",
+                                        "position_fraction": 0.5} if sltp else {}))
+    td = env.reset()
+    td = env.step(td.set("action", torch.tensor(0 if sltp else 1)))["next"]
+
+    trader.get_account_balance.side_effect = RuntimeError(
+        "Failed to get account balance: connection reset"
+    )
+    trade_action = 1 if sltp else len(env.action_levels) - 1
+    nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                   .set("action", torch.tensor(trade_action)))["next"]
+
+    assert nxt["status_unknown"].item() == 1.0, (
+        "a real adapter balance failure was not recognised as an outage"
+    )
+    assert not bool(nxt["terminated"])
+
+
+@pytest.mark.parametrize("succeeded,still_cached", [(True, False), (False, True)],
+                         ids=["close-succeeds", "close-fails"])
+def test_a_realised_close_invalidates_the_cached_balance(succeeded, still_cached):
+    """A close moves equity, so the cached balance is wrong by the trade's P&L.
+
+    The sizing path early-returns BEFORE the balance read, so nothing refreshes it: reset
+    seeds $10k, the policy opens, holds, closes at a loss, and a grace bar many bars later
+    sizes against the pre-close $10k. At 10x that is an order the venue rejects on margin.
+
+    Only on SUCCESS -- a failed close leaves the position, and with it the equity the
+    cache already describes.
+    """
+    env, trader = _real_futures_env(budget=3)
+    env.reset()
+    assert "balance" in env._last_confirmed_read, "setup: reset seeds the cache"
+
+    env.position.current_position = 1
+    trader.close_position.return_value = succeeded
+    env._handle_close_action(0.05)
+
+    assert ("balance" in env._last_confirmed_read) is still_cached

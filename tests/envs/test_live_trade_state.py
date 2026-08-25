@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from torchtrade.envs.core.state import PositionState, position_qty_from_status
+from tests.envs.base_exchange_tests import wire_outage_state
 
 
 # ---------------------------------------------------------------------------
@@ -142,9 +143,7 @@ def _make_binance_env(trader=None):
     env.position = PositionState()
     # Built with __new__, so __init__'s outage state is absent. The balance read that
     # sizes an order runs under `_halting` as of #295.
-    env.consecutive_unknown_status = 0
-    env._status_unknown_this_step = False
-    env._last_confirmed_read = {}
+    wire_outage_state(env)
     env.initial_portfolio_value = 10000.0
     env.history = HistoryTracker()
     env.reward_function = log_return_reward
@@ -182,9 +181,7 @@ def _make_bitget_env(trader=None):
     env.position = PositionState()
     # Built with __new__, so __init__'s outage state is absent. The balance read that
     # sizes an order runs under `_halting` as of #295.
-    env.consecutive_unknown_status = 0
-    env._status_unknown_this_step = False
-    env._last_confirmed_read = {}
+    wire_outage_state(env)
     env.initial_portfolio_value = 10000.0
     env.history = HistoryTracker()
     env.reward_function = log_return_reward

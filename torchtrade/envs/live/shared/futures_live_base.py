@@ -94,9 +94,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """
         try:
             value = read()
-        # NOT RuntimeError: adapters wrap timeouts in it, and KeyError is a config
-        # error. See docs/environments/online.md.
-        except (PositionUnknownError, ValueError) as error:
+        # RuntimeError is caught for GRACE ONLY, and re-raised untouched otherwise -- see
+        # the `raise` at the bottom. All four adapters wrap a failed balance read in
+        # `RuntimeError("Failed to get account balance: ...")`, so without this the grace
+        # period never engaged for the failure mode production actually produces; the
+        # tests only ever injected PositionUnknownError.
+        #
+        # It must NOT become halt-and-flatten material (#394, docs/environments/online.md):
+        # a read timeout arrives as RuntimeError too, and flattening a live position on a
+        # timeout is exactly what that decision refused. Grace does not flatten -- it
+        # serves last-known state and flags the bar -- so riding one out is safe where
+        # halting on it is not. KeyError stays out: that is a config error.
+        except (PositionUnknownError, ValueError, RuntimeError) as error:
             # The BAR is unconfirmed. The counter advances once per step in
             # `_finalize_step_flags`, not here: counting per read site double-counts a bar
             # where both reads fail, and counting only the pre-trade read let a persistent
@@ -138,6 +147,14 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                         self._max_unknown_status_steps,
                     )
                 return cached
+
+            # Grace did not apply. A RuntimeError leaves untouched -- it was caught only
+            # to give the grace path a chance at it, and turning one into a halt (or a
+            # FLATTEN close) is the #394 decision inverted.
+            if isinstance(error, RuntimeError) and not isinstance(
+                error, (PositionUnknownError, LiveObservationHalt)
+            ):
+                raise
 
             accepted = flatten_error = None
             if (self.config.observation_failure_policy
@@ -217,6 +234,13 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         if success:
             self.position.current_position = 0
+            # A realised close moves equity, so the cached balance is now wrong by the
+            # trade's P&L. Only on SUCCESS: a failed close leaves the position, and with
+            # it the equity the cache already describes. Without this, a later failed
+            # sizing read serves pre-close equity from an arbitrary number of bars ago --
+            # the sizing path early-returns before the balance read, so nothing refreshes
+            # it (#295).
+            self._last_confirmed_read.pop("balance", None)
 
         return self._create_trade_info(
             executed=True,

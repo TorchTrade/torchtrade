@@ -42,6 +42,7 @@ from torchtrade.envs.utils.liquidation import (
     cross_liquidation_price,
     isolated_liquidation_price,
 )
+from tests.envs.base_exchange_tests import wire_outage_state
 from torchtrade.envs.core.state import (
     POSITION_UNKNOWN,
     PositionState,
@@ -3144,6 +3145,7 @@ def test_closing_reports_the_order_side_that_closed_it(qty, expected_side):
         position=SimpleNamespace(current_position=1),
         _create_trade_info=TorchTradeFuturesLiveEnv._create_trade_info.__get__(object()),
     )
+    wire_outage_state(env)   # _handle_close_action clears the balance cache
     info = TorchTradeFuturesLiveEnv._handle_close_action(env, qty)
 
     assert info["side"] == expected_side, "a close must report the side it sent"
@@ -3400,9 +3402,7 @@ class _ResetStub:
         self.history_reset_calls = 0
         self.sync_action_level_calls = 0
         # #295: the shared _reset clears the outage state at the episode boundary.
-        self.consecutive_unknown_status = 0
-        self._status_unknown_this_step = False
-        self._last_confirmed_read = {}
+        wire_outage_state(self)
         self._reset_outage_state = (
             lambda: TorchTradeLiveEnv._reset_outage_state(self)
         )

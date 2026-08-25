@@ -608,3 +608,16 @@ def assert_an_invalid_action_cannot_move_an_open_position(env, action):
     assert env.position.current_position == 1, (
         f"action {action!r} moved the open position to {env.position.current_position}"
     )
+
+
+def wire_outage_state(env, budget=0):
+    """Give a stub the #295 staleness attributes `__init__` would have set.
+
+    Ten sites were pasting these four lines. A stub that skips them fails with an
+    AttributeError from whichever read happens to touch them first, which says nothing
+    about what the test was checking.
+    """
+    env.consecutive_unknown_status = 0
+    env._status_unknown_this_step = False
+    env._last_confirmed_read = {}
+    env._max_unknown_status_steps = budget
