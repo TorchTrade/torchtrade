@@ -5,9 +5,6 @@ from typing import Callable, Optional
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
-from torchtrade.envs.core.state import (
-    HistoryTracker,
-)
 
 class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """

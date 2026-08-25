@@ -20,7 +20,6 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         symbol: str,
         time_frames: Union[List[TimeFrame], TimeFrame],
         window_sizes: Union[List[int], int] = 10,
-        product_type: str = "USDT-FUTURES",
         feature_preprocessing_fn: Optional[Callable] = None,
         client: Optional[object] = None,
         demo: bool = True,
@@ -32,7 +31,6 @@ class BitgetObservationClass(BaseFuturesObservationClass):
             symbol: The trading symbol (e.g., "BTC/USDT:USDT")
             time_frames: Single TimeFrame or list of TimeFrame objects
             window_sizes: Single integer or list of integers specifying window sizes
-            product_type: Product type for Bitget V2 API (USDT-FUTURES, COIN-FUTURES, etc.)
             feature_preprocessing_fn: Optional custom preprocessing function
             client: Optional pre-configured Bitget Client for dependency injection
             demo: Whether to use demo/testnet environment (default: True)
@@ -41,7 +39,6 @@ class BitgetObservationClass(BaseFuturesObservationClass):
         symbol = normalize_symbol(symbol)
 
         # Store Bitget-specific attributes before calling super().__init__
-        self.product_type = product_type
         self.demo = demo
 
         # Call parent constructor with normalized symbol

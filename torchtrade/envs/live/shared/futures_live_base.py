@@ -77,10 +77,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     OBSERVER_CLS = None
     TRADER_CLS = None
 
-    #: Build the trader before the observer. True where the observer reuses the trader's
-    #: client (bybit, okx). Preserved per venue rather than normalised: both constructors
-    #: talk to the exchange, so the order decides which side effects have already landed
-    #: when the other one fails.
+    #: Build the trader before the observer. bybit shares the trader's pybit session with
+    #: its observer; okx keeps its pre-fold order for the reason below. Preserved per venue
+    #: rather than normalised: every trader __init__ WRITES leverage and margin mode to the
+    #: venue, so this decides whether that write lands before an observer failure.
     TRADER_FIRST = False
 
     def _observer_kwargs(self) -> dict:
@@ -96,11 +96,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     def _trader_kwargs(self, api_key: str, api_secret: str) -> dict:
         """Arguments for `TRADER_CLS`. Override to ADD venue-specific ones.
 
-        This is where the credential shapes stopped being a problem. okx and bitget take a
-        `passphrase` and binance and bybit do not, which is why folding these four looked
-        like a choice between `**credentials` (untyped) and an optional argument two
-        venues ignore -- the dead-parameter defect #289 deleted. The passphrase never
-        reaches anything but the trader, so a hook here needs neither.
         """
         return dict(
             symbol=self.config.symbol,
@@ -127,9 +122,12 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 **self._observer_kwargs()
             )
 
-        for build in ((make_trader, make_observer) if self.TRADER_FIRST
-                      else (make_observer, make_trader)):
-            build()
+        if self.TRADER_FIRST:
+            make_trader()
+            make_observer()
+        else:
+            make_observer()
+            make_trader()
 
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).
@@ -146,7 +144,8 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         self._capture_bankruptcy_baseline()
         self._build_observation_specs()
 
-        self.position = PositionState()
+        # `self.position` is already built in TorchTradeLiveEnv.__init__, which runs
+        # before this tail. binance and bitget rebuilt it; bybit and okx never did.
         self.history = HistoryTracker()
 
     def _halting(self, read, cache_key=None):

@@ -43,7 +43,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
     OBSERVER_CLS = BitgetObservationClass
     TRADER_CLS = BitgetFuturesOrderClass
-    TRADER_FIRST = False
 
     def __init__(
         self,

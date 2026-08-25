@@ -5,9 +5,6 @@ from typing import Callable, Optional
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
-from torchtrade.envs.core.state import (
-    HistoryTracker,
-)
 
 class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """
@@ -35,6 +32,9 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
 
     OBSERVER_CLS = OKXObservationClass
     TRADER_CLS = OKXFuturesOrderClass
+    # Trader first, as before the fold. NOT for client sharing -- okx keeps market
+    # data on a separate client -- but because both constructors talk to the venue
+    # and the order decides which side effects have landed when one fails.
     TRADER_FIRST = True
 
     def __init__(
@@ -75,11 +75,4 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
             **super()._trader_kwargs(api_key, api_secret),
             "position_mode": self.config.position_mode,
             "passphrase": self._passphrase,
-        }
-
-    def _observer_kwargs(self) -> dict:
-        # Reuses the trader's client, which is why TRADER_FIRST is set.
-        return {
-            **super()._observer_kwargs(),
-            "client": getattr(self.trader, "client", None),
         }

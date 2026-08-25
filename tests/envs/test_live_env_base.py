@@ -2982,23 +2982,22 @@ def test_every_live_env_can_actually_run_the_bar_wait(cls):
     # never assigns it -- which is exactly the alpaca break, certified clean. First
     # version of this test did that and the mutation survived.
     #
-    # `_finish_futures_init` is admitted BY NAME as of #288: the four futures venues now
-    # share that tail rather than each spelling the assignment out. Admitting the whole
-    # shared module would restore the hole above -- TorchTradeLiveEnv lives there too.
+    # #288 moved the assignment into the shared `_finish_futures_init`, so the PREDICATE
+    # widens, not the base list. Admitting the futures base as a source was my first
+    # attempt and it restored the hole above -- mutation-proven: deleting bybit's
+    # `_finish_futures_init()` call still passed. The venue must show one or the other in
+    # ITS OWN source.
     exchange_bases = [
         base for base in cls.__mro__
         if base.__module__.startswith("torchtrade.envs.live.")
         and not base.__module__.startswith("torchtrade.envs.live.shared")
     ]
-    futures_base = next(
-        (b for b in cls.__mro__ if b.__name__ == "TorchTradeFuturesLiveEnv"), None
-    )
-    if futures_base is not None and "_finish_futures_init" in futures_base.__dict__:
-        exchange_bases.append(futures_base)
     if not exchange_bases:
         pytest.skip(f"{cls.__name__} is a shared base, not an exchange env")
     assert any(
-        "self.execute_on = " in inspect.getsource(base) for base in exchange_bases
+        "self.execute_on = " in inspect.getsource(base)
+        or "_finish_futures_init()" in inspect.getsource(base)
+        for base in exchange_bases
     ), (
         f"{cls.__name__} never assigns self.execute_on in its exchange base; the shared "
         f"bar wait reads it and will AttributeError at the first bar, after the order"
@@ -3908,4 +3907,57 @@ def test_every_successful_close_invalidates_the_cached_balance():
     assert not offenders, (
         "a successful close leaves the cached sizing balance stale in: "
         + "; ".join(offenders)
+    )
+
+
+@pytest.mark.parametrize("venue,expect", [
+    ("binance", {}),
+    ("bitget",  {}),
+    ("bybit",   {"client": "SHARED"}),
+    ("okx",     {}),
+], ids=["binance", "bitget", "bybit", "okx"])
+def test_each_venue_builds_its_observer_with_the_arguments_it_needs(venue, expect):
+    """The non-DI path, which no test in the repo exercised: 83 constructions inject an
+    observer, 2 do not, and those 2 need live credentials so they skip.
+
+    So `_observer_kwargs` -- the whole point of #288 slice 1 -- was unreachable by the
+    suite, and it shipped with two bugs. okx inherited a `client=` override copied from
+    bybit, handing its observer the trader's `Trade.TradeAPI`, which has no
+    `get_candlesticks`: every kline fetch would have raised. bitget lost `product_type`,
+    so a COIN-FUTURES deployment would trade one product line and read candles from
+    another, silently.
+
+    `client` is asserted as a CATEGORY, not a value: bybit shares one session between the
+    two roles and the other three must not, which is the actual contract.
+    """
+    import importlib
+
+    # The concrete plain env, not the abstract exchange base: the base still declares
+    # `_step`/`_execute_trade_if_needed` abstract, so it cannot be instantiated at all.
+    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
+    cls = next(v for k, v in vars(module).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+
+    # A real instance via __new__, not a SimpleNamespace: `_observer_kwargs` calls
+    # zero-arg `super()`, which needs the class in its MRO. __init__ is skipped so the
+    # venue is never contacted.
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(
+        symbol="X", time_frames=["1m"], window_sizes=[10], demo=True,
+        leverage=5, margin_mode="isolated", position_mode="one_way",
+        product_type="USDT-FUTURES",
+    )
+    env._feature_preprocessing_fn = None
+    env.trader = SimpleNamespace(client="SHARED")
+    kwargs = env._observer_kwargs()
+
+    base_keys = {"symbol", "time_frames", "window_sizes",
+                 "feature_preprocessing_fn", "demo"}
+    assert base_keys <= set(kwargs), f"{venue} dropped {base_keys - set(kwargs)}"
+
+    extras = {k: v for k, v in kwargs.items() if k not in base_keys}
+    assert extras == expect, (
+        f"{venue} observer extras are {extras}, expected {expect}. A client the venue "
+        f"does not share is a broken market-data feed; a missing product_type is a "
+        f"silent wrong-market read."
     )
