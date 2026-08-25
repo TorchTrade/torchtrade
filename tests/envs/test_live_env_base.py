@@ -3983,3 +3983,100 @@ def test_no_venue_redeclares_the_account_state_contract(env_cls):
         f"shared contract on TorchTradeLiveEnv; a reordered copy is a permuted "
         f"observation that no test compares against anything else"
     )
+
+
+@pytest.mark.parametrize("venue,expect_order,observer_extras", [
+    ("binance", ["trader" if False else "observer", "trader"], set()),
+    ("bitget",  ["observer", "trader"], set()),
+    ("bybit",   ["trader", "observer"], {"client"}),
+    ("okx",     ["trader", "observer"], set()),
+], ids=["binance", "bitget", "bybit", "okx"])
+def test_init_trading_clients_wires_each_venue_as_before(
+    venue, expect_order, observer_extras
+):
+    """Characterisation of the code #288 actually refactored, network-free.
+
+    The previous test called `_observer_kwargs()` directly on a `__new__`'d instance, so
+    it never ran `_init_trading_clients` -- the method that selects the order, constructs
+    both classes and consumes both hooks. A mutation of a hook failed it while a wiring
+    regression at any of the eight call sites passed. Same error as the kwargs probe in
+    the PR body: verifying something adjacent to the thing that changed.
+
+    Construction ORDER is asserted, not just kwargs. bybit's observer reuses the trader's
+    session, so it must be built second; okx must NOT, because its trader client is a
+    Trade API and klines live on the MarketData one -- the round-1 regression.
+    """
+    import importlib
+
+    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
+    cls = next(v for k, v in vars(module).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+
+    log = []
+
+    class FakeObserver:
+        def __init__(self, **kw):
+            log.append(("observer", kw))
+
+    class FakeTrader:
+        def __init__(self, **kw):
+            log.append(("trader", kw))
+            self.client = "TRADER_SESSION"
+
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(
+        symbol="X", time_frames=["1m"], window_sizes=[10], demo=True,
+        leverage=5, margin_mode="isolated", position_mode="one_way",
+        product_type="COIN-FUTURES", trade_mode="fractional",
+    )
+    env._feature_preprocessing_fn = None
+    env._passphrase = env._api_passphrase = "PASS"
+
+    with patch.object(cls, "OBSERVER_CLS", FakeObserver), \
+         patch.object(cls, "TRADER_CLS", FakeTrader):
+        env._init_trading_clients("KEY", "SECRET", None, None)
+
+    assert [name for name, _ in log] == expect_order, (
+        f"{venue} built {[n for n, _ in log]}, expected {expect_order}"
+    )
+
+    kw = dict(log)
+    base_obs = {"symbol", "time_frames", "window_sizes", "feature_preprocessing_fn", "demo"}
+    assert set(kw["observer"]) == base_obs | observer_extras, (
+        f"{venue} observer kwargs {sorted(kw['observer'])}, expected "
+        f"{sorted(base_obs | observer_extras)}"
+    )
+    if "client" in observer_extras:
+        assert kw["observer"]["client"] == "TRADER_SESSION", (
+            f"{venue} shares the trader's session, so it must receive that object"
+        )
+
+    base_tr = {"symbol", "api_key", "api_secret", "demo", "leverage", "margin_mode"}
+    assert base_tr <= set(kw["trader"]), f"{venue} trader lost {base_tr - set(kw['trader'])}"
+    assert kw["trader"]["api_key"] == "KEY" and kw["trader"]["api_secret"] == "SECRET"
+
+
+def test_dependency_injection_still_skips_construction_entirely():
+    """A supplied observer/trader must win, on the shared path as on the old per-venue one.
+
+    83 of the suite's 85 env constructions rely on this, so a regression here would show
+    up everywhere at once -- but it is the shared method's contract now, and nothing
+    asserted it directly.
+    """
+    from torchtrade.envs.live.binance.env import BinanceFuturesTorchTradingEnv as Env
+
+    def explode(**kw):
+        raise AssertionError("constructed a client despite dependency injection")
+
+    env = Env.__new__(Env)
+    env.config = SimpleNamespace(
+        symbol="X", time_frames=["1m"], window_sizes=[10], demo=True,
+        leverage=5, margin_mode="isolated", trade_mode="fractional",
+    )
+    env._feature_preprocessing_fn = None
+    supplied_obs, supplied_tr = object(), object()
+
+    with patch.object(Env, "OBSERVER_CLS", explode), patch.object(Env, "TRADER_CLS", explode):
+        env._init_trading_clients("K", "S", supplied_obs, supplied_tr)
+
+    assert env.observer is supplied_obs and env.trader is supplied_tr
