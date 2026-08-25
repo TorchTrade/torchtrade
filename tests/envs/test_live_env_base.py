@@ -240,9 +240,11 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
     would be useless, and the guard would still read the stale cache. AST, not source text,
     so a comment mentioning the method cannot satisfy it.
     """
-    step = env_cls.__dict__["_step"]
+    step = env_cls._step
     sync = _first_call_position(step, {"_sync_position_from_exchange"})
-    trade = _first_call_position(step, {"_execute_trade_if_needed"})
+    trade = _first_call_position(
+        step, {"_execute_trade_if_needed", "_dispatch_sltp_trade"}
+    )
 
     assert sync is not None, (
         f"{env_cls.__name__}._step never reconciles the cached position with the exchange -- "
@@ -254,12 +256,24 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
     )
 
 
-# Every live env that owns a `_step` -- the concrete venues. The intermediate bases
-# define none, and an exchange #6 would land here the moment it does.
-STEPPING_ENVS = [c for c in LIVE_ENVS if "_step" in c.__dict__]
+# Every CONCRETE live env, discovered by what it RESOLVES rather than what it defines
+# locally. `"_step" in c.__dict__` silently dropped all four SLTP futures envs the moment
+# #288 moved `_step` onto SLTPMixin -- 10 -> 6 and 7 -> 3 -- taking the #295
+# outage-truncation guard and the action-validate-before-trade ordering guard with them.
+# The collected test count did not move, because this PR's new cases happened to offset
+# the vanished ones. A list keyed on where a method LIVES stops finding its subject the
+# moment the method moves, which is the whole point of a refactor.
+#
+# The length assertions are the other half: without them an emptied list SKIPS rather
+# than fails, which is how this would have shipped.
+STEPPING_ENVS = [c for c in LIVE_ENVS if not inspect.isabstract(c)]
+assert len(STEPPING_ENVS) == 10, (
+    f"expected the 10 concrete live envs (5 venues x plain/SLTP), got "
+    f"{[c.__name__ for c in STEPPING_ENVS]}"
+)
 
-# Every live env that owns a `_reset`: the two shared bodies plus the SLTP overrides.
-RESETTING_ENVS = [c for c in LIVE_ENVS if "_reset" in c.__dict__]
+# Same set: every concrete env resolves a `_reset`, whether its own or a shared one.
+RESETTING_ENVS = STEPPING_ENVS
 
 
 @pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
@@ -274,10 +288,17 @@ def test_every_live_step_validates_its_action_before_it_trades(env_cls):
     Ordering is the point. Presence alone would pass a `_step` that validated AFTER
     submitting, and the whole contract is that a malformed action costs nothing.
     """
-    step = env_cls.__dict__["_step"]
+    step = env_cls._step
     resolve = _first_call_position(step, {
         "_resolve_action_level", "_resolve_action_index", "_resolve_action_tuple"})
-    trade = _first_call_position(step, {"_execute_trade_if_needed"})
+    # `_dispatch_sltp_trade` is the SLTP trade call as of #288: the shared `_step` hands
+    # off through it so bybit/okx can thread the mark. Naming only the executor made this
+    # guard find no trade call at all on the four SLTP venues, which is a TypeError rather
+    # than a missed ordering -- loud, but only because the list that feeds it was fixed
+    # first. Keyed on the wrong name it would simply have stopped constraining anything.
+    trade = _first_call_position(
+        step, {"_execute_trade_if_needed", "_dispatch_sltp_trade"}
+    )
 
     assert resolve is not None, (
         f"{env_cls.__name__}._step indexes its action space without validating -- on a "
@@ -2206,6 +2227,12 @@ def test_no_live_env_infers_direction_from_the_order_side(exchange, module):
     """
     src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
            / "live" / exchange / f"{module}.py").read_text()
+    # The mixin too: `_record_sltp_position` and `_sync_position_from_exchange` live there
+    # and serve all four SLTP venues, so a venue-file-only scan polices the copies that no
+    # longer hold the code. Reintroducing this pattern in the mixin passed 20/20 cases.
+    if module == "env_sltp":
+        src += (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+                / "utils" / "sltp_mixin.py").read_text()
     assert 'trade_info["side"] ==' not in src, (
         f"{exchange}/{module} still infers position direction from the order side"
     )
@@ -2276,7 +2303,11 @@ def test_no_live_env_reads_a_raw_position_qty(exchange, module):
             / "live" / exchange / f"{module}.py")
     if not path.exists():
         pytest.skip(f"{exchange} has no {module}")
-    assert "position_status.qty" not in path.read_text(), (
+    src = path.read_text()
+    if module == "env_sltp":
+        src += (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+                / "utils" / "sltp_mixin.py").read_text()
+    assert "position_status.qty" not in src, (
         f"{exchange}/{module} reads a raw qty instead of position_qty_from_status()"
     )
 
@@ -3714,7 +3745,7 @@ def test_every_live_step_writes_done_explicitly(env_cls):
     the first place.
     """
     calls = [n.func.attr for n in ast.walk(ast.parse(
-        inspect.getsource(env_cls.__dict__["_step"]).lstrip()))
+        inspect.getsource(env_cls._step).lstrip()))
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
     assert "_finalize_step_flags" in calls, (
         f"{env_cls.__name__}._step does not call the shared done-family writer, so its "
@@ -3723,7 +3754,7 @@ def test_every_live_step_writes_done_explicitly(env_cls):
     # A substring check passed on a commented-out call with the writes reimplemented
     # alongside it. Only binance had an end-to-end backstop for that; nine venues did not.
     assert not [n for n in ast.walk(ast.parse(
-        inspect.getsource(env_cls.__dict__["_step"]).lstrip()))
+        inspect.getsource(env_cls._step).lstrip()))
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
         and n.func.attr == "set"
         and n.args and isinstance(n.args[0], ast.Constant)
@@ -3772,7 +3803,7 @@ def test_every_live_reset_clears_the_outage_state(env_cls):
     nothing. AST rather than source text, so a comment naming the method cannot satisfy it.
     """
     calls = [n.func.attr for n in ast.walk(ast.parse(
-        inspect.getsource(env_cls.__dict__["_reset"]).lstrip()))
+        inspect.getsource(env_cls._reset).lstrip()))
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
     # `_reset` accepted as delegation: the SLTP envs override _reset and call
     # super()._reset(), which is where the clear lives. What this rejects is an override

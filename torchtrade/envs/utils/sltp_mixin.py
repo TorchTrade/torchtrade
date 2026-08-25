@@ -64,7 +64,9 @@ class SLTPMixin:
         others: the unguarded balance read, the mark re-read, the close that left the
         cache stale. One copy is the point.
         """
-        status, position_status, current_price, position_size = self._acquire_pre_trade_state()
+        # `status` and `position_size` were unpacked and unused in all four copies.
+        # One canonical copy is the place to stop carrying that.
+        _, position_status, current_price, _ = self._acquire_pre_trade_state()
 
         # Source of truth: detects SL/TP closures AND state drift from failed brackets.
         position_closed = self._sync_position_from_exchange(position_status)

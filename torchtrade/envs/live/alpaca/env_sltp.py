@@ -136,15 +136,6 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
 
-    def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
-        """Reset the environment, including SLTP-specific state."""
-        # Call base reset
-        result = super()._reset(tensordict, **kwargs)
-
-        # Reset SLTP-specific state using mixin
-        self._reset_sltp_state()
-
-        return result
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""

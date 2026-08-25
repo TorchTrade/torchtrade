@@ -9,10 +9,8 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Callable
 import logging
 
-import torch
 
 logger = logging.getLogger(__name__)
-from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass

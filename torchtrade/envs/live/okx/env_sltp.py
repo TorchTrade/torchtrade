@@ -10,8 +10,6 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Tuple, Callable
 import logging
 
-import torch
-from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.live.okx.observation import OKXObservationClass
