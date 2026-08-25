@@ -129,6 +129,55 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             make_observer()
             make_trader()
 
+    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
+        """One step for the four PLAIN futures envs. Four copies, 100%/96% identical --
+        the 4% was a trailing comment on one line (#288).
+
+        The SLTP envs do NOT get this: `SLTPMixin` sits ahead of this class in their MRO
+        and owns their own `_step`, which resolves a bracket tuple rather than an action
+        level. Alpaca does not inherit this class at all.
+
+        Ordering here is the contract, not style. The pre-trade read comes first because
+        the duplicate-action guard downstream reads the position it syncs (invariant 2);
+        the trade takes the qty and price that read already acquired under the halt policy,
+        rather than fetching its own (#295); and `record_step` precedes the reward because
+        the reward function scores the history row it just wrote.
+        """
+        status, position_status, current_price, position_size = self._acquire_pre_trade_state()
+
+        self._sync_position_from_exchange(position_status)
+
+        desired_action = self._resolve_action_level(tensordict)
+        trade_info = self._execute_trade_if_needed(
+            desired_action, current_qty=position_size, current_price=current_price,
+        )
+        self._record_position_after_trade(desired_action, trade_info)
+
+        self._wait_for_next_timestamp()
+
+        new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
+        # None when the account is flat: there is no position mark to read, and fetching
+        # one would add a round-trip that can halt the episode. The pre-trade price is the
+        # honest fallback -- flat rows carry no PnL anyway.
+        new_price = new_price if new_price is not None else current_price
+
+        # History FIRST: the reward function reads it.
+        self.history.record_step(
+            price=new_price,
+            action=desired_action,
+            reward=0.0,
+            portfolio_value=new_portfolio_value,
+            position=new_qty,
+        )
+        reward = float(self.reward_function(self.history))
+        self.history.rewards[-1] = reward
+
+        done = self._check_termination(new_portfolio_value)
+        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
+        self._finalize_step_flags(next_tensordict, terminated=done)
+
+        return next_tensordict
+
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).
 
@@ -403,9 +452,13 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     if not math.isfinite(mark) or mark <= 0:
                         mark = None
                 except Exception:
+                    # `self.config.symbol`, not `self.symbol`: these envs have no
+                    # `symbol` attribute, so this handler raised AttributeError instead of
+                    # degrading -- the fallback the comment above promises never ran. Only
+                    # reachable when the post-bar mark fetch fails, which nothing tested.
                     logger.warning(
                         "post-bar mark unavailable for %s; the history row will carry the "
-                        "pre-trade price", self.symbol,
+                        "pre-trade price", self.config.symbol,
                     )
                     mark = None
             return portfolio_value, mark, self._last_observed_qty, observation

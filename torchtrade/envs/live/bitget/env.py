@@ -154,56 +154,6 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         self.action_levels = config.action_levels
         self.action_spec = Categorical(len(self.action_levels))
 
-    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        """Execute one environment step."""
-
-        # Get current price and position from trader status (avoids redundant observation call)
-        status, position_status, current_price, position_size = self._acquire_pre_trade_state()
-
-        self._sync_position_from_exchange(position_status)
-
-        # Get desired action level
-        desired_action = self._resolve_action_level(tensordict)
-
-        # Calculate and execute trade if needed
-        trade_info = self._execute_trade_if_needed(
-            desired_action, current_qty=position_size, current_price=current_price,
-        )
-
-        self._record_position_after_trade(desired_action, trade_info)
-
-        # Wait for next time step
-        self._wait_for_next_timestamp()
-
-        # Get updated state
-        new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
-        # None when the account is flat: there is no position mark to read, and
-        # fetching one would add a round-trip that can halt the episode. The
-        # pre-trade price is the honest fallback -- flat rows carry no PnL anyway.
-        new_price = new_price if new_price is not None else current_price
-
-        # Record step history FIRST (reward function needs updated history!)
-        self.history.record_step(
-            price=new_price,
-            action=desired_action,
-            reward=0.0,  # Placeholder, will be set after reward calculation
-            portfolio_value=new_portfolio_value,
-            position=new_qty
-        )
-
-        # Calculate reward using UPDATED history tracker
-        reward = float(self.reward_function(self.history))
-
-        # Update the reward in history
-        self.history.rewards[-1] = reward
-
-        # Check termination
-        done = self._check_termination(new_portfolio_value)
-
-        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        self._finalize_step_flags(next_tensordict, terminated=done)
-
-        return next_tensordict
 
 
     def _calculate_fractional_position(self, action_value: float, current_price: float) -> tuple[float, float, str]:

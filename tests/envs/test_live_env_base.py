@@ -2425,11 +2425,28 @@ def test_the_size_an_env_reports_actually_reaches_the_position(exchange):
     round fixed, one layer up.
     """
     src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-           / "live" / exchange / "env.py").read_text()
+           / "live" / exchange / "env.py").read_text()   # noqa: F841 -- see below
 
-    assert "_record_position_after_trade(desired_action, trade_info)" in src, (
-        f"{exchange} does not hand the whole trade_info to the recorder, so a size value "
-        f"it computes can be silently dropped on the way"
+    # AST over the RESOLVED `_step`, not the venue file: #288 moved the plain `_step` onto
+    # TorchTradeFuturesLiveEnv, so a file scan reads a module that no longer contains the
+    # call. And a substring cannot tell `trade_info` from `trade_info["qty"]` -- which is
+    # exactly the half-passing this guard exists to reject.
+    import importlib
+
+    mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
+    cls = next(v for k, v in vars(mod).items()
+               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
+    call = next(
+        (n for n in ast.walk(ast.parse(inspect.getsource(cls._step).lstrip()))
+         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+         and n.func.attr == "_record_position_after_trade"),
+        None,
+    )
+    assert call is not None, f"{exchange}'s _step never records the position it traded"
+    passed = [a.id for a in call.args if isinstance(a, ast.Name)]
+    assert "trade_info" in passed, (
+        f"{exchange} hands the recorder {ast.unparse(call)} rather than the whole "
+        f"trade_info, so a size value it computes can be silently dropped on the way"
     )
 
 
@@ -4259,4 +4276,80 @@ def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
     assert env.history.actions[-1] == pytest.approx(expected), (
         f"a {want or 'hold'} bracket recorded {env.history.actions[-1]} in the history "
         f"row the reward function reads, expected {expected}"
+    )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("level_idx,expected_sign", [(-1, 1.0), (0, -1.0)],
+                         ids=["full-long", "full-short"])
+def test_the_plain_history_row_records_the_action_actually_traded(
+    venue, level_idx, expected_sign
+):
+    """`action` in the history row is what the reward function scores.
+
+    Flipping its sign in the shared plain `_step` fails ZERO tests. I pinned exactly this
+    on the SLTP path an hour ago and left the plain one -- the same "some copies, not
+    others" this issue is about, in the guard against it.
+
+    Indexed by VALUE: binance ships [-1, 0, 1] and the others [-1, -0.5, 0, 0.5, 1], so a
+    hardcoded index means different things per venue.
+    """
+    import torch
+    from tests.envs.test_live_observation_failsafe import _real_futures_env
+
+    env, trader = _real_futures_env(budget=0, venue=venue)
+    action = len(env.action_levels) - 1 if level_idx == -1 else 0
+    td = env.reset()
+    env.step(td.set("action", torch.tensor(action)))
+
+    recorded = env.history.actions[-1]
+    assert recorded * expected_sign > 0, (
+        f"{venue}: a {'long' if expected_sign > 0 else 'short'} action recorded "
+        f"{recorded} in the history row the reward function reads"
+    )
+
+
+@pytest.mark.parametrize("shared_step,module", [
+    ("TorchTradeFuturesLiveEnv", "env"), ("SLTPMixin", "env_sltp"),
+], ids=["plain", "sltp"])
+def test_a_flat_bar_falls_back_to_the_pre_trade_price(shared_step, module):
+    """`new_price = new_price if new_price is not None else current_price`.
+
+    `_acquire_post_bar_state` returns None for the mark when the account is flat -- there
+    is no position to read one from. Dropping the fallback feeds None into
+    `history.record_step(price=...)`, and every downstream reader of that row gets it.
+
+    Failed zero tests on BOTH shared steps: the comment explaining why the fallback exists
+    has been carried through four copies and two folds without anything asserting it.
+    """
+    import torch
+    from tests.envs.test_live_observation_failsafe import _real_futures_env
+
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=(module == "env_sltp"))
+    td = env.reset()
+
+    # The mark goes unavailable only for the POST-bar read: the pre-trade read must
+    # succeed, or the step halts before it ever reaches the fallback. That asymmetry is
+    # the whole scenario -- a flat account has no position mark to read, and the post-bar
+    # fetch is deliberately allowed to fail rather than halt an episode over a label.
+    state = {"traded": False}
+
+    def mark():
+        if state["traded"]:
+            raise RuntimeError("post-bar mark unavailable")
+        return 100.0
+
+    real_wait = env._wait_for_next_timestamp
+
+    def wait():
+        state["traded"] = True
+        return real_wait()
+
+    trader.get_mark_price.side_effect = mark
+    env._wait_for_next_timestamp = wait
+    env.step(td.set("action", torch.tensor(0)))
+
+    assert env.history.base_prices[-1] is not None, "a flat bar recorded a None price"
+    assert isinstance(env.history.base_prices[-1], (int, float)), (
+        f"a flat bar recorded {env.history.base_prices[-1]!r} rather than the pre-trade price"
     )
