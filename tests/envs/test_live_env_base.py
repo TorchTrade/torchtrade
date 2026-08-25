@@ -3985,14 +3985,19 @@ def test_no_venue_redeclares_the_account_state_contract(env_cls):
     )
 
 
-@pytest.mark.parametrize("venue,expect_order,observer_extras", [
-    ("binance", ["trader" if False else "observer", "trader"], set()),
-    ("bitget",  ["observer", "trader"], set()),
-    ("bybit",   ["trader", "observer"], {"client"}),
-    ("okx",     ["trader", "observer"], set()),
+@pytest.mark.parametrize("venue,expect_order,observer_extras,trader_extras", [
+    ("binance", ["observer", "trader"], set(),
+     {"trade_mode": "fractional"}),
+    ("bitget",  ["observer", "trader"], set(),
+     {"trade_mode": "fractional", "position_mode": "one_way",
+      "product_type": "COIN-FUTURES", "passphrase": "PASS"}),
+    ("bybit",   ["trader", "observer"], {"client"},
+     {"position_mode": "one_way"}),
+    ("okx",     ["trader", "observer"], set(),
+     {"position_mode": "one_way", "passphrase": "PASS"}),
 ], ids=["binance", "bitget", "bybit", "okx"])
 def test_init_trading_clients_wires_each_venue_as_before(
-    venue, expect_order, observer_extras
+    venue, expect_order, observer_extras, trader_extras
 ):
     """Characterisation of the code #288 actually refactored, network-free.
 
@@ -4051,9 +4056,14 @@ def test_init_trading_clients_wires_each_venue_as_before(
             f"{venue} shares the trader's session, so it must receive that object"
         )
 
-    base_tr = {"symbol", "api_key", "api_secret", "demo", "leverage", "margin_mode"}
-    assert base_tr <= set(kw["trader"]), f"{venue} trader lost {base_tr - set(kw['trader'])}"
-    assert kw["trader"]["api_key"] == "KEY" and kw["trader"]["api_secret"] == "SECRET"
+    # EXACT, not a subset. A subset check passed while binance dropped `trade_mode`,
+    # bitget dropped `product_type`, okx dropped `passphrase` and bybit's `position_mode`
+    # changed value -- the routing `_trader_kwargs` exists to do was entirely unpinned.
+    base_tr = {"symbol": "X", "api_key": "KEY", "api_secret": "SECRET",
+               "demo": True, "leverage": 5, "margin_mode": "isolated"}
+    assert kw["trader"] == {**base_tr, **trader_extras}, (
+        f"{venue} trader kwargs {kw['trader']}, expected {{**base, **{trader_extras}}}"
+    )
 
 
 def test_dependency_injection_still_skips_construction_entirely():
