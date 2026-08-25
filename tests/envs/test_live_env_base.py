@@ -4188,6 +4188,11 @@ def test_the_shared_sltp_step_keeps_its_three_unpinned_contracts(venue):
     )
 
 
+# alpaca is absent DELIBERATELY, and that is worth stating rather than leaving to be
+# inferred from an omission: it is a SPOT env whose SLTP `_step` is only 35% identical to
+# the mixin's (no futures pre-trade acquisition, no mark). It overrides `_step` on purpose
+# and inherits `_reset`, which IS identical. Deleting alpaca's `_step` as "redundant"
+# would hand a spot env the futures step.
 @pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
 def test_no_sltp_env_reforks_the_shared_step(venue):
     """#288 folded four SLTP `_step`/`_reset` copies into SLTPMixin. Nothing noticed when
@@ -4253,3 +4258,32 @@ def test_the_dispatch_seam_forwards_the_threaded_mark_not_a_fresh_read(
             f"{venue} prices brackets off a candle close and must not be handed a mark; "
             f"got {seen.get('current_price')}"
         )
+
+
+def test_no_sltp_env_writes_the_dead_position_closed_field():
+    """`trade_info["position_closed"]` had five writers and zero readers.
+
+    `_sync_position_from_exchange` already acts on its own return value; the field was
+    pure metadata. I removed it from the shared copy and left alpaca's -- this issue's own
+    defect, committed while reviewing the change that created it, which is why the guard
+    is here rather than a note in a commit message.
+    """
+    import pathlib
+
+    root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
+    # AST, not substring: my first version matched the COMMENTS explaining the removal
+    # and failed on a clean tree. That is the same defect the pre-trade guard had -- a
+    # source-text check cannot tell code from prose about the code.
+    offenders = []
+    for path in list(root.glob("live/*/env_sltp.py")) + [root / "utils" / "sltp_mixin.py"]:
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (isinstance(node, ast.Assign)
+                    and any(isinstance(t, ast.Subscript)
+                            and isinstance(t.slice, ast.Constant)
+                            and t.slice.value == "position_closed"
+                            for t in node.targets)):
+                offenders.append(path.relative_to(root).as_posix())
+    assert not offenders, (
+        f"{offenders} write a field nothing reads; if it gains a reader, delete this test "
+        f"deliberately rather than letting the write drift back in"
+    )

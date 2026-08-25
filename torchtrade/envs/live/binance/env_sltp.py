@@ -113,8 +113,6 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
 
-
-
     def _execute_trade_if_needed(
         self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]]
     ) -> Dict:
