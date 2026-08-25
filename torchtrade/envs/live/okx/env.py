@@ -166,8 +166,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
 
-        # Under `_halting` like every other account read -- this is the read that SIZES
-        # the order, and it sat outside the policy (#295).
+        # Under `_halting` -- this is the read that SIZES the order (#295).
         balance_info = self._halting(
             self.trader.get_account_balance, cache_key="balance"
         )

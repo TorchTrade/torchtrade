@@ -228,11 +228,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Get actual balance from exchange
         # Use total_margin_balance (not available_balance) so the target reflects
         # the full portfolio, including margin already locked in open positions.
-        # Under `_halting` like every other account read: this is the read that SIZES
-        # the order, and it sat outside the policy -- so during a #295 grace bar the
-        # decision to trade survived on cached state and then died here anyway, with a
-        # bare error rather than a truncation. Cached separately from the pre-trade and
-        # post-bar reads because it is a different shape.
+        # Under `_halting` -- this is the read that SIZES the order (#295).
         balance_info = self._halting(
             self.trader.get_account_balance, cache_key="balance"
         )
@@ -275,13 +271,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
             trade_info: Dict with execution details
         """
         # Get current position and price from exchange
-        # Threaded from `_step`'s halted read, REQUIRED rather than defaulted. Reading
-        # here bypassed `_halting`, so on a grace bar these hit the dead venue and
-        # raised -- no order, no status_unknown, no truncation, on exactly the bars
-        # grace exists for. A default would restore that silently; omitting the
-        # argument is a TypeError on the first step instead (#295, #288 parity).
-
-        # Special case: Close to flat
+        # Threaded from `_step`'s halted read; required, never defaulted (#295).
         if action_value == 0.0:
             if abs(current_qty) > 0:
                 return self._handle_close_action(current_qty)

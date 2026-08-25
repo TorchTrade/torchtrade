@@ -195,10 +195,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             return trade_info
 
         # Get current mark price (more accurate than candle close for bracket orders)
-        # Threaded from `_step`'s halted read, REQUIRED. Re-reading the mark here
-        # bypassed the halt policy, so a grace bar that actually priced a bracket died
-        # with a bare error instead of trading on cached state and truncating on budget.
-        # binance and bitget take the price from base_features and never had this read.
+        # Threaded from `_step`'s halted read; required, never defaulted (#295).
         current_price = float(current_price)
         # Re-validated at the seam that USES it, not just where it was read. Threading
         # moved the read out of this method, and with it `_current_mark_price`'s
@@ -213,9 +210,7 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
             # Size on total_margin_balance (equity), matching offline sizing and the non-SLTP
             # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
             # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
-            # Under `_halting` like the plain envs' sizing read (#295). This is the read
-            # that SIZES a bracket order, and it was left raw when the plain path was
-            # fixed -- the same "landed on some venues, not others" shape #288 is about.
+            # Under `_halting` -- the read that SIZES a bracket (#295).
             balance = float(
                 self._halting(self.trader.get_account_balance, cache_key="balance")[
                     "total_margin_balance"

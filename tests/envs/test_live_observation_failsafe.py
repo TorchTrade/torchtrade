@@ -156,7 +156,8 @@ def test_every_futures_config_coerces_its_failure_policy(exchange, module):
 VENUES = ["binance", "bitget", "bybit", "okx"]
 
 
-def _real_futures_env(budget, venue="binance", position_status=None, **config_kw):
+def _real_futures_env(budget, venue="binance", sltp=False, position_status=None,
+                      **config_kw):
     """A real futures env on mocks, for any of the four venues.
 
     Parametrised because round 3 fixed the sizing read on all four and tested it on
@@ -167,7 +168,10 @@ def _real_futures_env(budget, venue="binance", position_status=None, **config_kw
     from unittest.mock import MagicMock, patch
     import numpy as np
 
-    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
+    module = importlib.import_module(
+        f"torchtrade.envs.live.{venue}.env_sltp" if sltp
+        else f"torchtrade.envs.live.{venue}.env"
+    )
     Env = next(v for k, v in vars(module).items()
                if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
     Config = next(v for k, v in vars(module).items()
@@ -175,7 +179,12 @@ def _real_futures_env(budget, venue="binance", position_status=None, **config_kw
 
     observer = MagicMock()
     observer.get_keys.return_value = ["1m_10"]
-    observer.get_observations.return_value = {"1m_10": np.zeros((10, 4), dtype=np.float32)}
+    # base_features carries OHLC; SLTP prices its brackets off the close column.
+    observer.get_observations.side_effect = lambda **kw: {
+        "1m_10": np.zeros((10, 4), dtype=np.float32),
+        **({"base_features": np.full((10, 4), 100.0, dtype=np.float32)}
+           if kw.get("return_base_ohlc") else {}),
+    }
     observer.get_features.return_value = {
         "observation_features": list("abcd"), "original_features": []}
     observer.reset.return_value = None
@@ -312,53 +321,22 @@ def test_a_real_env_flags_the_outage_and_truncates_on_the_budgeted_bar():
     The second: both read sites advanced the counter, so a budget of 3 truncated after two
     bars. `max_unknown_status_steps` has to mean bars, or it means nothing a trader can
     reason about.
-
-    Neither is visible from `_halting` in isolation, which is why this drives `env.step`.
     """
-    from unittest.mock import MagicMock, patch
-    import numpy as np
     import torch
-    from torchtrade.envs.live.binance.env import (
-        BinanceFuturesTorchTradingEnv as Env,
-        BinanceFuturesTradingEnvConfig as Config,
-    )
 
-    observer = MagicMock()
-    observer.get_keys.return_value = ["1m_10"]
-    observer.get_observations.return_value = {"1m_10": np.zeros((10, 4), dtype=np.float32)}
-    observer.get_features.return_value = {
-        "observation_features": list("abcd"), "original_features": []
-    }
-    observer.reset.return_value = None
+    env, trader = _real_futures_env(budget=3)
+    td = env.reset()
+    td = env.step(td.set("action", torch.tensor(1)))["next"]
+    assert td["status_unknown"].item() == 0.0
 
-    trader = MagicMock()
-    trader.get_account_balance.return_value = {
-        "available_balance": 1e4, "total_margin_balance": 1e4,
-        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0,
-    }
-    trader.get_status.return_value = {"position_status": None}
-    trader.get_mark_price.return_value = 100.0
-    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
-
-    config = Config(symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10],
-                    execute_on="1m", max_unknown_status_steps=3,
-                    close_position_on_init=False)
-    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
-        env = Env(config=config, observer=observer, trader=trader)
-        td = env.reset()
-
-        # One healthy bar, so the grace period has a confirmed read to stand on.
-        td = env.step(td.set("action", torch.tensor(1)))["next"]
-        assert td["status_unknown"].item() == 0.0
-
-        trader.get_status.side_effect = PositionUnknownError("venue unreachable")
-        seen = []
-        for _ in range(3):
-            td = td.exclude("done", "terminated", "truncated", "reward")
-            nxt = env.step(td.set("action", torch.tensor(1)))["next"]
-            seen.append((nxt["status_unknown"].item(), bool(nxt["done"]),
-                         bool(nxt["terminated"]), bool(nxt["truncated"])))
-            td = nxt
+    trader.get_status.side_effect = PositionUnknownError("venue unreachable")
+    seen = []
+    for _ in range(3):
+        td = td.exclude("done", "terminated", "truncated", "reward")
+        nxt = env.step(td.set("action", torch.tensor(1)))["next"]
+        seen.append((nxt["status_unknown"].item(), bool(nxt["done"]),
+                     bool(nxt["terminated"]), bool(nxt["truncated"])))
+        td = nxt
 
     assert seen == [
         (1.0, False, False, False),
@@ -367,53 +345,31 @@ def test_a_real_env_flags_the_outage_and_truncates_on_the_budgeted_bar():
     ], f"outage bars were {seen}"
 
 
+
 def test_reset_halts_typed_rather_than_relocating_the_crash():
     """The reset read must go through the halt policy too (#295).
 
     Truncation fires precisely BECAUSE the outage is ongoing, so the very next `reset()`
     is the likeliest moment for the venue to still be down. With reset's reads outside
-    `_halting`, the process crash this work exists to remove did not go away -- it moved
-    from `_step` to the following `reset`, one bar later, as a bare PositionUnknownError
-    that `except LiveObservationHalt` does not catch and FLATTEN does not act on.
+    `_halting`, the crash this work exists to remove did not go away -- it moved from
+    `_step` to the following `reset`, as a bare PositionUnknownError that
+    `except LiveObservationHalt` does not catch and FLATTEN does not act on.
 
-    Raising here is still correct: an episode must not START on unconfirmed state. What
-    the grace period buys is riding out an outage mid-episode, not beginning one blind.
+    Raising here is still correct: an episode must not START on unconfirmed state.
     """
-    from unittest.mock import MagicMock, patch
-    import numpy as np
-    from torchtrade.envs.live.binance.env import (
-        BinanceFuturesTorchTradingEnv as Env, BinanceFuturesTradingEnvConfig as Config,
+    env, trader = _real_futures_env(
+        budget=3, observation_failure_policy=ObservationFailurePolicy.FLATTEN
     )
+    trader.get_status.side_effect = PositionUnknownError("still down")
+    trader.close_position.reset_mock()
 
-    observer = MagicMock()
-    observer.get_keys.return_value = ["1m_10"]
-    observer.get_observations.return_value = {"1m_10": np.zeros((10, 4), dtype=np.float32)}
-    observer.get_features.return_value = {
-        "observation_features": list("abcd"), "original_features": []}
-    observer.reset.return_value = None
-    trader = MagicMock()
-    trader.get_account_balance.return_value = {
-        "available_balance": 1e4, "total_margin_balance": 1e4,
-        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
-    trader.get_mark_price.return_value = 100.0
-    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
-    trader.get_status.return_value = {"position_status": None}
-
-    config = Config(symbol="BTCUSDT", time_frames=["1m"], window_sizes=[10],
-                    execute_on="1m", max_unknown_status_steps=3,
-                    observation_failure_policy=ObservationFailurePolicy.FLATTEN,
-                    close_position_on_init=False)
-    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
-        env = Env(config=config, observer=observer, trader=trader)
-        trader.get_status.side_effect = PositionUnknownError("still down")
-        trader.close_position.reset_mock()
-
-        with pytest.raises(LiveObservationHalt):
-            env.reset()
+    with pytest.raises(LiveObservationHalt):
+        env.reset()
 
     assert trader.close_position.called, (
         "FLATTEN did not act on the reset read: it was outside the halt policy"
     )
+
 
 
 def test_the_cache_holds_a_copy_not_the_object_the_collector_mutates():
@@ -593,64 +549,25 @@ def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down(venue):
 def test_an_sltp_grace_bar_can_still_size_a_bracket_with_the_venue_down(venue):
     """No test drove an SLTP env through an outage at all, on any venue.
 
-    So when the sizing read was brought under `_halting` on the plain envs, the SLTP
-    envs' own `get_account_balance()` -- a separate line, in a separate file, doing the
-    same thing -- was simply not part of the change. A bare PositionUnknownError escaped
-    `_step` instead of the episode truncating, for `trade_mode="fractional"`, on all four
-    venues.
-
-    That is #288's thesis stated as a bug: the same fix landing on some copies and not
-    others, with nothing in the suite able to tell.
+    So when the sizing read came under `_halting` on the plain envs, the SLTP envs' own
+    `get_account_balance()` -- a separate line, in a separate file, doing the same thing
+    -- was simply not part of the change. #288's thesis stated as a bug: the same fix
+    landing on some copies and not others, with nothing able to tell.
     """
-    import importlib
-    from unittest.mock import MagicMock, patch
-    import numpy as np
     import torch
 
-    module = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
-    Env = next(v for k, v in vars(module).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
-    Config = next(v for k, v in vars(module).items()
-                  if k.endswith("TradingEnvConfig") and v.__module__ == module.__name__)
-    symbol = "BTC-USDT-SWAP" if venue == "okx" else "BTCUSDT"
+    env, trader = _real_futures_env(budget=3, venue=venue, sltp=True,
+                                    trade_mode="fractional", position_fraction=0.5)
+    td = env.reset()
+    td = env.step(td.set("action", torch.tensor(0)))["next"]          # HOLD, confirmed
 
-    observer = MagicMock()
-    observer.get_keys.return_value = ["1m_10"]
-    # base_features carries OHLC; SLTP prices its brackets off the close column.
-    observer.get_observations.side_effect = lambda **kw: {
-        "1m_10": np.zeros((10, 4), dtype=np.float32),
-        **({"base_features": np.full((10, 4), 100.0, dtype=np.float32)}
-           if kw.get("return_base_ohlc") else {}),
-    }
-    observer.get_features.return_value = {
-        "observation_features": list("abcd"), "original_features": []}
-    observer.reset.return_value = None
-    trader = MagicMock()
-    trader.get_account_balance.return_value = {
-        "available_balance": 1e4, "total_margin_balance": 1e4,
-        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
-    trader.get_status.return_value = {"position_status": None}
-    trader.get_mark_price.return_value = 100.0
-    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
-    trader.round_quantity.side_effect = lambda q: round(float(q), 3)
-    trader._round_amount.side_effect = lambda q: round(float(q), 3)
+    trader.get_status.side_effect = PositionUnknownError("venue unreachable")
+    trader.get_mark_price.side_effect = PositionUnknownError("venue unreachable")
+    trader.get_account_balance.side_effect = PositionUnknownError("venue unreachable")
 
-    config = Config(symbol=symbol, time_frames=["1m"], window_sizes=[10],
-                    execute_on="1m", max_unknown_status_steps=3,
-                    trade_mode="fractional", position_fraction=0.5,
-                    close_position_on_init=False)
-    with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
-        env = Env(config=config, observer=observer, trader=trader)
-        td = env.reset()
-        td = env.step(td.set("action", torch.tensor(0)))["next"]      # HOLD, confirmed
-
-        trader.get_status.side_effect = PositionUnknownError("venue unreachable")
-        trader.get_mark_price.side_effect = PositionUnknownError("venue unreachable")
-        trader.get_account_balance.side_effect = PositionUnknownError("venue unreachable")
-
-        # A real bracket action, so the sizing path runs rather than the hold early-return.
-        nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
-                       .set("action", torch.tensor(1)))["next"]
+    # A real bracket action, so the sizing path runs rather than the hold early-return.
+    nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                   .set("action", torch.tensor(1)))["next"]
 
     assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
     assert not bool(nxt["terminated"]), "an outage is never a terminated episode"
