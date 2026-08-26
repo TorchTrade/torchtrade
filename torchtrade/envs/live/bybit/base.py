@@ -3,7 +3,10 @@
 from typing import Callable, Optional
 
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
-from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
+from torchtrade.envs.live.bybit.order_executor import (
+    TAKER_FEE,
+    BybitFuturesOrderClass,
+)
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
@@ -14,7 +17,7 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     TorchTradeLiveEnv is the observation contract.
     """
 
-
+    TAKER_FEE = TAKER_FEE
     OBSERVER_CLS = BybitObservationClass
     TRADER_CLS = BybitFuturesOrderClass
     TRADER_FIRST = True

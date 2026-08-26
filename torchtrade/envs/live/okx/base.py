@@ -3,7 +3,10 @@
 from typing import Callable, Optional
 
 from torchtrade.envs.live.okx.observation import OKXObservationClass
-from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
+from torchtrade.envs.live.okx.order_executor import (
+    TAKER_FEE,
+    OKXFuturesOrderClass,
+)
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
@@ -15,7 +18,7 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     contract.
     """
 
-
+    TAKER_FEE = TAKER_FEE
     OBSERVER_CLS = OKXObservationClass
     TRADER_CLS = OKXFuturesOrderClass
     # Trader first, as before the fold. NOT for client sharing -- okx keeps market

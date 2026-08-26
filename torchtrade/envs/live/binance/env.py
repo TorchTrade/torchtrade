@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Callable
 import logging
@@ -14,7 +13,6 @@ from torchtrade.envs.core.live import (
 )
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
-    TAKER_FEE,
     BinanceFuturesOrderClass,
     MarginMode,
 )
@@ -22,8 +20,6 @@ from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
 from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
     build_default_action_levels,
-    calculate_fractional_position,
-    PositionCalculationParams,
 )
 
 
@@ -187,80 +183,22 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         return 100.0  # Default fallback
 
     def _calculate_fractional_position(
-        self,
-        action_value: float,
-        current_price: float
+        self, action_value: float, current_price: float
     ) -> tuple[float, float, str]:
-        """Calculate position size from fractional action value for live trading.
+        """The shared sizing, plus the two things only binance does at this stage.
 
-        Uses shared utility function for consistent position sizing across all environments.
-        Applies exchange-specific validation and rounding constraints.
-
-        Args:
-            action_value: Action from [-1.0, 1.0] representing fraction of balance
-            current_price: Current market price
-
-        Returns:
-            Tuple of (position_size, notional_value, side):
-            - position_size: Quantity rounded to exchange step size
-            - notional_value: Absolute value in quote currency
-            - side: "long", "short", or "flat"
+        The other three venues apply their min-qty floor and lot-size rounding to the
+        DELTA inside `_execute_fractional_action`; binance refuses below min-NOTIONAL and
+        rounds the TARGET here. Both are real, neither is the other's bug.
         """
-        # Handle neutral case
-        if action_value == 0.0:
-            return 0.0, 0.0, "flat"
-
-        # Query actual balance from exchange
-        # Use total_margin_balance (not available_balance) so the target reflects
-        # the full portfolio, including margin already locked in open positions.
-        # available_balance only shows free margin, which shrinks as positions grow,
-        # causing repeated buys when the agent keeps requesting action=1.0.
-        # The VERDICT is inside the closure, not just the read. `_halting` catches
-        # ValueError precisely so an impossible account state becomes a halt; raising one
-        # frame above it sent that straight out of `_step`. `equity == 0.0` is what a
-        # venue reports while liquidating you -- the worst moment to crash rather than
-        # halt under policy (#295).
-        def read_balance():
-            info = self.trader.get_account_balance()
-            total_balance = info["total_margin_balance"]
-            # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
-            # balance sizes an inf target (#277). The name is load-bearing:
-            # test_futures_sizing_rejects_a_non_finite_balance greps for it.
-            if not math.isfinite(total_balance) or total_balance <= 0:
-                raise ValueError(
-                    f"cannot size a trade against a portfolio value of {total_balance}"
-                )
-            return info
-
-        balance_info = self._halting(read_balance, cache_key="balance")
-        total_balance = balance_info["total_margin_balance"]
-
-        # Use shared utility for core position calculation
-        # Reserve 2% buffer for exchange maintenance margin requirements
-        effective_balance = total_balance * 0.98
-        params = PositionCalculationParams(
-            balance=effective_balance,
-            action_value=action_value,
-            current_price=current_price,
-            leverage=self.config.leverage,
-            transaction_fee=TAKER_FEE,
+        position_size, notional_value, side = super()._calculate_fractional_position(
+            action_value, current_price
         )
-        position_size, notional_value, side = calculate_fractional_position(params)
+        if side == "flat":
+            return position_size, notional_value, side
 
-        # Apply exchange-specific validation
-        # Check minimum notional requirement
-        #
-        # Edge case: If calculated position is below exchange minimum, we return "flat"
-        # instead of rounding up to minimum. This means:
-        #   - Agent selects small action (e.g., 0.1 = 10% allocation)
-        #   - Calculation results in notional < min_notional
-        #   - Position is NOT opened (returns flat)
-        #   - Agent receives warning in logs but no position state change
-        #
-        # Alternative approaches considered:
-        #   1. Round up to minimum notional → Could overallocate beyond action intent
-        #   2. Expose rejection in observation → Would require state schema change
-        #   3. Current: Fail gracefully with warning → Simple, predictable behavior
+        # Below the venue minimum the position is NOT opened, rather than rounded up:
+        # rounding up would allocate beyond what the action asked for.
         min_notional = self._get_min_notional()
         if notional_value < min_notional:
             logger.warning(
@@ -274,12 +212,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # floor with a bare int(), which shaves a whole step off exact multiples --
         # 0.29 -> 0.28 (#271). One owner of lot-size knowledge, not two.
         position_qty = self.trader.round_quantity(abs(position_size))
-
-        # Apply direction
-        direction = 1 if position_size > 0 else -1
-        position_size = position_qty * direction
-
-        return position_size, notional_value, side
+        return position_qty * (1 if position_size > 0 else -1), notional_value, side
 
     def _execute_fractional_action(
         self, action_value: float, *, current_qty: float, current_price: float,

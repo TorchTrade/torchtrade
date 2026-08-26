@@ -30,6 +30,10 @@ from torchtrade.envs.core.state import (
     position_direction_from_status,
     position_qty_from_status,
 )
+from torchtrade.envs.utils.fractional_sizing import (
+    PositionCalculationParams,
+    calculate_fractional_position,
+)
 from torchtrade.envs.utils.liquidation import (
     isolated_liquidation_price,
     nearest_liquidation_price,
@@ -158,6 +162,51 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             next_tensordict, price=new_price, action=desired_action,
             portfolio_value=new_portfolio_value, position=new_qty,
         )
+
+    # Set on each venue's <Venue>BaseTorchTradingEnv, NOT on the plain leaf: the SLTP
+    # sibling's MRO runs SLTPMixin -> <Venue>Base -> here and never touches the leaf.
+    TAKER_FEE: float
+
+    def _calculate_fractional_position(
+        self, action_value: float, current_price: float
+    ) -> tuple[float, float, str]:
+        """Target position size from a fractional action, for all four futures venues.
+        """
+        # Above the balance read on purpose: a flat action must not need the exchange.
+        # No caller reaches this today -- all four pre-filter zero -- so it guards a
+        # caller that stops doing so, not a live path.
+        if action_value == 0.0:
+            return 0.0, 0.0, "flat"
+
+        # The VERDICT is inside the closure, not just the read. `_halting` catches
+        # ValueError precisely so an impossible account state becomes a halt; raising one
+        # frame above it sent that straight out of `_step`. `equity == 0.0` is what a
+        # venue reports while liquidating you -- the worst moment to crash rather than
+        # halt under policy (#295).
+        def read_balance():
+            info = self.trader.get_account_balance()
+            total_balance = info["total_margin_balance"]
+            # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
+            # balance sizes an inf target (#277).
+            if not math.isfinite(total_balance) or total_balance <= 0:
+                raise ValueError(
+                    f"cannot size a trade against a portfolio value of {total_balance}"
+                )
+            return info
+
+        balance_info = self._halting(read_balance, cache_key="balance")
+
+        # total_margin_balance, not available_balance: the target must reflect the whole
+        # portfolio including margin already locked in open positions.
+        # The 2% buffer is the venue's maintenance-margin headroom.
+        effective_balance = balance_info["total_margin_balance"] * 0.98
+        return calculate_fractional_position(PositionCalculationParams(
+            balance=effective_balance,
+            action_value=action_value,
+            current_price=current_price,
+            leverage=self.config.leverage,
+            transaction_fee=self.TAKER_FEE,
+        ))
 
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).

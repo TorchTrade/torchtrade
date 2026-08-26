@@ -3,7 +3,7 @@ import pandas as pd
 import ccxt
 
 from torchtrade.envs.live.shared.futures_base_obs import BaseFuturesObservationClass
-from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+from torchtrade.envs.utils.timeframe import TimeFrame
 from torchtrade.envs.live.bitget.utils import timeframe_to_bitget, BITGET_INTERVAL_MAP, normalize_symbol
 
 
