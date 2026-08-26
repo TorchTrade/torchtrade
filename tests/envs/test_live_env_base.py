@@ -4254,11 +4254,6 @@ def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
         )
 
 
-# BOTH module axes. The plain and SLTP classes are siblings, not parent and child -- the
-# SLTP MRO runs SLTPMixin -> <Venue>Base -> TorchTradeFuturesLiveEnv and never touches the
-# plain leaf. Setting the fee on the leaf resolved it for four of the eight classes that
-# inherit the shared sizing and AttributeError'd for the other four, and every test I wrote
-# for the fee iterated the plain list only.
 def _sizing_stub(cls, *, leverage=10, balance=10_000.0, min_notional=0.0,
                  stub_min_notional=True):
     """A futures env wired for `_calculate_fractional_position` and nothing else.
