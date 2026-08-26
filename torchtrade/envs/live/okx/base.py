@@ -16,12 +16,7 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     contract.
     """
 
-    # On the BASE, not the plain leaf: the SLTP sibling's MRO runs
-    # SLTPMixin -> this class -> TorchTradeFuturesLiveEnv and never touches the
-    # plain leaf, so a fee set there resolves for half the classes that inherit
-    # the shared sizing and AttributeErrors for the other half.
     TAKER_FEE = TAKER_FEE
-
 
     OBSERVER_CLS = OKXObservationClass
     TRADER_CLS = OKXFuturesOrderClass

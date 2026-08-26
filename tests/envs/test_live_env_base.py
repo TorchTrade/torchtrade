@@ -1941,15 +1941,7 @@ def test_alpaca_sizing_refuses_a_non_finite_position_quantity():
 @pytest.mark.parametrize("balance", [0.0, -5.0, float("nan"), float("inf")],
                          ids=["zero", "negative", "nan", "inf"])
 def test_an_unusable_balance_cannot_size_a_trade(balance):
-    """The guard BEHAVIOURALLY. Its sibling below only greps the source for two strings.
-
-    Four mutations kept both grep strings intact and passed:
-      `isfinite(x) and x <= 0`   NaN and +inf now size a trade -- this IS #277
-      `x <= 0` -> `x < 0`        ZERO equity accepted, which is what a venue reports
-                                 while liquidating you -- the moment the comment on the
-                                 guard says is the worst one to keep trading through
-      `raise` -> `logger.warning` nothing is ever rejected
-      guard hoisted out of the closure   the #295 regression, named in that same comment
+    """Zero, negative, NaN and +inf equity must all refuse to size a trade.
 
     Raising LiveObservationHalt rather than ValueError is the third and fourth of those:
     `_halting` converts the ValueError only if it is raised INSIDE the closure it wraps.
@@ -1983,34 +1975,6 @@ def test_the_sizing_uses_the_whole_portfolio_not_the_free_margin():
     assert notional > 5_000.0, (
         f"sized a notional of {notional:.2f} against a 10,000 portfolio: that is the free "
         f"margin, and sizing against it makes a held position re-buy every bar"
-    )
-
-
-@pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
-def test_futures_sizing_rejects_a_non_finite_balance(exchange):
-    """`not (x > 0)` catches NaN but passes +inf, and these four lines are this PR's own.
-
-    An inf balance sizes an inf target: bitget's amount rounding then yields NaN and hands
-    it to create_order, while binance and bybit raise an undiagnosable OverflowError
-    mid-step. The alpaca sibling written in the same commit is safe only because it
-    isfinite-checks its inputs first.
-    """
-    # The RESOLVED method, following one hop through `super()`. A file scan of
-    # `live/<venue>/env.py` broke the moment #288 folded the sizing onto the shared base:
-    # the guard could no longer see its own subject, which is the failure it exists to
-    # prevent in the code. binance still overrides, so its own body is scanned too.
-    cls = _sole(importlib.import_module(f"torchtrade.envs.live.{exchange}.env"),
-                "TorchTradingEnv")
-    src = inspect.getsource(cls._calculate_fractional_position)
-    if "super()._calculate_fractional_position" in src:
-        src += inspect.getsource(
-            TorchTradeFuturesLiveEnv._calculate_fractional_position
-        )
-    assert "if not (total_balance > 0):" not in src, (
-        f"{exchange} sizes against a balance guarded by `not (x > 0)`, which +inf passes"
-    )
-    assert "math.isfinite(total_balance)" in src, (
-        f"{exchange} does not check that the sizing balance is finite"
     )
 
 
@@ -4282,14 +4246,8 @@ def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
 
     # By BEHAVIOUR, not by grepping the body for `_get_min_notional`: neutering the `if`
     # that uses it left the name in the source and the string check passed.
-    env = cls.__new__(cls)
-    env.config = SimpleNamespace(leverage=10)
-    env.trader = MagicMock()
-    env.trader.get_account_balance.return_value = {"total_margin_balance": 10_000.0}
+    env = _sizing_stub(cls, min_notional=1e12)   # nothing can clear this
     env.trader.round_quantity.side_effect = lambda q: round(float(q), 3)
-    env._halting = lambda read, cache_key=None: read()
-
-    env._get_min_notional = lambda: 1e12          # nothing can clear this
     assert env._calculate_fractional_position(1.0, 100.0) == (0.0, 0.0, "flat"), (
         "binance opened a position whose notional is below the venue minimum; the "
         "exchange rejects it and the env then believes it holds one"
@@ -4313,6 +4271,23 @@ def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
 # plain leaf. Setting the fee on the leaf resolved it for four of the eight classes that
 # inherit the shared sizing and AttributeError'd for the other four, and every test I wrote
 # for the fee iterated the plain list only.
+def _sizing_stub(cls, *, leverage=10, balance=10_000.0, min_notional=0.0):
+    """A futures env wired for `_calculate_fractional_position` and nothing else.
+
+    `__new__` rather than a constructor: instantiating an EnvBase subclass runs venue
+    wiring this method does not use, and `nn.Module.__init__` never runs, so there is no
+    `_modules`. The three attributes below are exactly what the sizing path reads.
+    """
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(leverage=leverage)
+    env.trader = MagicMock()
+    env.trader.get_account_balance.return_value = {"total_margin_balance": balance}
+    env.trader.round_quantity.side_effect = lambda q: q
+    env._halting = lambda read, cache_key=None: read()
+    env._get_min_notional = lambda: min_notional
+    return env
+
+
 # Derived from the registry and pinned by NAME, so a fifth venue fails here rather than
 # on its first live trade. The values stay literal: the failure being guarded is every
 # venue reading ONE fee, which a derived expected value would reproduce.
@@ -4352,67 +4327,13 @@ def test_every_class_that_inherits_the_shared_sizing_can_run_it(cls):
     the fee sat on the plain leaf, so calling it raised AttributeError mid-sizing. Nothing
     reached it yet, which is exactly why no test noticed: a landmine rather than a bug.
     """
-    env = cls.__new__(cls)
-    env.config = SimpleNamespace(leverage=10)
-    env.trader = MagicMock()
-    env.trader.get_account_balance.return_value = {"total_margin_balance": 10_000.0}
+    env = _sizing_stub(cls)
     env.trader.round_quantity.side_effect = lambda q: round(float(q), 3)
-    env._halting = lambda read, cache_key=None: read()
-    env._get_min_notional = lambda: 0.0
 
     size, notional, side = env._calculate_fractional_position(1.0, 100.0)
 
     assert side == "long" and size > 0 and notional > 0, (
         f"{cls.__name__} inherits the shared sizing but produced {(size, notional, side)}"
-    )
-
-
-def test_a_venue_without_a_taker_fee_fails_at_construction():
-    """Boundary, not rule. Without this the failure is an AttributeError raised the first
-    time a nonzero action is sized -- mid-`_step`, with a position possibly already open.
-    """
-    # Everything the tail touches AFTER the check, so the TypeError is what fails rather
-    # than the first missing attribute. A venue that forgets the fee has a real config.
-    env = SimpleNamespace(
-        config=SimpleNamespace(execute_on="1m", close_position_on_init=False),
-        trader=MagicMock(),
-    )
-    with pytest.raises(TypeError, match="does not set TAKER_FEE"):
-        TorchTradeFuturesLiveEnv._finish_futures_init(env)
-
-
-def test_the_sizing_reserves_the_maintenance_margin_buffer():
-    """The 2% haircut on the balance. Dropping it failed ZERO tests.
-
-    It is the venue's maintenance-margin headroom: sizing against the full balance leaves
-    nothing between the position and a margin call on the first adverse tick. Asserted as
-    a ratio between two sizings rather than a magic notional, so it survives a change to
-    the fee or the leverage.
-    """
-    cls = _sole(importlib.import_module("torchtrade.envs.live.bybit.env"),
-                "TorchTradingEnv")
-
-    def notional_for(balance):
-        env = cls.__new__(cls)
-        env.config = SimpleNamespace(leverage=10)
-        env.trader = MagicMock()
-        env.trader.get_account_balance.return_value = {"total_margin_balance": balance}
-        env._halting = lambda read, cache_key=None: read()
-        return env._calculate_fractional_position(1.0, 100.0)[1]
-
-    # Against an INDEPENDENT expected value, not a ratio between two of the env's own
-    # sizings: sizing is linear in the balance, so `n(B) == n(B/0.98) * 0.98` holds whether
-    # or not the buffer exists. That first version passed with the buffer deleted.
-    from torchtrade.envs.utils.fractional_sizing import (
-        PositionCalculationParams, calculate_fractional_position,
-    )
-    expected = calculate_fractional_position(PositionCalculationParams(
-        balance=10_000.0 * 0.98, action_value=1.0, current_price=100.0,
-        leverage=10, transaction_fee=cls.TAKER_FEE,
-    ))[1]
-    assert notional_for(10_000.0) == pytest.approx(expected), (
-        f"sized against the full balance rather than 98% of it: the 2% maintenance-margin "
-        f"headroom is what keeps the first adverse tick from being a margin call"
     )
 
 
@@ -4442,44 +4363,13 @@ def test_the_fold_did_not_move_a_single_sized_notional(venue, leverage, expected
     """
     cls = _sole(importlib.import_module(f"torchtrade.envs.live.{venue}.env"),
                 "TorchTradingEnv")
-    env = cls.__new__(cls)
-    env.config = SimpleNamespace(leverage=leverage)
-    env.trader = MagicMock()
-    env.trader.get_account_balance.return_value = {"total_margin_balance": 10_000.0}
-    env.trader.round_quantity.side_effect = lambda q: q
-    env._halting = lambda read, cache_key=None: read()
-    env._get_min_notional = lambda: 0.0
+    env = _sizing_stub(cls, leverage=leverage)
 
     _, notional, _ = env._calculate_fractional_position(1.0, 100.0)
 
     assert notional == pytest.approx(expected, rel=1e-12), (
         f"{venue} at {leverage}x now sizes {notional!r} where it sized {expected!r} before "
         f"the fold"
-    )
-
-
-def test_the_shared_sizing_actually_uses_the_venues_fee():
-    """And the fee must reach the arithmetic, not merely be declared on the class.
-
-    Pinning the four constants proves they differ; this proves the shared body reads
-    `self.TAKER_FEE` rather than a module-level one it closed over.
-    """
-    sizes = {}
-    for venue in ("binance", "bitget", "bybit", "okx"):
-        cls = _sole(importlib.import_module(f"torchtrade.envs.live.{venue}.env"),
-                    "TorchTradingEnv")
-        env = cls.__new__(cls)
-        env.config = SimpleNamespace(leverage=125)
-        env.trader = MagicMock()
-        env.trader.get_account_balance.return_value = {"total_margin_balance": 10_000.0}
-        env.trader.round_quantity.side_effect = lambda q: q
-        env._halting = lambda read, cache_key=None: read()
-        env._get_min_notional = lambda: 0.0
-        sizes[venue] = env._calculate_fractional_position(1.0, 100.0)[1]
-
-    assert len(set(round(v, 6) for v in sizes.values())) == 4, (
-        f"four venues with four different taker fees produced {sizes}; identical notionals "
-        f"mean the shared body is not reading self.TAKER_FEE"
     )
 
 

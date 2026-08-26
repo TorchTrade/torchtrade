@@ -16,12 +16,7 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     contract, and `_trader_kwargs` below for what is genuinely Binance-specific.
     """
 
-    # On the BASE, not the plain leaf: the SLTP sibling's MRO runs
-    # SLTPMixin -> this class -> TorchTradeFuturesLiveEnv and never touches the
-    # plain leaf, so a fee set there resolves for half the classes that inherit
-    # the shared sizing and AttributeErrors for the other half.
     TAKER_FEE = TAKER_FEE
-
 
     OBSERVER_CLS = BinanceObservationClass
     TRADER_CLS = BinanceFuturesOrderClass

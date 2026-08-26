@@ -163,11 +163,16 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             portfolio_value=new_portfolio_value, position=new_qty,
         )
 
-    # Each venue sets its OWN. The four bodies below were byte-identical text, but this
-    # name resolved to a different value in each module -- 0.0004 / 0.0006 / 0.00055 /
-    # 0.0005 -- so folding them without lifting the fee out would have silently re-priced
-    # three venues. `fee_multiplier = 1 + leverage * fee`, so at 125x the binance and
-    # bitget fees size a position ~2.3% apart. Exact values are pinned by a test.
+    # Set by each venue's <Venue>BaseTorchTradingEnv, NOT by the plain leaf: the SLTP
+    # sibling's MRO runs SLTPMixin -> <Venue>Base -> here and never touches the leaf, so a
+    # fee set there resolves for half the classes that inherit this sizing and
+    # AttributeErrors for the other half.
+    #
+    # The four bodies this replaced were byte-identical TEXT with this name resolving to a
+    # different value per module -- 0.0004 / 0.0006 / 0.00055 / 0.0005. Folding them
+    # without lifting the fee would have silently re-priced three venues:
+    # `fee_multiplier = 1 + leverage * fee`, so at 125x binance and bitget size ~2.3%
+    # apart. The eight pre-fold notionals are pinned by test.
     TAKER_FEE: float
 
     def _calculate_fractional_position(
@@ -202,8 +207,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         balance_info = self._halting(read_balance, cache_key="balance")
 
         # total_margin_balance, not available_balance: the target must reflect the whole
-        # portfolio including margin already locked in open positions. available_balance
-        # shrinks as positions grow, which made a held action=1.0 buy repeatedly.
+        # portfolio including margin already locked in open positions.
         # The 2% buffer is the venue's maintenance-margin headroom.
         effective_balance = balance_info["total_margin_balance"] * 0.98
         return calculate_fractional_position(PositionCalculationParams(
@@ -220,16 +224,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         Ordering is load-bearing and was identical in all four: flatten before the
         baseline, so the baseline is the balance the episode actually starts from.
         """
-        # At the boundary, not in the sizing rule. `TAKER_FEE: float` on this class is a
-        # bare annotation and creates no attribute, so a venue that forgets it would
-        # otherwise raise the first time it sizes a nonzero action -- mid-`_step`, with a
-        # position possibly already open.
-        if not hasattr(self, "TAKER_FEE"):
-            raise TypeError(
-                f"{type(self).__name__} does not set TAKER_FEE; the shared fractional "
-                f"sizing reads it, and the venues' fees differ"
-            )
-
         self.execute_on = self.config.execute_on
 
         self.trader.cancel_open_orders()

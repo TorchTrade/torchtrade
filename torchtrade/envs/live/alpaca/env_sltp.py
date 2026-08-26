@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union, Callable
 import logging
 
-import torch
 
 logger = logging.getLogger(__name__)
 from torchtrade.envs.core.state import position_qty_from_status
