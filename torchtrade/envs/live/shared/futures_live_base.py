@@ -153,22 +153,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # argues the rest.
         new_price = new_price if new_price is not None else current_price
 
-        # History FIRST: the reward function reads it.
-        self.history.record_step(
-            price=new_price,
-            action=desired_action,
-            reward=0.0,
-            portfolio_value=new_portfolio_value,
-            position=new_qty,
+        return self._record_and_score(
+            next_tensordict, price=new_price, action=desired_action,
+            portfolio_value=new_portfolio_value, position=new_qty,
         )
-        reward = float(self.reward_function(self.history))
-        self.history.rewards[-1] = reward
-
-        done = self._check_termination(new_portfolio_value)
-        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        self._finalize_step_flags(next_tensordict, terminated=done)
-
-        return next_tensordict
 
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).

@@ -352,6 +352,34 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self._status_unknown_this_step = False
         self._last_confirmed_read.clear()
 
+    def _record_and_score(self, next_tensordict, *, price, action, portfolio_value,
+                          position):
+        """The tail every live `_step` ran verbatim -- four copies, alpaca included (#288).
+
+        Ordering is the contract. `record_step` writes a 0.0 placeholder FIRST because
+        `reward_function` scores the history it is about to be added to; the overwrite on
+        the next line is what makes the row true. Scoring before recording makes the reward
+        at t belong to the action at t-1, which is the #278 shape and the reason this is
+        one method rather than four.
+
+        Returns `next_tensordict` so a `_step` ends `return self._record_and_score(...)`.
+        """
+        self.history.record_step(
+            price=price,
+            action=action,
+            reward=0.0,
+            portfolio_value=portfolio_value,
+            position=position,
+        )
+        reward = float(self.reward_function(self.history))
+        self.history.rewards[-1] = reward
+
+        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
+        self._finalize_step_flags(
+            next_tensordict, terminated=self._check_termination(portfolio_value)
+        )
+        return next_tensordict
+
     def _finalize_step_flags(self, next_tensordict, terminated: bool) -> None:
         """Stamp status_unknown and the done family. Ten identical copies (#288, #295).
 

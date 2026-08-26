@@ -3762,21 +3762,36 @@ def test_every_live_step_writes_done_explicitly(env_cls):
     reimplementing the writes by hand is how `truncated` became a declared constant in
     the first place.
     """
-    calls = [n.func.attr for n in ast.walk(ast.parse(
-        inspect.getsource(env_cls._step).lstrip()))
-        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
-    assert "_finalize_step_flags" in calls, (
-        f"{env_cls.__name__}._step does not call the shared done-family writer, so its "
-        f"truncation channel is unreachable"
+    def _attr_calls(func):
+        return [n.func.attr for n in ast.walk(ast.parse(inspect.getsource(func).lstrip()))
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+
+    # One hop is allowed, and only one: #288 moved the record-then-score tail onto
+    # `_record_and_score`, so `_step` now reaches the writer through it. The delegate is
+    # pinned below, so "delegates" cannot become "delegates to something that stopped
+    # writing the family".
+    step_calls = _attr_calls(env_cls._step)
+    assert ("_finalize_step_flags" in step_calls
+            or "_record_and_score" in step_calls), (
+        f"{env_cls.__name__}._step neither calls the shared done-family writer nor the "
+        f"tail that does, so its truncation channel is unreachable"
+    )
+    assert "_finalize_step_flags" in _attr_calls(env_cls._record_and_score), (
+        f"{env_cls.__name__}._record_and_score stopped calling the done-family writer; "
+        f"every `_step` that delegates to it silently lost its truncation channel"
     )
     # A substring check passed on a commented-out call with the writes reimplemented
     # alongside it. Only binance had an end-to-end backstop for that; nine venues did not.
-    assert not [n for n in ast.walk(ast.parse(
-        inspect.getsource(env_cls._step).lstrip()))
+    # Both bodies, since the writes could be hand-rolled in either.
+    hand_written = [
+        n for func in (env_cls._step, env_cls._record_and_score)
+        for n in ast.walk(ast.parse(inspect.getsource(func).lstrip()))
         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
         and n.func.attr == "set"
         and n.args and isinstance(n.args[0], ast.Constant)
-        and n.args[0].value in ("done", "terminated", "truncated")], (
+        and n.args[0].value in ("done", "terminated", "truncated")
+    ]
+    assert not hand_written, (
         f"{env_cls.__name__}._step writes the done family by hand alongside "
         f"_finalize_step_flags; the hand-written value wins and the shared one is a lie"
     )
@@ -4163,6 +4178,9 @@ def test_dependency_injection_still_skips_construction_entirely():
 # override it, to thread the price rather than re-read it (#295). Guarding it would demand
 # a fold of the one method that exists not to be folded.
 _SHARED_METHOD_OWNERSHIP = [
+    # `_record_and_score` is owned by TorchTradeLiveEnv and reached by all TEN stepping
+    # envs, alpaca included -- the only tail in this file that alpaca shares (#288).
+    *((c, TorchTradeLiveEnv, "_record_and_score") for c in STEPPING_ENVS),
     *((c, TorchTradeFuturesLiveEnv, m)
       for c in PLAIN_FUTURES_ENVS for m in ("_step", "_reset")),
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
@@ -4388,16 +4406,16 @@ def test_the_history_row_is_the_one_the_reward_function_scores(sltp):
     """The history row the reward function scores. Each assertion below kills a mutation
     of the shared `_step` that failed zero tests.
 
-    Parametrised on plain vs SLTP, NOT on venue: the two owners hold SEPARATE copies of
-    the record-then-overwrite tail, while the four venues within each share one function
-    object and die to the same mutation identically.
+    Parametrised on plain vs SLTP, NOT on venue. Since #288 folded the tail itself onto
+    `TorchTradeLiveEnv._record_and_score` there is ONE copy for all ten live envs, so the
+    reward contracts die here once; what still differs per owner is what each `_step`
+    THREADS into it -- the price, the qty, and how the action level is derived. That is
+    what these two cases pin. Which venue resolves to which owner is the re-fork guard's
+    job, and alpaca is covered by that guard rather than by a case here.
 
     ONE step, not two: the pre/post price asymmetry below is armed once, so by step two
     both reads return the post-bar value and the price and qty assertions stop
     discriminating.
-
-    Not covered here: alpaca keeps its own two copies of this tail
-    (`live/alpaca/env.py`, `live/alpaca/env_sltp.py`) -- outside this fold.
     """
 
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=sltp)
