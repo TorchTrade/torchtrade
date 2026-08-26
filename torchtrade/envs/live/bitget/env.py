@@ -116,6 +116,8 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
      leverage, distance_to_liquidation]
     """
 
+    TAKER_FEE = TAKER_FEE   # venue-specific; the shared sizing reads self.TAKER_FEE
+
     def __init__(
         self,
         config: BitgetFuturesTradingEnvConfig,
@@ -151,62 +153,6 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         self.action_levels = config.action_levels
         self.action_spec = Categorical(len(self.action_levels))
 
-
-    def _calculate_fractional_position(self, action_value: float, current_price: float) -> tuple[float, float, str]:
-        """Calculate target position size from fractional action.
-
-        Uses shared utility function for consistent position sizing across all environments.
-        This fixes the fee calculation bug in the previous implementation.
-
-        Args:
-            action_value: Action from [-1.0, 1.0] representing fraction of balance
-            current_price: Current market price
-
-        Returns:
-            Tuple of (position_size, notional_value, side):
-            - position_size: Target position quantity (positive=long, negative=short, 0=flat)
-            - notional_value: Absolute value in quote currency
-            - side: "long", "short", or "flat"
-        """
-        if action_value == 0.0:
-            return 0.0, 0.0, "flat"
-
-        # Get actual balance from exchange
-        # Use total_margin_balance (not available_balance) so the target reflects
-        # the full portfolio, including margin already locked in open positions.
-        # The VERDICT is inside the closure, not just the read. `_halting` catches
-        # ValueError precisely so an impossible account state becomes a halt; raising one
-        # frame above it sent that straight out of `_step`. `equity == 0.0` is what a
-        # venue reports while liquidating you -- the worst moment to crash rather than
-        # halt under policy (#295).
-        def read_balance():
-            info = self.trader.get_account_balance()
-            total_balance = info["total_margin_balance"]
-            # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
-            # balance sizes an inf target (#277). The name is load-bearing:
-            # test_futures_sizing_rejects_a_non_finite_balance greps for it.
-            if not math.isfinite(total_balance) or total_balance <= 0:
-                raise ValueError(
-                    f"cannot size a trade against a portfolio value of {total_balance}"
-                )
-            return info
-
-        balance_info = self._halting(read_balance, cache_key="balance")
-        total_balance = balance_info["total_margin_balance"]
-
-        # Use shared utility for core position calculation
-        # Reserve 2% buffer for exchange maintenance margin requirements
-        effective_balance = total_balance * 0.98
-        params = PositionCalculationParams(
-            balance=effective_balance,
-            action_value=action_value,
-            current_price=current_price,
-            leverage=self.config.leverage,
-            transaction_fee=TAKER_FEE,
-        )
-        position_size, notional_value, side = calculate_fractional_position(params)
-
-        return position_size, notional_value, side
 
     def _execute_fractional_action(
         self, action_value: float, *, current_qty: float, current_price: float,

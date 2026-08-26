@@ -14,6 +14,7 @@ import ast
 import dataclasses
 import pathlib
 import re
+import importlib
 import inspect
 import textwrap
 import math
@@ -1946,8 +1947,17 @@ def test_futures_sizing_rejects_a_non_finite_balance(exchange):
     mid-step. The alpaca sibling written in the same commit is safe only because it
     isfinite-checks its inputs first.
     """
-    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-           / "live" / exchange / "env.py").read_text()
+    # The RESOLVED method, following one hop through `super()`. A file scan of
+    # `live/<venue>/env.py` broke the moment #288 folded the sizing onto the shared base:
+    # the guard could no longer see its own subject, which is the failure it exists to
+    # prevent in the code. binance still overrides, so its own body is scanned too.
+    cls = _sole(importlib.import_module(f"torchtrade.envs.live.{exchange}.env"),
+                "TorchTradingEnv")
+    src = inspect.getsource(cls._calculate_fractional_position)
+    if "super()._calculate_fractional_position" in src:
+        src += inspect.getsource(
+            TorchTradeFuturesLiveEnv._calculate_fractional_position
+        )
     assert "if not (total_balance > 0):" not in src, (
         f"{exchange} sizes against a balance guarded by `not (x > 0)`, which +inf passes"
     )
@@ -4202,6 +4212,141 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("SLTPMixin", "_record_sltp_position"),
     ("SLTPMixin", "_reset_sltp_state"),
 }
+
+
+# bitget/bybit/okx inherit the shared sizing; binance extends it. Same split shape as the
+# dispatch hook below, and guarded the same way: identity for the inheritors, behaviour for
+# the extender.
+_SIZING_INHERITORS = [c for c in PLAIN_FUTURES_ENVS
+                      if c.__module__.split(".")[-2] != "binance"]
+assert len(_SIZING_INHERITORS) == 3
+
+
+@pytest.mark.parametrize("cls", _SIZING_INHERITORS, ids=lambda c: c.__name__)
+def test_the_sizing_inheritors_do_not_refork_it(cls):
+    """Three of the four bodies were byte-identical; only binance had a reason to differ."""
+    assert (cls._calculate_fractional_position
+            is TorchTradeFuturesLiveEnv._calculate_fractional_position), (
+        f"{cls.__name__} re-forks _calculate_fractional_position; only binance extends it "
+        f"(min-notional refusal and target rounding), and it does so via super()"
+    )
+
+
+def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
+    """binance's override must still run the shared arithmetic underneath its extras.
+
+    Replacing rather than extending is how the halt-policy balance read, the isfinite
+    guard and the 2% buffer would quietly stop applying to the one venue whose sizing has
+    the most steps in it.
+    """
+    cls = _sole(importlib.import_module("torchtrade.envs.live.binance.env"),
+                "TorchTradingEnv")
+    assert "super()._calculate_fractional_position" in inspect.getsource(
+        cls._calculate_fractional_position
+    ), "binance's sizing no longer delegates to the shared implementation"
+
+    # By BEHAVIOUR, not by grepping the body for `_get_min_notional`: neutering the `if`
+    # that uses it left the name in the source and the string check passed.
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(leverage=10)
+    env.trader = MagicMock()
+    env.trader.get_account_balance.return_value = {"total_margin_balance": 10_000.0}
+    env.trader.round_quantity.side_effect = lambda q: round(float(q), 3)
+    env._halting = lambda read, cache_key=None: read()
+
+    env._get_min_notional = lambda: 1e12          # nothing can clear this
+    assert env._calculate_fractional_position(1.0, 100.0) == (0.0, 0.0, "flat"), (
+        "binance opened a position whose notional is below the venue minimum; the "
+        "exchange rejects it and the env then believes it holds one"
+    )
+
+    env._get_min_notional = lambda: 0.0
+    env.trader.round_quantity.side_effect = lambda q: 0.123456
+    size, _, _ = env._calculate_fractional_position(1.0, 100.0)
+    assert abs(size) == pytest.approx(0.123456), (
+        f"binance sized {size} rather than the executor's rounded quantity; an unrounded "
+        f"target is rejected by the venue's lot-size filter (#271)"
+    )
+
+
+@pytest.mark.parametrize("venue,fee", [
+    ("binance", 0.0004), ("bitget", 0.0006), ("bybit", 0.00055), ("okx", 0.0005),
+])
+def test_each_venue_keeps_its_own_taker_fee(venue, fee):
+    """The four sizing bodies were byte-identical TEXT and not identical BEHAVIOUR.
+
+    `TAKER_FEE` resolved to a different value in each module, so folding them without
+    lifting the fee onto the class would have silently re-priced three venues. Sizing is
+    `1 + leverage * fee`, so at 125x the binance and bitget fees size a position ~2.3%
+    apart. Pinned by VALUE, because the failure mode is one shared constant that looks
+    right on the venue you happen to test.
+    """
+    cls = _sole(importlib.import_module(f"torchtrade.envs.live.{venue}.env"),
+                "TorchTradingEnv")
+    assert cls.TAKER_FEE == pytest.approx(fee), (
+        f"{venue}'s taker fee is {cls.TAKER_FEE}, not {fee}; every venue reading one "
+        f"fee is what a careless fold of the sizing bodies would produce"
+    )
+
+
+def test_the_sizing_reserves_the_maintenance_margin_buffer():
+    """The 2% haircut on the balance. Dropping it failed ZERO tests.
+
+    It is the venue's maintenance-margin headroom: sizing against the full balance leaves
+    nothing between the position and a margin call on the first adverse tick. Asserted as
+    a ratio between two sizings rather than a magic notional, so it survives a change to
+    the fee or the leverage.
+    """
+    cls = _sole(importlib.import_module("torchtrade.envs.live.bybit.env"),
+                "TorchTradingEnv")
+
+    def notional_for(balance):
+        env = cls.__new__(cls)
+        env.config = SimpleNamespace(leverage=10)
+        env.trader = MagicMock()
+        env.trader.get_account_balance.return_value = {"total_margin_balance": balance}
+        env._halting = lambda read, cache_key=None: read()
+        return env._calculate_fractional_position(1.0, 100.0)[1]
+
+    # Against an INDEPENDENT expected value, not a ratio between two of the env's own
+    # sizings: sizing is linear in the balance, so `n(B) == n(B/0.98) * 0.98` holds whether
+    # or not the buffer exists. That first version passed with the buffer deleted.
+    from torchtrade.envs.utils.fractional_sizing import (
+        PositionCalculationParams, calculate_fractional_position,
+    )
+    expected = calculate_fractional_position(PositionCalculationParams(
+        balance=10_000.0 * 0.98, action_value=1.0, current_price=100.0,
+        leverage=10, transaction_fee=cls.TAKER_FEE,
+    ))[1]
+    assert notional_for(10_000.0) == pytest.approx(expected), (
+        f"sized against the full balance rather than 98% of it: the 2% maintenance-margin "
+        f"headroom is what keeps the first adverse tick from being a margin call"
+    )
+
+
+def test_the_shared_sizing_actually_uses_the_venues_fee():
+    """And the fee must reach the arithmetic, not merely be declared on the class.
+
+    Pinning the four constants proves they differ; this proves the shared body reads
+    `self.TAKER_FEE` rather than a module-level one it closed over.
+    """
+    sizes = {}
+    for venue in ("binance", "bitget", "bybit", "okx"):
+        cls = _sole(importlib.import_module(f"torchtrade.envs.live.{venue}.env"),
+                    "TorchTradingEnv")
+        env = cls.__new__(cls)
+        env.config = SimpleNamespace(leverage=125)
+        env.trader = MagicMock()
+        env.trader.get_account_balance.return_value = {"total_margin_balance": 10_000.0}
+        env.trader.round_quantity.side_effect = lambda q: q
+        env._halting = lambda read, cache_key=None: read()
+        env._get_min_notional = lambda: 0.0
+        sizes[venue] = env._calculate_fractional_position(1.0, 100.0)[1]
+
+    assert len(set(round(v, 6) for v in sizes.values())) == 4, (
+        f"four venues with four different taker fees produced {sizes}; identical notionals "
+        f"mean the shared body is not reading self.TAKER_FEE"
+    )
 
 
 # binance and bitget take the mixin's `_dispatch_sltp_trade`; bybit and okx override it to
