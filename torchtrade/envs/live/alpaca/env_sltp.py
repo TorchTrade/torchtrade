@@ -214,28 +214,10 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Convert action_tuple to numeric action for history
         action_value = 1.0 if action_tuple != (None, None) else 0.0
 
-        # Record step history FIRST (reward function needs updated history!)
-        self.history.record_step(
-            price=new_price,
-            action=action_value,
-            reward=0.0,  # Placeholder, will be set after reward calculation
-            portfolio_value=new_portfolio_value,
-            position=new_qty,
+        return self._record_and_score(
+            next_tensordict, price=new_price, action=action_value,
+            portfolio_value=new_portfolio_value, position=new_qty,
         )
-
-        # Calculate reward using UPDATED history tracker
-        reward = float(self.reward_function(self.history))
-
-        # Update the reward in history
-        self.history.rewards[-1] = reward
-
-        # Check termination
-        done = self._check_termination(new_portfolio_value)
-
-        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        self._finalize_step_flags(next_tensordict, terminated=done)
-
-        return next_tensordict
 
     def _execute_trade_if_needed(self, action_tuple: Tuple[Optional[float], Optional[float]]) -> Dict:
         """Execute trade if position change is needed.

@@ -29,7 +29,6 @@ from torchtrade.envs.core.state import (
     advance_hold_counter,
     position_direction_from_status,
     position_qty_from_status,
-    PositionState,
 )
 from torchtrade.envs.utils.liquidation import (
     isolated_liquidation_price,
@@ -128,6 +127,37 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         else:
             make_observer()
             make_trader()
+
+    def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
+        """One step for the four PLAIN futures envs (#288).
+
+        The SLTP envs override this via SLTPMixin, which precedes this class in their MRO;
+        alpaca does not inherit this class.
+        """
+        # One PRE-TRADE status read: the trade below reuses this qty and price rather
+        # than fetching its own, so an outage cannot open a window between the read and
+        # the trade (#295). The post-bar read is a second, separate one.
+        _, position_status, current_price, position_size = self._acquire_pre_trade_state()
+
+        self._sync_position_from_exchange(position_status)
+
+        desired_action = self._resolve_action_level(tensordict)
+        trade_info = self._execute_trade_if_needed(
+            desired_action, current_qty=position_size, current_price=current_price,
+        )
+        self._record_position_after_trade(desired_action, trade_info)
+
+        self._wait_for_next_timestamp()
+
+        new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
+        # None when the account is flat: no position mark to read. `_acquire_post_bar_state`
+        # argues the rest.
+        new_price = new_price if new_price is not None else current_price
+
+        return self._record_and_score(
+            next_tensordict, price=new_price, action=desired_action,
+            portfolio_value=new_portfolio_value, position=new_qty,
+        )
 
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).
@@ -405,7 +435,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 except Exception:
                     logger.warning(
                         "post-bar mark unavailable for %s; the history row will carry the "
-                        "pre-trade price", self.symbol,
+                        "pre-trade price", self.config.symbol,
                     )
                     mark = None
             return portfolio_value, mark, self._last_observed_qty, observation

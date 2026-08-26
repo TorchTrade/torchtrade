@@ -1,6 +1,7 @@
 """#343: a live env that cannot read its own account state must halt, not improvise."""
 
 import pytest
+from tests.envs.base_exchange_tests import _sole
 from types import SimpleNamespace
 
 from torchtrade.envs.core.live import (
@@ -114,11 +115,8 @@ def test_every_futures_step_reads_state_through_the_halting_helper(exchange, mod
     import importlib
     import inspect
 
-    ns = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}").__dict__
-    env_cls = next(v for k, v in ns.items()
-                   if inspect.isclass(v) and k.endswith("TorchTradingEnv")
-                   and v.__module__.endswith(module))
-    source = inspect.getsource(env_cls._step)
+    mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
+    source = inspect.getsource(_sole(mod, "TorchTradingEnv")._step)
 
     assert "_acquire_post_bar_state()" in source, f"{exchange}/{module} bypasses the halt"
     assert "self._get_observation()" not in source, f"{exchange}/{module} reads directly"
@@ -129,19 +127,14 @@ def test_every_futures_step_reads_state_through_the_halting_helper(exchange, mod
 def test_every_futures_config_coerces_its_failure_policy(exchange, module):
     """A bad policy string must be rejected at the boundary, not in production.
 
-    The `__module__` filter matches the env_cls discovery above and is load-bearing: the
-    SLTP configs now import their shared base into the module namespace, and without it
-    `next()` returns that base for all four venues -- so this test silently stopped
+    `_sole`'s `__module__` filter is load-bearing here: the SLTP configs import their
+    shared base into the module namespace, and without it this test silently stopped
     exercising the subclass coercion it exists to pin (#288 review).
     """
     import importlib
-    import inspect
 
-    ns = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}").__dict__
-    cfg_cls = next(v for k, v in ns.items()
-                   if inspect.isclass(v) and k.endswith("Config")
-                   and hasattr(v, "observation_failure_policy")
-                   and v.__module__.endswith(module))
+    mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
+    cfg_cls = _sole(mod, "Config")
 
     assert cfg_cls().observation_failure_policy is ObservationFailurePolicy.HALT
     assert cfg_cls(observation_failure_policy="flatten").observation_failure_policy is (
@@ -172,10 +165,8 @@ def _real_futures_env(budget, venue="binance", sltp=False, position_status=None,
         f"torchtrade.envs.live.{venue}.env_sltp" if sltp
         else f"torchtrade.envs.live.{venue}.env"
     )
-    Env = next(v for k, v in vars(module).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
-    Config = next(v for k, v in vars(module).items()
-                  if k.endswith("TradingEnvConfig") and v.__module__ == module.__name__)
+    Env = _sole(module, "TorchTradingEnv")
+    Config = _sole(module, "TradingEnvConfig")
 
     observer = MagicMock()
     observer.get_keys.return_value = ["1m_10"]
@@ -541,6 +532,13 @@ def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down(venue):
     nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
                    .set("action", torch.tensor(full_long)))["next"]
 
+    # `status_unknown` alone is over-determined: the failing `get_status` raises it
+    # whether or not the sizing path is ever reached. Neutering the trade dispatch left
+    # this test green. The point of the test is that the trade STILL HAPPENS.
+    assert trader.trade.called, (
+        "the grace bar never reached the trade: this test passes on an env that gives up "
+        "on the outage, which is the opposite of what it is named for"
+    )
     assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
     assert not bool(nxt["terminated"]), "an outage is never a terminated episode"
 
@@ -569,6 +567,13 @@ def test_an_sltp_grace_bar_can_still_size_a_bracket_with_the_venue_down(venue):
     nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
                    .set("action", torch.tensor(1)))["next"]
 
+    # `status_unknown` alone is over-determined: the failing `get_status` raises it
+    # whether or not the sizing path is ever reached. Neutering the trade dispatch left
+    # this test green. The point of the test is that the trade STILL HAPPENS.
+    assert trader.trade.called, (
+        "the grace bar never reached the trade: this test passes on an env that gives up "
+        "on the outage, which is the opposite of what it is named for"
+    )
     assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
     assert not bool(nxt["terminated"]), "an outage is never a terminated episode"
 

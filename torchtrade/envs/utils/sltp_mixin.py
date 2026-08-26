@@ -101,22 +101,10 @@ class SLTPMixin:
         side, _, _ = action_tuple
         action_value = 1.0 if side == "long" else (-1.0 if side == "short" else 0.0)
 
-        # History FIRST: the reward function reads it.
-        self.history.record_step(
-            price=new_price,
-            action=action_value,
-            reward=0.0,
-            portfolio_value=new_portfolio_value,
-            position=new_qty,
+        return self._record_and_score(
+            next_tensordict, price=new_price, action=action_value,
+            portfolio_value=new_portfolio_value, position=new_qty,
         )
-        reward = float(self.reward_function(self.history))
-        self.history.rewards[-1] = reward
-
-        done = self._check_termination(new_portfolio_value)
-        next_tensordict.set("reward", torch.tensor([reward], dtype=torch.float))
-        self._finalize_step_flags(next_tensordict, terminated=done)
-
-        return next_tensordict
 
     def _sync_position_from_exchange(self, position_status) -> bool:
         """Sync internal position state from exchange and detect SL/TP closures.

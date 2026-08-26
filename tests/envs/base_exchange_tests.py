@@ -621,3 +621,22 @@ def wire_outage_state(env, budget=0):
     env._status_unknown_this_step = False
     env._last_confirmed_read = {}
     env._max_unknown_status_steps = budget
+
+def _sole(module, suffix):
+    """The ONE class in `module` whose name ends in `suffix`.
+
+    Not `next(...)`, which returns the first match in DEFINITION order: a decoy declared
+    above the real class silently becomes the subject, and a guard then passes green on a
+    class nobody meant to check.
+    """
+    found = [
+        v for k, v in vars(module).items()
+        if isinstance(v, type)          # `__module__` resolves through the class, so a
+        and k.endswith(suffix)          # module-level INSTANCE would otherwise qualify
+        and getattr(v, "__module__", None) == module.__name__
+    ]
+    assert len(found) == 1, (
+        f"{module.__name__} defines {len(found)} classes ending in {suffix!r} "
+        f"({[c.__name__ for c in found]}); the guard would have silently picked the first"
+    )
+    return found[0]
