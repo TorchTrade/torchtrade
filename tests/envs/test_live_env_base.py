@@ -42,10 +42,9 @@ from torchtrade.envs.utils.liquidation import (
     cross_liquidation_price,
     isolated_liquidation_price,
 )
-from tests.envs.base_exchange_tests import wire_outage_state
+from tests.envs.base_exchange_tests import _sole, wire_outage_state
 from tests.envs.test_live_observation_failsafe import _real_futures_env
 from torchtrade.envs.core.common_types import PositionStatus
-from tests.envs.base_exchange_tests import _sole
 from torchtrade.envs.core.state import (
     POSITION_UNKNOWN,
     PositionState,
@@ -82,14 +81,11 @@ FUTURES_ENVS = [
     if issubclass(c, TorchTradeFuturesLiveEnv) and c is not TorchTradeFuturesLiveEnv
 ]
 
-# Split by module.
 PLAIN_FUTURES_ENVS = [c for c in FUTURES_ENVS if c.__module__.endswith(".env")]
 SLTP_FUTURES_ENVS = [c for c in FUTURES_ENVS if c.__module__.endswith(".env_sltp")]
 # 4 -> 3 is the hazard: an EMPTY list is already a collection error (pyproject sets
 # empty_parameter_set_mark), but a list that merely shrinks is silent.
 assert len(PLAIN_FUTURES_ENVS) == len(SLTP_FUTURES_ENVS) == 4
-
-
 
 
 @pytest.mark.parametrize("done_on_bankruptcy,portfolio_value,expected", [
@@ -173,9 +169,8 @@ def test_discovery_covers_every_live_exchange():
     """
     exchanges = {cls.__module__.split(".")[-2] for cls in LIVE_ENVS} - {"shared"}
     assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}
-    # These drive the guards below; a list that shrinks rather than empties is silent.
     assert len(NON_SLTP_ENVS) == 5
-    assert len(FUTURES_ENVS) == 12
+    assert len(FUTURES_ENVS) == 12          # 4 venues x (base, env, env_sltp)
 
 
 @pytest.mark.parametrize("method", [
@@ -183,7 +178,6 @@ def test_discovery_covers_every_live_exchange():
     # Everything the shared `_step` calls. Guarding `_step` itself is not enough: a venue
     # that re-forks one of ITS callees still passes the `_step` identity check while the
     # "a shared fix lands once" guarantee is already gone. Verified -- a byte-identical
-    # copy of a callee on one venue failed zero of 1076 tests.
     "_record_position_after_trade", "_resolve_action_level",
     "_wait_for_next_timestamp", "_finalize_step_flags",
 ])
@@ -678,8 +672,6 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     env_mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
     # By NAME, not by `"_step" in vars(c)`: #288 moved the SLTP `_step` onto the mixin,
     # and a discovery predicate keyed on where the method LIVES silently stops finding
-    # its subject the moment that changes -- pytest then reports a StopIteration rather
-    # than a missing guard.
     env_cls = _sole(env_mod, "TorchTradingEnv")
 
     orders = []
@@ -2533,9 +2525,6 @@ def _build_env_with(env_cls, module, trader):
         "observation_features": ["a", "b", "c", "d"], "original_features": []})
     observer.intervals, observer.window_sizes = ["1m"], [10]
 
-    # __module__, not just the name: `vars` also carries any config imported into the
-    # module. Both env_sltp modules import their shared base, and without this filter
-    # `next` returns THAT -- a test that silently stops testing the venue (#288).
     config_cls = _sole(module, "Config")
     try:
         config = config_cls(symbol="BTCUSDT", demo=True, time_frames=["1m"],
@@ -4167,14 +4156,12 @@ def test_dependency_injection_still_skips_construction_entirely():
 # the mixin's (no futures pre-trade acquisition, no mark). It overrides `_step` on purpose
 # and inherits `_reset`, which IS identical. Deleting alpaca's `_step` as "redundant"
 # would hand a spot env the futures step.
-# Per OWNER, because the two own different method sets. The SLTP callees were unguarded:
-# a byte-identical copy of `_record_sltp_position` on one venue passed the whole suite.
+# Per OWNER, because the two own different method sets.
 #
 # `_dispatch_sltp_trade` is deliberately ABSENT. It is the venue-variation hook -- its own
 # docstring calls it "the ONE thing `_step` varies by venue" -- and bybit and okx really do
 # override it, to thread the price rather than re-read it (#295). Guarding it would demand
-# a fold of the one method that exists not to be folded. Adding it here failed exactly
-# those two venues, which is how I found out.
+# a fold of the one method that exists not to be folded.
 _SHARED_METHOD_OWNERSHIP = [
     *((c, TorchTradeFuturesLiveEnv, m)
       for c in PLAIN_FUTURES_ENVS for m in ("_step", "_reset")),
@@ -4183,16 +4170,12 @@ _SHARED_METHOD_OWNERSHIP = [
         "_reset_sltp_state",
     )),
 ]
-assert len(_SHARED_METHOD_OWNERSHIP) == 4 * 2 + 4 * 5
 
 
 @pytest.mark.parametrize("cls,owner,method", _SHARED_METHOD_OWNERSHIP,
                          ids=[f"{c.__name__}-{m}" for c, _, m in _SHARED_METHOD_OWNERSHIP])
 def test_no_futures_env_reforks_a_shared_step_or_reset(cls, owner, method):
-    """#288 folded eight `_step`/`_reset` copies onto two owners. Nothing noticed when one
-    of them did not fold.
-
-    An incomplete fold is invisible behaviourally, right up until a fix lands on the
+    """An incomplete fold is invisible behaviourally, right up until a fix lands on the
     shared copy and one venue does not get it.
 
     Identity against the owner, not `"_step" not in vars(cls)`: those are equivalent only
@@ -4266,40 +4249,71 @@ def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
 
 
 def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
-    """#295: one status read per step, threaded into the trade -- not re-read.
+    """#295: the trade uses the qty and price the pre-trade read acquired, not its own.
 
-    Zeroing `current_qty` survives BOTH contract files. Across the whole suite it dies to
-    exactly one test, in bitget's venue file, incidentally. That is the wrong home for it:
-    `_execute_trade_if_needed` is NOT shared, so the "command flat, close a position the
-    env did not open" path runs through venue-specific code on all four venues and is
-    exercised on one. The contract belongs where the shared `_step` is owned.
+    `_execute_trade_if_needed` is NOT shared, so this contract belongs where the shared
+    `_step` is owned rather than in one venue's file.
 
-    Re-reading instead of threading is what let an outage open a window between the two
-    reads, which is the whole of #295; a zeroed qty makes the executor believe it is flat
-    and re-open a position it already holds.
+    The venue reports something DIFFERENT after the first read. That is the whole design:
+    with the fixture's constant mocks a re-read returns the identical value, so the first
+    version of this test passed under the very mutation it names -- swapping the threaded
+    price for `self._current_mark_price()` changed nothing observable. Constants cannot
+    distinguish "read once and thread it" from "read again"; only a changing venue can.
+
+    The read COUNT is pinned too, and it is the stricter half: two status reads per step,
+    the pre-trade one and the post-bar one. A third is a re-read, which is the window an
+    outage slips through even when the values happen to agree.
     """
-    open_long = PositionStatus(
+    held = PositionStatus(
         qty=0.05, notional_value=6000.0, entry_price=100.0, unrealized_pnl=0.0,
         unrealized_pnl_pct=0.0, mark_price=100.0, leverage=10,
         margin_mode="isolated", liquidation_price=91.0,
     )
-    env, trader = _real_futures_env(budget=0, venue="binance", position_status=open_long)
+    moved = PositionStatus(
+        qty=0.99, notional_value=99000.0, entry_price=100.0, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=999.0, leverage=10,
+        margin_mode="isolated", liquidation_price=91.0,
+    )
+    env, trader = _real_futures_env(budget=0, venue="binance", position_status=held)
+
+    reads = {"status": 0, "mark": 0}
+
+    def status():
+        reads["status"] += 1
+        return {"position_status": held if reads["status"] == 1 else moved}
+
+    def mark():
+        reads["mark"] += 1
+        return 100.0 if reads["mark"] == 1 else 999.0
+
+    trader.get_status.side_effect = status
+    trader.get_mark_price.side_effect = mark
 
     seen = {}
-    env._execute_trade_if_needed = lambda action, **kw: (
-        seen.update(kw), {"executed": False}
-    )[1]
+
+    def spy(action, **kw):
+        seen.update(kw)
+        return {"executed": False}          # a real return: five sites in binance alone
+
+    env._execute_trade_if_needed = spy
 
     td = env.reset()
+    reads["status"] = reads["mark"] = 0     # count the STEP's reads, not reset's
     env.step(td.set("action", torch.tensor(0)))
 
+    assert seen, "setup: the trade was never dispatched, so nothing was threaded to it"
     assert seen.get("current_qty") == pytest.approx(0.05), (
-        f"the trade was handed current_qty={seen.get('current_qty')!r} rather than the "
-        f"0.05 the pre-trade read acquired; 0.0 reads as flat and re-opens the position"
+        f"the trade was handed current_qty={seen.get('current_qty')!r}; 0.99 means it "
+        f"re-read the venue instead of taking what the pre-trade read acquired (#295), "
+        f"and 0.0 means it was dropped"
     )
     assert seen.get("current_price") == pytest.approx(100.0), (
-        f"the trade was handed current_price={seen.get('current_price')!r} rather than "
-        f"the price the pre-trade read acquired under the halt policy (#295)"
+        f"the trade was handed current_price={seen.get('current_price')!r}; 999.0 means "
+        f"it re-read the mark rather than taking the threaded one (#295)"
+    )
+    assert reads["status"] == 2, (
+        f"{reads['status']} status reads in one step, not 2 (pre-trade and post-bar); an "
+        f"extra read is the outage window #295 closed by threading"
     )
 
 
@@ -4335,7 +4349,12 @@ def test_the_history_row_is_the_one_the_reward_function_scores(sltp):
     trader.get_mark_price.side_effect = lambda: 120.0 if bar["done"] else 100.0
 
     real_wait = env._wait_for_next_timestamp
-    env._wait_for_next_timestamp = lambda: (bar.__setitem__("done", True), real_wait())[1]
+
+    def wait():
+        bar["done"] = True
+        return real_wait()
+
+    env._wait_for_next_timestamp = wait
 
     td = env.reset()
     if sltp:
@@ -4343,13 +4362,14 @@ def test_the_history_row_is_the_one_the_reward_function_scores(sltp):
     action = 0 if sltp else len(env.action_levels) - 1
     out = env.step(td.set("action", torch.tensor(action)))["next"]
 
-    rows = len(env.history.actions)
-    assert out["reward"].item() == pytest.approx(float(rows)), (
-        f"the step returned {out['reward'].item()}, not reward_function's score of the "
-        f"{rows} row(s) that existed when it was called; 0.0 is either the placeholder "
-        f"or a reward computed before `record_step` wrote its row"
+    # The literal 1, not `len(history.actions)` re-read here: a count taken after the step
+    # moves with the bug, so a doubled `record_step` would score 2 against 2 rows and pass.
+    assert out["reward"].item() == pytest.approx(1.0), (
+        f"the step returned {out['reward'].item()}, not reward_function's score of the 1 "
+        f"row that existed when it was called; 0.0 is either the placeholder or a reward "
+        f"computed before `record_step` wrote its row"
     )
-    assert env.history.rewards[-1] == pytest.approx(float(rows)), (
+    assert env.history.rewards[-1] == pytest.approx(1.0), (
         "history kept `record_step`'s 0.0 placeholder; the reward function reads this "
         "row on the NEXT step"
     )
@@ -4363,16 +4383,15 @@ def test_the_history_row_is_the_one_the_reward_function_scores(sltp):
 
 
 # binance ships [-1, 0, 1]; the other three ship [-1, -0.5, 0, 0.5, 1]. The venue axis is
-# NOT theatre here, though it is on every other test in this file: venues differ in DATA,
+# NOT theatre here, unlike elsewhere in this file: venues differ in DATA,
 # not only in code, and on binance a mutation flattening the level to its sign is a no-op.
-# It survived until this case existed.
+#
 @pytest.mark.parametrize("venue,want", [
     ("binance", 1), ("binance", -1), ("bitget", 0.5), ("bitget", -0.5),
 ], ids=["full-long", "full-short", "half-long", "half-short"])
 def test_the_plain_history_row_records_the_action_actually_traded(venue, want):
-    """`action` in the history row is what the reward function scores.
-
-    Flipping its sign in the shared plain `_step` fails ZERO tests.
+    """`action` in the history row is what the reward function scores -- the LEVEL, not
+    its sign.
     """
     env, _ = _real_futures_env(budget=0, venue=venue)
     # Index by value, not position: the action_levels lists differ in length.
@@ -4384,10 +4403,6 @@ def test_the_plain_history_row_records_the_action_actually_traded(venue, want):
     assert recorded == pytest.approx(float(want)), (
         f"the row recorded {recorded} rather than the action level {float(want)} actually "
         f"traded; a sign-only check passes on a halved or a flattened level"
-    )
-    assert recorded * want > 0, (
-        f"a {'long' if want > 0 else 'short'} action recorded {recorded} in the history "
-        f"row the reward function reads"
     )
 
 
@@ -4407,8 +4422,7 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
     The `setup:` assertion is not ceremony. The scenario is armed by a one-shot flag
     flipped inside `_wait_for_next_timestamp`; delete that call from the shared `_step`
     and the flag never flips, the post-bar mark never fails, the fallback never runs --
-    and without this assertion the test still passed. A test whose subject can vanish
-    while it stays green has to check that its own scenario happened.
+    and without this assertion the test still passed.
     """
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=sltp)
     td = env.reset()

@@ -631,7 +631,9 @@ def _sole(module, suffix):
     """
     found = [
         v for k, v in vars(module).items()
-        if k.endswith(suffix) and getattr(v, "__module__", None) == module.__name__
+        if isinstance(v, type)          # `__module__` resolves through the class, so a
+        and k.endswith(suffix)          # module-level INSTANCE would otherwise qualify
+        and getattr(v, "__module__", None) == module.__name__
     ]
     assert len(found) == 1, (
         f"{module.__name__} defines {len(found)} classes ending in {suffix!r} "
