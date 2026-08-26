@@ -29,7 +29,6 @@ from torchtrade.envs.core.state import (
     advance_hold_counter,
     position_direction_from_status,
     position_qty_from_status,
-    PositionState,
 )
 from torchtrade.envs.utils.liquidation import (
     isolated_liquidation_price,

@@ -114,11 +114,10 @@ def test_every_futures_step_reads_state_through_the_halting_helper(exchange, mod
     import importlib
     import inspect
 
-    ns = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}").__dict__
-    env_cls = next(v for k, v in ns.items()
-                   if inspect.isclass(v) and k.endswith("TorchTradingEnv")
-                   and v.__module__.endswith(module))
-    source = inspect.getsource(env_cls._step)
+    from tests.envs.test_live_env_base import _sole
+
+    mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
+    source = inspect.getsource(_sole(mod, "TorchTradingEnv")._step)
 
     assert "_acquire_post_bar_state()" in source, f"{exchange}/{module} bypasses the halt"
     assert "self._get_observation()" not in source, f"{exchange}/{module} reads directly"
@@ -129,19 +128,16 @@ def test_every_futures_step_reads_state_through_the_halting_helper(exchange, mod
 def test_every_futures_config_coerces_its_failure_policy(exchange, module):
     """A bad policy string must be rejected at the boundary, not in production.
 
-    The `__module__` filter matches the env_cls discovery above and is load-bearing: the
-    SLTP configs now import their shared base into the module namespace, and without it
-    `next()` returns that base for all four venues -- so this test silently stopped
+    `_sole`'s `__module__` filter is load-bearing here: the SLTP configs import their
+    shared base into the module namespace, and without it this test silently stopped
     exercising the subclass coercion it exists to pin (#288 review).
     """
     import importlib
-    import inspect
 
-    ns = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}").__dict__
-    cfg_cls = next(v for k, v in ns.items()
-                   if inspect.isclass(v) and k.endswith("Config")
-                   and hasattr(v, "observation_failure_policy")
-                   and v.__module__.endswith(module))
+    from tests.envs.test_live_env_base import _sole
+
+    mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
+    cfg_cls = _sole(mod, "Config")
 
     assert cfg_cls().observation_failure_policy is ObservationFailurePolicy.HALT
     assert cfg_cls(observation_failure_policy="flatten").observation_failure_policy is (
