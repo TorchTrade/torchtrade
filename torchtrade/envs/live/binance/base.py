@@ -2,6 +2,7 @@
 
 from typing import Callable, Optional
 
+from .order_executor import TAKER_FEE
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
@@ -14,6 +15,12 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     TorchTradeFuturesLiveEnv. See `ACCOUNT_STATE` on TorchTradeLiveEnv for the observation
     contract, and `_trader_kwargs` below for what is genuinely Binance-specific.
     """
+
+    # On the BASE, not the plain leaf: the SLTP sibling's MRO runs
+    # SLTPMixin -> this class -> TorchTradeFuturesLiveEnv and never touches the
+    # plain leaf, so a fee set there resolves for half the classes that inherit
+    # the shared sizing and AttributeErrors for the other half.
+    TAKER_FEE = TAKER_FEE
 
 
     OBSERVER_CLS = BinanceObservationClass

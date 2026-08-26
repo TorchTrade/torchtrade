@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Callable
 import logging
@@ -14,7 +13,6 @@ from torchtrade.envs.core.live import (
 )
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
-    TAKER_FEE,
     BinanceFuturesOrderClass,
     MarginMode,
 )
@@ -22,8 +20,6 @@ from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
 from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
     build_default_action_levels,
-    calculate_fractional_position,
-    PositionCalculationParams,
 )
 
 
@@ -123,7 +119,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
      leverage, distance_to_liquidation]
     """
 
-    TAKER_FEE = TAKER_FEE   # venue-specific; the shared sizing reads self.TAKER_FEE
 
     def __init__(
         self,

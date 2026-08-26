@@ -1,5 +1,4 @@
 """OKX Futures TorchRL trading environment with fractional position sizing."""
-import math
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
 
@@ -7,7 +6,6 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import (
-    TAKER_FEE,
     OKXFuturesOrderClass,
     MarginMode,
     PositionMode,
@@ -19,8 +17,6 @@ from torchtrade.envs.core.live import (
 )
 from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
-    calculate_fractional_position,
-    PositionCalculationParams,
 )
 
 
@@ -92,7 +88,6 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
     Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
     """
 
-    TAKER_FEE = TAKER_FEE   # venue-specific; the shared sizing reads self.TAKER_FEE
 
     def __init__(
         self,

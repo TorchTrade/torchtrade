@@ -1938,6 +1938,54 @@ def test_alpaca_sizing_refuses_a_non_finite_position_quantity():
     assert submitted == [], f"an order was submitted from a NaN quantity: {submitted}"
 
 
+@pytest.mark.parametrize("balance", [0.0, -5.0, float("nan"), float("inf")],
+                         ids=["zero", "negative", "nan", "inf"])
+def test_an_unusable_balance_cannot_size_a_trade(balance):
+    """The guard BEHAVIOURALLY. Its sibling below only greps the source for two strings.
+
+    Four mutations kept both grep strings intact and passed:
+      `isfinite(x) and x <= 0`   NaN and +inf now size a trade -- this IS #277
+      `x <= 0` -> `x < 0`        ZERO equity accepted, which is what a venue reports
+                                 while liquidating you -- the moment the comment on the
+                                 guard says is the worst one to keep trading through
+      `raise` -> `logger.warning` nothing is ever rejected
+      guard hoisted out of the closure   the #295 regression, named in that same comment
+
+    Raising LiveObservationHalt rather than ValueError is the third and fourth of those:
+    `_halting` converts the ValueError only if it is raised INSIDE the closure it wraps.
+    A guard hoisted one frame up sends a bare ValueError out of `_step`.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance")
+    trader.get_account_balance.return_value = {
+        "available_balance": balance, "total_margin_balance": balance,
+        "total_wallet_balance": balance, "total_maintenance_margin": 0.0,
+    }
+    with pytest.raises(LiveObservationHalt):
+        env._calculate_fractional_position(1.0, 100.0)
+
+
+def test_the_sizing_uses_the_whole_portfolio_not_the_free_margin():
+    """total_margin_balance, not available_balance.
+
+    available_balance shrinks as positions grow, so a held action=1.0 re-sized against it
+    buys again every bar. A `.get("available_balance", total)` fallback survives every
+    other test in this file: with the two values equal in the fixture, nothing can tell
+    which one was read.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance")
+    trader.get_account_balance.return_value = {
+        "available_balance": 1_000.0,          # what is free right now
+        "total_margin_balance": 10_000.0,      # what the portfolio is worth
+        "total_wallet_balance": 10_000.0, "total_maintenance_margin": 0.0,
+    }
+    _, notional, _ = env._calculate_fractional_position(1.0, 100.0)
+
+    assert notional > 5_000.0, (
+        f"sized a notional of {notional:.2f} against a 10,000 portfolio: that is the free "
+        f"margin, and sizing against it makes a held position re-buy every bar"
+    )
+
+
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
 def test_futures_sizing_rejects_a_non_finite_balance(exchange):
     """`not (x > 0)` catches NaN but passes +inf, and these four lines are this PR's own.
@@ -4193,6 +4241,10 @@ _SHARED_METHOD_OWNERSHIP = [
     *((c, TorchTradeLiveEnv, "_record_and_score") for c in STEPPING_ENVS),
     *((c, TorchTradeFuturesLiveEnv, m)
       for c in PLAIN_FUTURES_ENVS for m in ("_step", "_reset")),
+    # binance is absent by design: it EXTENDS the sizing via super() (min-notional refusal
+    # and target rounding), which its own behavioural test pins.
+    *((c, TorchTradeFuturesLiveEnv, "_calculate_fractional_position")
+      for c in PLAIN_FUTURES_ENVS if c.__module__.split(".")[-2] != "binance"),
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
         "_step", "_reset", "_resolve_action_tuple", "_record_sltp_position",
         "_reset_sltp_state",
@@ -4206,30 +4258,13 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("TorchTradeLiveEnv", "_record_and_score"),
     ("TorchTradeFuturesLiveEnv", "_step"),
     ("TorchTradeFuturesLiveEnv", "_reset"),
+    ("TorchTradeFuturesLiveEnv", "_calculate_fractional_position"),
     ("SLTPMixin", "_step"),
     ("SLTPMixin", "_reset"),
     ("SLTPMixin", "_resolve_action_tuple"),
     ("SLTPMixin", "_record_sltp_position"),
     ("SLTPMixin", "_reset_sltp_state"),
 }
-
-
-# bitget/bybit/okx inherit the shared sizing; binance extends it. Same split shape as the
-# dispatch hook below, and guarded the same way: identity for the inheritors, behaviour for
-# the extender.
-_SIZING_INHERITORS = [c for c in PLAIN_FUTURES_ENVS
-                      if c.__module__.split(".")[-2] != "binance"]
-assert len(_SIZING_INHERITORS) == 3
-
-
-@pytest.mark.parametrize("cls", _SIZING_INHERITORS, ids=lambda c: c.__name__)
-def test_the_sizing_inheritors_do_not_refork_it(cls):
-    """Three of the four bodies were byte-identical; only binance had a reason to differ."""
-    assert (cls._calculate_fractional_position
-            is TorchTradeFuturesLiveEnv._calculate_fractional_position), (
-        f"{cls.__name__} re-forks _calculate_fractional_position; only binance extends it "
-        f"(min-notional refusal and target rounding), and it does so via super()"
-    )
 
 
 def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
@@ -4262,17 +4297,35 @@ def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
 
     env._get_min_notional = lambda: 0.0
     env.trader.round_quantity.side_effect = lambda q: 0.123456
-    size, _, _ = env._calculate_fractional_position(1.0, 100.0)
-    assert abs(size) == pytest.approx(0.123456), (
-        f"binance sized {size} rather than the executor's rounded quantity; an unrounded "
-        f"target is rejected by the venue's lot-size filter (#271)"
-    )
+    # Signed, and both directions. `abs(size)` discarded precisely the expression under
+    # test -- `position_qty * (1 if position_size > 0 else -1)` -- and only long was run,
+    # so the short branch was never entered at all.
+    for action, expected in ((1.0, 0.123456), (-1.0, -0.123456)):
+        size, _, _ = env._calculate_fractional_position(action, 100.0)
+        assert size == pytest.approx(expected), (
+            f"binance sized {size} for action {action}, not the executor's rounded "
+            f"quantity with the direction re-applied (#271)"
+        )
 
 
-@pytest.mark.parametrize("venue,fee", [
-    ("binance", 0.0004), ("bitget", 0.0006), ("bybit", 0.00055), ("okx", 0.0005),
-])
-def test_each_venue_keeps_its_own_taker_fee(venue, fee):
+# BOTH module axes. The plain and SLTP classes are siblings, not parent and child -- the
+# SLTP MRO runs SLTPMixin -> <Venue>Base -> TorchTradeFuturesLiveEnv and never touches the
+# plain leaf. Setting the fee on the leaf resolved it for four of the eight classes that
+# inherit the shared sizing and AttributeError'd for the other four, and every test I wrote
+# for the fee iterated the plain list only.
+# Derived from the registry and pinned by NAME, so a fifth venue fails here rather than
+# on its first live trade. The values stay literal: the failure being guarded is every
+# venue reading ONE fee, which a derived expected value would reproduce.
+_EXPECTED_TAKER_FEES = {
+    "binance": 0.0004, "bitget": 0.0006, "bybit": 0.00055, "okx": 0.0005,
+}
+assert set(_EXPECTED_TAKER_FEES) == {c.__module__.split(".")[-2]
+                                     for c in PLAIN_FUTURES_ENVS}
+
+
+@pytest.mark.parametrize("module", ["env", "env_sltp"])
+@pytest.mark.parametrize("venue,fee", sorted(_EXPECTED_TAKER_FEES.items()))
+def test_each_venue_keeps_its_own_taker_fee(venue, fee, module):
     """The four sizing bodies were byte-identical TEXT and not identical BEHAVIOUR.
 
     `TAKER_FEE` resolved to a different value in each module, so folding them without
@@ -4281,12 +4334,51 @@ def test_each_venue_keeps_its_own_taker_fee(venue, fee):
     apart. Pinned by VALUE, because the failure mode is one shared constant that looks
     right on the venue you happen to test.
     """
-    cls = _sole(importlib.import_module(f"torchtrade.envs.live.{venue}.env"),
+    cls = _sole(importlib.import_module(f"torchtrade.envs.live.{venue}.{module}"),
                 "TorchTradingEnv")
-    assert cls.TAKER_FEE == pytest.approx(fee), (
-        f"{venue}'s taker fee is {cls.TAKER_FEE}, not {fee}; every venue reading one "
-        f"fee is what a careless fold of the sizing bodies would produce"
+    assert getattr(cls, "TAKER_FEE", None) == pytest.approx(fee), (
+        f"{cls.__name__}'s taker fee is {getattr(cls, 'TAKER_FEE', None)}, not {fee}; "
+        f"every venue reading one fee is what a careless fold of the sizing bodies would "
+        f"produce, and a fee only the plain sibling can see is what a careless fix does"
     )
+
+
+@pytest.mark.parametrize("cls", PLAIN_FUTURES_ENVS + SLTP_FUTURES_ENVS,
+                         ids=lambda c: c.__name__)
+def test_every_class_that_inherits_the_shared_sizing_can_run_it(cls):
+    """Resolving `self.TAKER_FEE` is not enough -- the method has to actually execute.
+
+    The SLTP classes inherit `_calculate_fractional_position` from the futures base while
+    the fee sat on the plain leaf, so calling it raised AttributeError mid-sizing. Nothing
+    reached it yet, which is exactly why no test noticed: a landmine rather than a bug.
+    """
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(leverage=10)
+    env.trader = MagicMock()
+    env.trader.get_account_balance.return_value = {"total_margin_balance": 10_000.0}
+    env.trader.round_quantity.side_effect = lambda q: round(float(q), 3)
+    env._halting = lambda read, cache_key=None: read()
+    env._get_min_notional = lambda: 0.0
+
+    size, notional, side = env._calculate_fractional_position(1.0, 100.0)
+
+    assert side == "long" and size > 0 and notional > 0, (
+        f"{cls.__name__} inherits the shared sizing but produced {(size, notional, side)}"
+    )
+
+
+def test_a_venue_without_a_taker_fee_fails_at_construction():
+    """Boundary, not rule. Without this the failure is an AttributeError raised the first
+    time a nonzero action is sized -- mid-`_step`, with a position possibly already open.
+    """
+    # Everything the tail touches AFTER the check, so the TypeError is what fails rather
+    # than the first missing attribute. A venue that forgets the fee has a real config.
+    env = SimpleNamespace(
+        config=SimpleNamespace(execute_on="1m", close_position_on_init=False),
+        trader=MagicMock(),
+    )
+    with pytest.raises(TypeError, match="does not set TAKER_FEE"):
+        TorchTradeFuturesLiveEnv._finish_futures_init(env)
 
 
 def test_the_sizing_reserves_the_maintenance_margin_buffer():

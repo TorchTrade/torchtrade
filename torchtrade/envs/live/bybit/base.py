@@ -2,6 +2,7 @@
 
 from typing import Callable, Optional
 
+from .order_executor import TAKER_FEE
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
@@ -13,6 +14,12 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     reuses the trader's session, which is why TRADER_FIRST is set here. `ACCOUNT_STATE` on
     TorchTradeLiveEnv is the observation contract.
     """
+
+    # On the BASE, not the plain leaf: the SLTP sibling's MRO runs
+    # SLTPMixin -> this class -> TorchTradeFuturesLiveEnv and never touches the
+    # plain leaf, so a fee set there resolves for half the classes that inherit
+    # the shared sizing and AttributeErrors for the other half.
+    TAKER_FEE = TAKER_FEE
 
 
     OBSERVER_CLS = BybitObservationClass

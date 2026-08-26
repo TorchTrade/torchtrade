@@ -2,6 +2,7 @@
 
 from typing import Callable, Optional
 
+from .order_executor import TAKER_FEE
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
@@ -14,6 +15,12 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     comes from TorchTradeFuturesLiveEnv; `ACCOUNT_STATE` on TorchTradeLiveEnv is the
     observation contract.
     """
+
+    # On the BASE, not the plain leaf: the SLTP sibling's MRO runs
+    # SLTPMixin -> this class -> TorchTradeFuturesLiveEnv and never touches the
+    # plain leaf, so a fee set there resolves for half the classes that inherit
+    # the shared sizing and AttributeErrors for the other half.
+    TAKER_FEE = TAKER_FEE
 
 
     OBSERVER_CLS = BitgetObservationClass

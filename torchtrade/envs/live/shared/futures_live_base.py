@@ -220,6 +220,16 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         Ordering is load-bearing and was identical in all four: flatten before the
         baseline, so the baseline is the balance the episode actually starts from.
         """
+        # At the boundary, not in the sizing rule. `TAKER_FEE: float` on this class is a
+        # bare annotation and creates no attribute, so a venue that forgets it would
+        # otherwise raise the first time it sizes a nonzero action -- mid-`_step`, with a
+        # position possibly already open.
+        if not hasattr(self, "TAKER_FEE"):
+            raise TypeError(
+                f"{type(self).__name__} does not set TAKER_FEE; the shared fractional "
+                f"sizing reads it, and the venues' fees differ"
+            )
+
         self.execute_on = self.config.execute_on
 
         self.trader.cancel_open_orders()

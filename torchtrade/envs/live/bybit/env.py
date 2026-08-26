@@ -1,5 +1,4 @@
 """Bybit Futures TorchRL trading environment with fractional position sizing."""
-import math
 
 from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
@@ -9,7 +8,6 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import (
-    TAKER_FEE,
     BybitFuturesOrderClass,
     MarginMode,
     PositionMode,
@@ -21,8 +19,6 @@ from torchtrade.envs.core.live import (
 )
 from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
-    calculate_fractional_position,
-    PositionCalculationParams,
 )
 
 
@@ -94,7 +90,6 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
     """
 
-    TAKER_FEE = TAKER_FEE   # venue-specific; the shared sizing reads self.TAKER_FEE
 
     def __init__(
         self,

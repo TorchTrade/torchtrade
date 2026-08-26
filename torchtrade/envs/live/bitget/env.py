@@ -1,4 +1,3 @@
-import math
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
 
@@ -6,7 +5,6 @@ from torchrl.data import Categorical
 
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
-    TAKER_FEE,
     BitgetFuturesOrderClass,
     MarginMode,
     PositionMode,
@@ -18,8 +16,6 @@ from torchtrade.envs.core.live import (
 )
 from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
-    calculate_fractional_position,
-    PositionCalculationParams,
 )
 
 
@@ -116,7 +112,6 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
      leverage, distance_to_liquidation]
     """
 
-    TAKER_FEE = TAKER_FEE   # venue-specific; the shared sizing reads self.TAKER_FEE
 
     def __init__(
         self,
