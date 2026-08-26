@@ -650,7 +650,7 @@ def test_reading_a_field_off_an_unknown_status_says_why():
 # `test_position_sizing_refuses_an_unknown_status` lived here. It guarded an outage that
 # began BETWEEN the two get_status() calls inside one step -- a window #295 closed by
 # construction: the trade path now takes the qty `_acquire_pre_trade_state` already
-# resolved, so there is one status read per step and no second window to fall into.
+# resolved, so there is one PRE-TRADE status read and no second window to fall into.
 # `test_an_outage_stops_the_step_before_it_can_trade` below covers what remains.
 
 
@@ -4188,6 +4188,70 @@ _SHARED_METHOD_OWNERSHIP = [
         "_reset_sltp_state",
     )),
 ]
+# By NAME, not by count. Dropping `_reset` from the matrix above passed 936 tests: the
+# registry-length pins guard the ENV axis, and nothing guarded the METHOD axis. This also
+# says out loud what is meant to be shared, so adding a genuinely shared method is a
+# deliberate edit here rather than an arithmetic fix.
+assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHIP} == {
+    ("TorchTradeLiveEnv", "_record_and_score"),
+    ("TorchTradeFuturesLiveEnv", "_step"),
+    ("TorchTradeFuturesLiveEnv", "_reset"),
+    ("SLTPMixin", "_step"),
+    ("SLTPMixin", "_reset"),
+    ("SLTPMixin", "_resolve_action_tuple"),
+    ("SLTPMixin", "_record_sltp_position"),
+    ("SLTPMixin", "_reset_sltp_state"),
+}
+
+
+# binance and bitget take the mixin's `_dispatch_sltp_trade`; bybit and okx override it to
+# thread the price (#295). That split is intended, so the hook is out of the uniform table
+# above -- but "intended for two venues" is not "unguarded for the other two": a later
+# private override in binance or bitget would otherwise evade every guard in this file.
+_DISPATCH_INHERITORS = [c for c in SLTP_FUTURES_ENVS
+                        if c.__module__.split(".")[-2] in ("binance", "bitget")]
+_DISPATCH_OVERRIDERS = [c for c in SLTP_FUTURES_ENVS
+                        if c.__module__.split(".")[-2] in ("bybit", "okx")]
+assert len(_DISPATCH_INHERITORS) == len(_DISPATCH_OVERRIDERS) == 2
+
+
+@pytest.mark.parametrize("cls", _DISPATCH_INHERITORS, ids=lambda c: c.__name__)
+def test_the_dispatch_hook_is_inherited_where_it_is_not_deliberately_overridden(cls):
+    """The venue-variation hook is still owned, for the venues that do not vary.
+
+    bybit and okx override `_dispatch_sltp_trade` to pass the threaded price rather than
+    let the executor re-read it (#295). binance and bitget price their brackets off a
+    candle close and take the mixin's default -- so for them a private copy is a re-fork
+    like any other, and nothing said so.
+    """
+    assert cls._dispatch_sltp_trade is SLTPMixin._dispatch_sltp_trade, (
+        f"{cls.__name__} defines its own _dispatch_sltp_trade. Only bybit and okx have a "
+        f"reason to (the #295 threaded price); if this venue now needs one too, move it "
+        f"into _DISPATCH_OVERRIDERS deliberately rather than letting the hook drift"
+    )
+
+
+@pytest.mark.parametrize("cls", _DISPATCH_OVERRIDERS, ids=lambda c: c.__name__)
+def test_the_dispatch_overriders_thread_the_price_they_were_given(cls):
+    """And the two that DO override must consume the threaded price, not re-read it.
+
+    Excluding them from the ownership table costs the identity check; this replaces it
+    with what identity was standing in for.
+    """
+    call = next(
+        (n for n in ast.walk(ast.parse(
+            inspect.getsource(cls._dispatch_sltp_trade).lstrip()))
+         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+         and n.func.attr == "_execute_trade_if_needed"),
+        None,
+    )
+    assert call is not None, f"{cls.__name__}'s override never dispatches the trade"
+    assert any(kw.arg == "current_price" and isinstance(kw.value, ast.Name)
+               for kw in call.keywords), (
+        f"{cls.__name__} overrides _dispatch_sltp_trade but does not forward the threaded "
+        f"current_price -- the only reason the override exists (#295); re-reading it "
+        f"inside the trade path bypasses the halt policy"
+    )
 
 
 @pytest.mark.parametrize("cls,owner,method", _SHARED_METHOD_OWNERSHIP,
@@ -4322,7 +4386,12 @@ def test_a_reset_clears_the_bracket_on_the_shared_sltp_owner():
 
 
 def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
-    """#295: the trade uses the qty and price the pre-trade read acquired, not its own.
+    """#295: the shared `_step` FORWARDS the qty and price its pre-trade read acquired.
+
+    Scope, stated because the stub sets it: `_execute_trade_if_needed` is replaced here,
+    so this pins the shared CALLER -- what it threads, and that it does not read again.
+    It does not prove a venue's executor then uses those values rather than re-reading;
+    that is the venues' own contract, covered behaviourally by the SLTP grace-bar tests.
 
     `_execute_trade_if_needed` is NOT shared, so this contract belongs where the shared
     `_step` is owned rather than in one venue's file.

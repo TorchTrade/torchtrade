@@ -134,8 +134,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         The SLTP envs override this via SLTPMixin, which precedes this class in their MRO;
         alpaca does not inherit this class.
         """
-        # One status read per step: the trade below reuses this qty and price rather than
-        # fetching its own, so an outage cannot open a window between the two (#295).
+        # One PRE-TRADE status read: the trade below reuses this qty and price rather
+        # than fetching its own, so an outage cannot open a window between the read and
+        # the trade (#295). The post-bar read is a second, separate one.
         _, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
         self._sync_position_from_exchange(position_status)
