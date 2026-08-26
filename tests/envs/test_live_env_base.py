@@ -4259,7 +4259,8 @@ def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
 # plain leaf. Setting the fee on the leaf resolved it for four of the eight classes that
 # inherit the shared sizing and AttributeError'd for the other four, and every test I wrote
 # for the fee iterated the plain list only.
-def _sizing_stub(cls, *, leverage=10, balance=10_000.0, min_notional=0.0):
+def _sizing_stub(cls, *, leverage=10, balance=10_000.0, min_notional=0.0,
+                 stub_min_notional=True):
     """A futures env wired for `_calculate_fractional_position` and nothing else.
 
     `__new__` rather than a constructor: instantiating an EnvBase subclass runs venue
@@ -4272,7 +4273,10 @@ def _sizing_stub(cls, *, leverage=10, balance=10_000.0, min_notional=0.0):
     env.trader.get_account_balance.return_value = {"total_margin_balance": balance}
     env.trader.round_quantity.side_effect = lambda q: round(float(q), 3)
     env._halting = lambda read, cache_key=None: read()
-    env._get_min_notional = lambda: min_notional
+    # Optional: binance's flat branch is only observable when this is NOT stubbed, since
+    # the stub swallows the exchange-info round-trip that the branch exists to skip.
+    if stub_min_notional:
+        env._get_min_notional = lambda: min_notional
     return env
 
 
@@ -4324,23 +4328,28 @@ _GOLDEN_SIZINGS = [
 ]
 
 
-def test_a_flat_action_is_sized_without_touching_the_exchange():
+@pytest.mark.parametrize("cls", PLAIN_FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_a_flat_action_is_sized_without_touching_the_exchange(cls):
     """The `action_value == 0.0` short-circuit above the balance read.
 
-    It looks like a duplicate -- the four callers short-circuit first, and the free
-    function guards zero again underneath -- and has been proposed for deletion twice.
-    It is not a duplicate: without it a flat action performs a balance read, and against
-    an unusable balance raises instead of returning flat. That is the liquidation case
-    #295 exists for, and no other test reaches this method with a zero action.
+    Proposed for deletion twice as a duplicate of the guards on either side of it. It is
+    not a duplicate -- without it a flat action performs a balance read and raises on an
+    unusable balance rather than returning flat -- but the honest scope is narrower than
+    I first claimed: all four callers pre-filter zero before calling, so NO production
+    path reaches this today. It is defence against a caller that stops pre-filtering, and
+    this test is the only thing that currently exercises it.
     """
-    cls = _sole(importlib.import_module("torchtrade.envs.live.bybit.env"),
-                "TorchTradingEnv")
-    env = _sizing_stub(cls, balance=float("nan"))
+    # `_get_min_notional` unstubbed, and EVERY trader call counted -- not just the balance
+    # read. Stubbing it hid binance's own flat branch: deleting that early return sends a
+    # `futures_exchange_info()` call down the one path this test exists to keep
+    # exchange-free, and a balance-only assertion passed straight through it.
+    env = _sizing_stub(cls, balance=float("nan"), stub_min_notional=False)
 
     assert env._calculate_fractional_position(0.0, 100.0) == (0.0, 0.0, "flat")
-    assert not env.trader.get_account_balance.called, (
-        "a flat action read the exchange balance; with an unusable balance that raises "
-        "rather than returning flat"
+    assert env.trader.mock_calls == [], (
+        f"a flat action called the exchange: {env.trader.mock_calls}. It must need "
+        f"nothing from the venue -- an unusable balance would raise instead of returning "
+        f"flat, and a min-notional lookup is an unhalted round-trip"
     )
 
 

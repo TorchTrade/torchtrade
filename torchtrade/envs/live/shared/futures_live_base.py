@@ -172,6 +172,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     ) -> tuple[float, float, str]:
         """Target position size from a fractional action, for all four futures venues.
         """
+        # Above the balance read on purpose: a flat action must not need the exchange.
+        # No caller reaches this today -- all four pre-filter zero -- so it guards a
+        # caller that stops doing so, not a live path.
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
 
