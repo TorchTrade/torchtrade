@@ -149,9 +149,8 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         self._wait_for_next_timestamp()
 
         new_portfolio_value, new_price, new_qty, next_tensordict = self._acquire_post_bar_state()
-        # None when the account is flat: there is no position mark to read, and fetching
-        # one would add a round-trip that can halt the episode. The pre-trade price is the
-        # honest fallback -- flat rows carry no PnL anyway.
+        # None when the account is flat: no position mark to read. `_acquire_post_bar_state`
+        # argues the rest.
         new_price = new_price if new_price is not None else current_price
 
         # History FIRST: the reward function reads it.

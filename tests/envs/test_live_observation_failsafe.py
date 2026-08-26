@@ -1,6 +1,7 @@
 """#343: a live env that cannot read its own account state must halt, not improvise."""
 
 import pytest
+from tests.envs.base_exchange_tests import _sole
 from types import SimpleNamespace
 
 from torchtrade.envs.core.live import (
@@ -114,8 +115,6 @@ def test_every_futures_step_reads_state_through_the_halting_helper(exchange, mod
     import importlib
     import inspect
 
-    from tests.envs.test_live_env_base import _sole
-
     mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
     source = inspect.getsource(_sole(mod, "TorchTradingEnv")._step)
 
@@ -133,8 +132,6 @@ def test_every_futures_config_coerces_its_failure_policy(exchange, module):
     exercising the subclass coercion it exists to pin (#288 review).
     """
     import importlib
-
-    from tests.envs.test_live_env_base import _sole
 
     mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
     cfg_cls = _sole(mod, "Config")
@@ -168,8 +165,6 @@ def _real_futures_env(budget, venue="binance", sltp=False, position_status=None,
         f"torchtrade.envs.live.{venue}.env_sltp" if sltp
         else f"torchtrade.envs.live.{venue}.env"
     )
-    from tests.envs.test_live_env_base import _sole
-
     Env = _sole(module, "TorchTradingEnv")
     Config = _sole(module, "TradingEnvConfig")
 

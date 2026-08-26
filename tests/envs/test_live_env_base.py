@@ -43,6 +43,9 @@ from torchtrade.envs.utils.liquidation import (
     isolated_liquidation_price,
 )
 from tests.envs.base_exchange_tests import wire_outage_state
+from tests.envs.test_live_observation_failsafe import _real_futures_env
+from torchtrade.envs.core.common_types import PositionStatus
+from tests.envs.base_exchange_tests import _sole
 from torchtrade.envs.core.state import (
     POSITION_UNKNOWN,
     PositionState,
@@ -79,7 +82,7 @@ FUTURES_ENVS = [
     if issubclass(c, TorchTradeFuturesLiveEnv) and c is not TorchTradeFuturesLiveEnv
 ]
 
-# Split by module. Preferred over scanning a module namespace -- see `_sole` below.
+# Split by module.
 PLAIN_FUTURES_ENVS = [c for c in FUTURES_ENVS if c.__module__.endswith(".env")]
 SLTP_FUTURES_ENVS = [c for c in FUTURES_ENVS if c.__module__.endswith(".env_sltp")]
 # 4 -> 3 is the hazard: an EMPTY list is already a collection error (pyproject sets
@@ -87,22 +90,6 @@ SLTP_FUTURES_ENVS = [c for c in FUTURES_ENVS if c.__module__.endswith(".env_sltp
 assert len(PLAIN_FUTURES_ENVS) == len(SLTP_FUTURES_ENVS) == 4
 
 
-def _sole(module, suffix):
-    """The ONE class in `module` whose name ends in `suffix`.
-
-    Not `next(...)`, which returns the first match in DEFINITION order: a decoy declared
-    above the real class silently becomes the subject, and a guard then passes green on a
-    class nobody meant to check.
-    """
-    found = [
-        v for k, v in vars(module).items()
-        if k.endswith(suffix) and getattr(v, "__module__", None) == module.__name__
-    ]
-    assert len(found) == 1, (
-        f"{module.__name__} defines {len(found)} classes ending in {suffix!r} "
-        f"({[c.__name__ for c in found]}); the guard would have silently picked the first"
-    )
-    return found[0]
 
 
 @pytest.mark.parametrize("done_on_bankruptcy,portfolio_value,expected", [
@@ -4180,25 +4167,38 @@ def test_dependency_injection_still_skips_construction_entirely():
 # the mixin's (no futures pre-trade acquisition, no mark). It overrides `_step` on purpose
 # and inherits `_reset`, which IS identical. Deleting alpaca's `_step` as "redundant"
 # would hand a spot env the futures step.
-@pytest.mark.parametrize("method", ["_step", "_reset"])
-@pytest.mark.parametrize("cls,owner", [
-    *((c, TorchTradeFuturesLiveEnv) for c in PLAIN_FUTURES_ENVS),
-    *((c, SLTPMixin) for c in SLTP_FUTURES_ENVS),
-], ids=[c.__name__ for c in PLAIN_FUTURES_ENVS + SLTP_FUTURES_ENVS])
+# Per OWNER, because the two own different method sets. The SLTP callees were unguarded:
+# a byte-identical copy of `_record_sltp_position` on one venue passed the whole suite.
+#
+# `_dispatch_sltp_trade` is deliberately ABSENT. It is the venue-variation hook -- its own
+# docstring calls it "the ONE thing `_step` varies by venue" -- and bybit and okx really do
+# override it, to thread the price rather than re-read it (#295). Guarding it would demand
+# a fold of the one method that exists not to be folded. Adding it here failed exactly
+# those two venues, which is how I found out.
+_SHARED_METHOD_OWNERSHIP = [
+    *((c, TorchTradeFuturesLiveEnv, m)
+      for c in PLAIN_FUTURES_ENVS for m in ("_step", "_reset")),
+    *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
+        "_step", "_reset", "_resolve_action_tuple", "_record_sltp_position",
+        "_reset_sltp_state",
+    )),
+]
+assert len(_SHARED_METHOD_OWNERSHIP) == 4 * 2 + 4 * 5
+
+
+@pytest.mark.parametrize("cls,owner,method", _SHARED_METHOD_OWNERSHIP,
+                         ids=[f"{c.__name__}-{m}" for c, _, m in _SHARED_METHOD_OWNERSHIP])
 def test_no_futures_env_reforks_a_shared_step_or_reset(cls, owner, method):
     """#288 folded eight `_step`/`_reset` copies onto two owners. Nothing noticed when one
     of them did not fold.
 
-    Reverting bybit's file mid-way through mutation testing left it with private copies and
-    the suite stayed green -- of course it did, the copy still worked. An incomplete fold is
-    invisible behaviourally, right up until a fix lands on the shared copy and bybit does
-    not get it.
+    An incomplete fold is invisible behaviourally, right up until a fix lands on the
+    shared copy and one venue does not get it.
 
-    Identity against the owner, not `"_step" not in vars(cls)`. The two are equivalent
-    today only because SLTPMixin sits directly after the class in the MRO -- I checked,
-    there is nothing between them. Insert one intermediate base and absence-from-the-
-    subclass starts passing on a copy that really does shadow the owner; identity does not
-    care where in the MRO the copy is planted.
+    Identity against the owner, not `"_step" not in vars(cls)`: those are equivalent only
+    while SLTPMixin sits directly after the class in the MRO. Insert one intermediate base
+    and absence-from-the-subclass starts passing on a copy that really does shadow the
+    owner; identity does not care where the copy is planted.
     """
     assert getattr(cls, method) is getattr(owner, method), (
         f"{cls.__name__}.{method} resolves to {getattr(cls, method).__qualname__} rather "
@@ -4251,8 +4251,6 @@ def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
     action is.
     """
     import torch
-    from tests.envs.test_live_observation_failsafe import _real_futures_env
-
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
     td = env.reset()
 
@@ -4267,43 +4265,60 @@ def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
     )
 
 
-# The venue names behind the registry, so a fifth exchange joins these tests on its own.
-PLAIN_VENUES = [c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS]
+def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
+    """#295: one status read per step, threaded into the trade -- not re-read.
+
+    Zeroing `current_qty` survives BOTH contract files. Across the whole suite it dies to
+    exactly one test, in bitget's venue file, incidentally. That is the wrong home for it:
+    `_execute_trade_if_needed` is NOT shared, so the "command flat, close a position the
+    env did not open" path runs through venue-specific code on all four venues and is
+    exercised on one. The contract belongs where the shared `_step` is owned.
+
+    Re-reading instead of threading is what let an outage open a window between the two
+    reads, which is the whole of #295; a zeroed qty makes the executor believe it is flat
+    and re-open a position it already holds.
+    """
+    open_long = PositionStatus(
+        qty=0.05, notional_value=6000.0, entry_price=100.0, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=100.0, leverage=10,
+        margin_mode="isolated", liquidation_price=91.0,
+    )
+    env, trader = _real_futures_env(budget=0, venue="binance", position_status=open_long)
+
+    seen = {}
+    env._execute_trade_if_needed = lambda action, **kw: (
+        seen.update(kw), {"executed": False}
+    )[1]
+
+    td = env.reset()
+    env.step(td.set("action", torch.tensor(0)))
+
+    assert seen.get("current_qty") == pytest.approx(0.05), (
+        f"the trade was handed current_qty={seen.get('current_qty')!r} rather than the "
+        f"0.05 the pre-trade read acquired; 0.0 reads as flat and re-opens the position"
+    )
+    assert seen.get("current_price") == pytest.approx(100.0), (
+        f"the trade was handed current_price={seen.get('current_price')!r} rather than "
+        f"the price the pre-trade read acquired under the halt policy (#295)"
+    )
 
 
 @pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
 def test_the_history_row_is_the_one_the_reward_function_scores(sltp):
-    """Five contracts of the shared `_step` that failed ZERO tests between them.
+    """The history row the reward function scores. Each assertion below kills a mutation
+    of the shared `_step` that failed zero tests.
 
-    Everything here is read back out of `history` -- by the reward function on the next
-    step, and by every analysis of the episode after it:
+    Parametrised on plain vs SLTP, NOT on venue: the two owners hold SEPARATE copies of
+    the record-then-overwrite tail, while the four venues within each share one function
+    object and die to the same mutation identically.
 
-      reward -> 0.0                      the placeholder `record_step` writes
-      drop `history.rewards[-1] = ...`   same, one line later
-      reward computed BEFORE record_step it then scores a one-bar-stale history: the
-                                         reward at t belongs to the action at t-1 (#278)
-      price=current_price                the PRE-trade bar, against a post-bar PV
-      position=position_size             the PRE-trade qty, so an opening row reads flat
+    ONE step, not two: the pre/post price asymmetry below is armed once, so by step two
+    both reads return the post-bar value and the price and qty assertions stop
+    discriminating.
 
-    Parametrised on plain vs SLTP, NOT on venue. `TorchTradeFuturesLiveEnv._step` and
-    `SLTPMixin._step` hold SEPARATE copies of the record-then-overwrite tail, so each
-    needs its own pin; the four venues within each share one function object, and
-    mutating it fails all four identically. Which venue resolves to which owner is the
-    re-fork guard's job, not this one's.
-
-    ONE step, not two. `reward_function` counts the history, so a reward computed before
-    `record_step` scores 0 rows instead of 1 -- indistinguishable from the placeholder by
-    VALUE, but both are caught, which is what the assertion is for. A second step would
-    make them distinguishable and silently kill the price and qty assertions instead: the
-    pre/post asymmetry below is armed once, so by step two both reads return the post-bar
-    values and `price=current_price` becomes identical to `price=new_price`. I wrote the
-    two-step version first and the two mutations survived it.
-
-    NOT covered here, and still unpinned: alpaca keeps its own two copies of this tail
+    Not covered here: alpaca keeps its own two copies of this tail
     (`live/alpaca/env.py`, `live/alpaca/env_sltp.py`) -- outside this fold.
     """
-    from tests.envs.test_live_observation_failsafe import _real_futures_env
-    from torchtrade.envs.core.common_types import PositionStatus
 
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=sltp)
     env.reward_function = lambda history: float(len(history.actions))
@@ -4343,56 +4358,70 @@ def test_the_history_row_is_the_one_the_reward_function_scores(sltp):
         "portfolio_value[t] from a different bar (#278)"
     )
     assert env.history.positions[-1] == pytest.approx(0.05), (
-        "the opening row records the pre-trade qty, so it reads flat"
+        "the row records the pre-trade qty, so a position held across the bar reads flat"
     )
 
 
-@pytest.mark.parametrize("want,expected_sign", [(1, 1.0), (-1, -1.0)],
-                         ids=["full-long", "full-short"])
-def test_the_plain_history_row_records_the_action_actually_traded(want, expected_sign):
+# binance ships [-1, 0, 1]; the other three ship [-1, -0.5, 0, 0.5, 1]. The venue axis is
+# NOT theatre here, though it is on every other test in this file: venues differ in DATA,
+# not only in code, and on binance a mutation flattening the level to its sign is a no-op.
+# It survived until this case existed.
+@pytest.mark.parametrize("venue,want", [
+    ("binance", 1), ("binance", -1), ("bitget", 0.5), ("bitget", -0.5),
+], ids=["full-long", "full-short", "half-long", "half-short"])
+def test_the_plain_history_row_records_the_action_actually_traded(venue, want):
     """`action` in the history row is what the reward function scores.
 
     Flipping its sign in the shared plain `_step` fails ZERO tests.
     """
-    from tests.envs.test_live_observation_failsafe import _real_futures_env
-
-    env, _ = _real_futures_env(budget=0, venue="binance")
-    # By VALUE: binance ships [-1, 0, 1] and the others [-1, -0.5, 0, 0.5, 1], so a
-    # hardcoded index means a different position size per venue.
+    env, _ = _real_futures_env(budget=0, venue=venue)
+    # Index by value, not position: the action_levels lists differ in length.
     action = env.action_levels.index(want)
     td = env.reset()
     env.step(td.set("action", torch.tensor(action)))
 
     recorded = env.history.actions[-1]
-    assert recorded * expected_sign > 0, (
-        f"a {'long' if expected_sign > 0 else 'short'} action recorded "
-        f"{recorded} in the history row the reward function reads"
+    assert recorded == pytest.approx(float(want)), (
+        f"the row recorded {recorded} rather than the action level {float(want)} actually "
+        f"traded; a sign-only check passes on a halved or a flattened level"
+    )
+    assert recorded * want > 0, (
+        f"a {'long' if want > 0 else 'short'} action recorded {recorded} in the history "
+        f"row the reward function reads"
     )
 
 
 @pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
 def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
-    """`new_price = new_price if new_price is not None else current_price`.
+    """A flat bar has no post-bar mark; the row must carry the pre-trade price.
 
     `_acquire_post_bar_state` returns None for the mark when the account is flat -- there
     is no position to read one from. Dropping the fallback feeds None into
     `history.record_step(price=...)`, and every downstream reader of that row gets it.
-    """
-    from tests.envs.test_live_observation_failsafe import _real_futures_env
 
+    137.0, not the fixture's 100.0: `_real_futures_env` also fills `base_features` with
+    100.0, so asserting 100.0 could not tell the pre-trade MARK from the observer's close
+    -- and the close is the plausible wrong implementation, since the SLTP path prices its
+    brackets off exactly that.
+
+    The `setup:` assertion is not ceremony. The scenario is armed by a one-shot flag
+    flipped inside `_wait_for_next_timestamp`; delete that call from the shared `_step`
+    and the flag never flips, the post-bar mark never fails, the fallback never runs --
+    and without this assertion the test still passed. A test whose subject can vanish
+    while it stays green has to check that its own scenario happened.
+    """
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=sltp)
     td = env.reset()
 
-    # The mark goes unavailable only for the POST-bar read: the pre-trade read must
-    # succeed, or the step halts before it ever reaches the fallback. That asymmetry is
-    # the whole scenario -- a flat account has no position mark to read, and the post-bar
-    # fetch is deliberately allowed to fail rather than halt an episode over a label.
-    state = {"traded": False}
+    # The mark fails only for the POST-bar read: the pre-trade read must succeed, or the
+    # step halts before it ever reaches the fallback.
+    state = {"traded": False, "post_bar_failed": False}
 
     def mark():
         if state["traded"]:
+            state["post_bar_failed"] = True
             raise RuntimeError("post-bar mark unavailable")
-        return 100.0
+        return 137.0
 
     real_wait = env._wait_for_next_timestamp
 
@@ -4404,9 +4433,12 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
     env._wait_for_next_timestamp = wait
     env.step(td.set("action", torch.tensor(0)))
 
-    # 100.0 is what get_mark_price returned on the PRE-trade read. Asserting the value
-    # rather than the type: `isinstance(..., (int, float))` passes on an `else 0.0`.
-    assert env.history.base_prices[-1] == pytest.approx(100.0), (
+    assert state["post_bar_failed"], (
+        "setup: the post-bar mark fetch never failed, so the fallback under test never "
+        "ran -- this test would pass on any implementation"
+    )
+    # The value, not the type: `isinstance(..., (int, float))` passes on an `else 0.0`.
+    assert env.history.base_prices[-1] == pytest.approx(137.0), (
         f"a flat bar recorded {env.history.base_prices[-1]!r} rather than the pre-trade "
-        f"price of 100.0"
+        f"mark of 137.0 (100.0 would mean it took the observer's close instead)"
     )
