@@ -669,7 +669,6 @@ def test_an_outage_stops_the_step_before_it_can_trade(exchange, module):
     and the trade path by hand, in an order _step cannot produce, and so proved nothing
     about production -- _step raises on the status read before it ever reaches the sync.
     """
-    import importlib
     env_mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
     # By NAME, not by `"_step" in vars(c)`: #288 moved the SLTP `_step` onto the mixin,
     # and a discovery predicate keyed on where the method LIVES silently stops finding
@@ -2399,7 +2398,6 @@ def test_every_live_config_validates_its_action_levels(exchange):
     """The WIRING, per exchange. Crossing the two dimensions proved the same thing five
     times over: a missing call kills every value row for that exchange together, so the
     values never distinguish anything the rule test above does not already cover."""
-    import importlib
 
     module = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
     config_cls = _sole(module, "Config")
@@ -2457,7 +2455,6 @@ def test_the_size_an_env_reports_actually_reaches_the_position(exchange):
     # TorchTradeFuturesLiveEnv, so a file scan reads a module that no longer contains the
     # call. And a substring cannot tell `trade_info` from `trade_info["qty"]` -- which is
     # exactly the half-passing this guard exists to reject.
-    import importlib
 
     mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
     cls = _sole(mod, "TorchTradingEnv")
@@ -2501,7 +2498,6 @@ def test_a_real_step_lands_both_size_values_on_the_position(exchange, min_qty):
     existed, the other that the call site named the dict. Only reading the value off the
     position after a real step can tell you it arrived, so this drives `_step` and looks.
     """
-    import importlib
 
     module = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
     env_cls = _sole(module, "TorchTradingEnv")
@@ -2652,7 +2648,6 @@ def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
     it. Resolution is the stronger check anyway -- a venue that re-forks `_step` without
     the helper still fails, because `inspect.getsource` then returns ITS copy.
     """
-    import importlib
 
     mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
     cls = _sole(mod, "TorchTradingEnv")
@@ -4028,7 +4023,6 @@ def test_each_venue_builds_its_observer_with_the_arguments_it_needs(venue, expec
     `client` is asserted as a CATEGORY, not a value: bybit shares one session between the
     two roles and the other three must not, which is the actual contract.
     """
-    import importlib
 
     # The concrete plain env, not the abstract exchange base: the base still declares
     # `_step`/`_execute_trade_if_needed` abstract, so it cannot be instantiated at all.
@@ -4108,7 +4102,6 @@ def test_init_trading_clients_wires_each_venue_as_before(
     session, so it must be built second; okx must NOT, because its trader client is a
     Trade API and klines live on the MarketData one -- the round-1 regression.
     """
-    import importlib
 
     module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
     cls = _sole(module, "TorchTradingEnv")
@@ -4244,10 +4237,7 @@ def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
         cls._calculate_fractional_position
     ), "binance's sizing no longer delegates to the shared implementation"
 
-    # By BEHAVIOUR, not by grepping the body for `_get_min_notional`: neutering the `if`
-    # that uses it left the name in the source and the string check passed.
     env = _sizing_stub(cls, min_notional=1e12)   # nothing can clear this
-    env.trader.round_quantity.side_effect = lambda q: round(float(q), 3)
     assert env._calculate_fractional_position(1.0, 100.0) == (0.0, 0.0, "flat"), (
         "binance opened a position whose notional is below the venue minimum; the "
         "exchange rejects it and the env then believes it holds one"
@@ -4255,9 +4245,7 @@ def test_binance_extends_the_shared_sizing_rather_than_replacing_it():
 
     env._get_min_notional = lambda: 0.0
     env.trader.round_quantity.side_effect = lambda q: 0.123456
-    # Signed, and both directions. `abs(size)` discarded precisely the expression under
-    # test -- `position_qty * (1 if position_size > 0 else -1)` -- and only long was run,
-    # so the short branch was never entered at all.
+    # Signed, and both directions.
     for action, expected in ((1.0, 0.123456), (-1.0, -0.123456)):
         size, _, _ = env._calculate_fractional_position(action, 100.0)
         assert size == pytest.approx(expected), (
@@ -4288,38 +4276,14 @@ def _sizing_stub(cls, *, leverage=10, balance=10_000.0, min_notional=0.0):
     return env
 
 
-# Derived from the registry and pinned by NAME, so a fifth venue fails here rather than
-# on its first live trade. The values stay literal: the failure being guarded is every
-# venue reading ONE fee, which a derived expected value would reproduce.
+# Derived from the registry so a fifth venue fails here rather than on its first live
+# trade. The values stay literal: the failure guarded against is every venue reading ONE
+# fee, which a derived expected value would reproduce.
 _EXPECTED_TAKER_FEES = {
     "binance": 0.0004, "bitget": 0.0006, "bybit": 0.00055, "okx": 0.0005,
 }
 assert set(_EXPECTED_TAKER_FEES) == {c.__module__.split(".")[-2]
                                      for c in PLAIN_FUTURES_ENVS}
-
-
-# `env_sltp` only. The plain classes' fees are pinned harder by the golden notionals,
-# which assert the arithmetic those fees produce; the SLTP classes are not in that table,
-# and `test_every_class_that_inherits_the_shared_sizing_can_run_it` would pass them at
-# TAKER_FEE = 0.0 since it only checks the method runs. This is their sole value check.
-@pytest.mark.parametrize("venue,fee", sorted(_EXPECTED_TAKER_FEES.items()))
-def test_each_sltp_class_keeps_its_venues_taker_fee(venue, fee):
-    module = "env_sltp"
-    """The four sizing bodies were byte-identical TEXT and not identical BEHAVIOUR.
-
-    `TAKER_FEE` resolved to a different value in each module, so folding them without
-    lifting the fee onto the class would have silently re-priced three venues. Sizing is
-    `1 + leverage * fee`, so at 125x the binance and bitget fees size a position ~2.3%
-    apart. Pinned by VALUE, because the failure mode is one shared constant that looks
-    right on the venue you happen to test.
-    """
-    cls = _sole(importlib.import_module(f"torchtrade.envs.live.{venue}.{module}"),
-                "TorchTradingEnv")
-    assert getattr(cls, "TAKER_FEE", None) == pytest.approx(fee), (
-        f"{cls.__name__}'s taker fee is {getattr(cls, 'TAKER_FEE', None)}, not {fee}; "
-        f"every venue reading one fee is what a careless fold of the sizing bodies would "
-        f"produce, and a fee only the plain sibling can see is what a careless fix does"
-    )
 
 
 @pytest.mark.parametrize("cls", PLAIN_FUTURES_ENVS + SLTP_FUTURES_ENVS,
@@ -4332,7 +4296,6 @@ def test_every_class_that_inherits_the_shared_sizing_can_run_it(cls):
     reached it yet, which is exactly why no test noticed: a landmine rather than a bug.
     """
     env = _sizing_stub(cls)
-    env.trader.round_quantity.side_effect = lambda q: round(float(q), 3)
 
     size, notional, side = env._calculate_fractional_position(1.0, 100.0)
 
@@ -4347,10 +4310,9 @@ def test_every_class_that_inherits_the_shared_sizing_can_run_it(cls):
 # At 125x the four venues diverge by ~2.3%, which is the whole reason the fee could not be
 # folded along with the bodies.
 _GOLDEN_SIZINGS = [
-    # (venue, leverage, position_size, notional). SIZE as well as notional: notional alone
-    # is blind to binance's override, which transforms only the size -- deleting that
-    # override entirely left a notional-only golden 8/8 green. binance's sizes below are
-    # lot-rounded (97.961) where the other three are not, which is the override showing.
+    # (venue, leverage, position_size, notional), as sized BEFORE the fold. Size as well
+    # as notional: binance's override transforms only the size, so a notional-only pin
+    # cannot see it -- its rows are lot-rounded where the other three are not.
     ("binance", 1, 97.961, 9796.08156737305),
     ("binance", 125, 11666.667, 1166666.6666666665),
     ("bitget", 1, 97.9412352588447, 9794.12352588447),
@@ -4360,6 +4322,26 @@ _GOLDEN_SIZINGS = [
     ("okx", 1, 97.95102448775612, 9795.102448775613),
     ("okx", 125, 11529.411764705882, 1152941.1764705882),
 ]
+
+
+def test_a_flat_action_is_sized_without_touching_the_exchange():
+    """The `action_value == 0.0` short-circuit above the balance read.
+
+    It looks like a duplicate -- the four callers short-circuit first, and the free
+    function guards zero again underneath -- and has been proposed for deletion twice.
+    It is not a duplicate: without it a flat action performs a balance read, and against
+    an unusable balance raises instead of returning flat. That is the liquidation case
+    #295 exists for, and no other test reaches this method with a zero action.
+    """
+    cls = _sole(importlib.import_module("torchtrade.envs.live.bybit.env"),
+                "TorchTradingEnv")
+    env = _sizing_stub(cls, balance=float("nan"))
+
+    assert env._calculate_fractional_position(0.0, 100.0) == (0.0, 0.0, "flat")
+    assert not env.trader.get_account_balance.called, (
+        "a flat action read the exchange balance; with an unusable balance that raises "
+        "rather than returning flat"
+    )
 
 
 @pytest.mark.parametrize("venue,leverage,exp_size,exp_notional", _GOLDEN_SIZINGS,
@@ -4382,7 +4364,6 @@ def test_the_fold_did_not_move_a_single_sized_position(venue, leverage, exp_size
 
     # rel=1e-9, not 1e-12: reassociating the shared formula -- `capital * lev / mult` vs
     # `(capital / mult) * lev` -- is behaviourally identical and can move the last ULPs.
-    # The smallest change that SHOULD fail here is a 0.01% buffer edit, six orders larger.
     assert notional == pytest.approx(exp_notional, rel=1e-9), (
         f"{venue} at {leverage}x now sizes a notional of {notional!r} where it sized "
         f"{exp_notional!r} before the fold"

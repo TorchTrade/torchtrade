@@ -19,7 +19,6 @@ class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """
 
     TAKER_FEE = TAKER_FEE
-
     OBSERVER_CLS = BitgetObservationClass
     TRADER_CLS = BitgetFuturesOrderClass
 

@@ -18,7 +18,6 @@ class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """
 
     TAKER_FEE = TAKER_FEE
-
     OBSERVER_CLS = BybitObservationClass
     TRADER_CLS = BybitFuturesOrderClass
     TRADER_FIRST = True

@@ -171,7 +171,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         self, action_value: float, current_price: float
     ) -> tuple[float, float, str]:
         """Target position size from a fractional action, for all four futures venues.
-
         """
         if action_value == 0.0:
             return 0.0, 0.0, "flat"

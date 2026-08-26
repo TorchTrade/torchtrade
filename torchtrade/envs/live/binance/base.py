@@ -19,7 +19,6 @@ class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """
 
     TAKER_FEE = TAKER_FEE
-
     OBSERVER_CLS = BinanceObservationClass
     TRADER_CLS = BinanceFuturesOrderClass
 

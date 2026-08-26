@@ -19,7 +19,6 @@ class OKXBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):
     """
 
     TAKER_FEE = TAKER_FEE
-
     OBSERVER_CLS = OKXObservationClass
     TRADER_CLS = OKXFuturesOrderClass
     # Trader first, as before the fold. NOT for client sharing -- okx keeps market
