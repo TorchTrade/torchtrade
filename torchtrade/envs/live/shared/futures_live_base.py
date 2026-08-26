@@ -133,13 +133,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """One step for the four PLAIN futures envs (#288).
 
         The SLTP envs override this via SLTPMixin, which precedes this class in their MRO;
-        alpaca does not inherit this class. Ordering is load-bearing, and each constraint
-        is stated where it binds rather than listed here.
+        alpaca does not inherit this class.
         """
-        # Before the trade: the duplicate-action guard reads the position this syncs
-        # (invariant 2), and the trade below takes the qty and price it acquired under the
-        # halt policy rather than fetching its own (#295).
-        status, position_status, current_price, position_size = self._acquire_pre_trade_state()
+        # One status read per step: the trade below reuses this qty and price rather than
+        # fetching its own, so an outage cannot open a window between the two (#295).
+        _, position_status, current_price, position_size = self._acquire_pre_trade_state()
 
         self._sync_position_from_exchange(position_status)
 
@@ -448,10 +446,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                     if not math.isfinite(mark) or mark <= 0:
                         mark = None
                 except Exception:
-                    # `self.config.symbol`, not `self.symbol`: these envs have no
-                    # `symbol` attribute, so this handler raised AttributeError instead of
-                    # degrading -- the fallback the comment above promises never ran. Only
-                    # reachable when the post-bar mark fetch fails, which nothing tested.
                     logger.warning(
                         "post-bar mark unavailable for %s; the history row will carry the "
                         "pre-trade price", self.config.symbol,

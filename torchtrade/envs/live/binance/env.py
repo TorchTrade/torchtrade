@@ -3,10 +3,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Union, Callable
 import logging
 
-import torch
 
 logger = logging.getLogger(__name__)
-from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.utils.timeframe import TimeFrame
@@ -157,7 +155,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Define action space (environment-specific)
         self.action_levels = config.action_levels
         self.action_spec = Categorical(len(self.action_levels))
-
 
 
     def _get_symbol_info(self) -> Dict:

@@ -5,8 +5,6 @@ from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
 
-import torch
-from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
@@ -113,7 +111,6 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
         self.action_levels = config.action_levels
         self.action_spec = Categorical(len(self.action_levels))
-
 
 
     def _calculate_fractional_position(self, action_value: float, current_price: float) -> tuple[float, float, str]:

@@ -79,6 +79,45 @@ FUTURES_ENVS = [
     if issubclass(c, TorchTradeFuturesLiveEnv) and c is not TorchTradeFuturesLiveEnv
 ]
 
+# Split by module, and resolved from the registry rather than by scanning a module
+# namespace for a name ending in "TorchTradingEnv": `next(...)` returns the FIRST match in
+# definition order, so a second class defined above the real one silently becomes the
+# subject. Not hypothetical -- with a decoy that INHERITS the shared `_step` (and so
+# satisfies an identity check vacuously), the guard below passed green while the real
+# class's `_step` was re-forked to raise.
+PLAIN_FUTURES_ENVS = [c for c in FUTURES_ENVS if c.__module__.endswith(".env")]
+SLTP_FUTURES_ENVS = [c for c in FUTURES_ENVS if c.__module__.endswith(".env_sltp")]
+assert len(PLAIN_FUTURES_ENVS) == len(SLTP_FUTURES_ENVS) == 4, (
+    "a list that SHRINKS is the hazard, not one that empties: pyproject's "
+    "empty_parameter_set_mark already turns an empty list into a collection error, but "
+    "4 -> 3 is silent, and that is the shape #411's loss actually took"
+)
+
+
+def _sole(module, suffix, **require):
+    """The ONE class in `module` whose name ends in `suffix`.
+
+    Not `next(...)`: that returns the first match in DEFINITION order, so a second class
+    declared above the real one silently becomes the subject. Verified by mutation -- a
+    decoy that inherits the shared `_step` (and so satisfies an identity check vacuously)
+    let a re-forked `_step` on the real class pass green, in the very guard written to
+    catch it. Asserting the count converts that into a failure that names both classes.
+
+    `require` takes predicates applied to each candidate, for the call sites that need a
+    concrete or a dataclass one.
+    """
+    found = [
+        v for k, v in vars(module).items()
+        if k.endswith(suffix)
+        and getattr(v, "__module__", None) == module.__name__
+        and all(pred(v) for pred in require.values())
+    ]
+    assert len(found) == 1, (
+        f"{module.__name__} defines {len(found)} classes ending in {suffix!r} "
+        f"({[c.__name__ for c in found]}); the guard would have silently picked the first"
+    )
+    return found[0]
+
 
 @pytest.mark.parametrize("done_on_bankruptcy,portfolio_value,expected", [
     (True, 50.0, True),    # below 10% of the 1000 initial -> bankrupt
@@ -161,13 +200,24 @@ def test_discovery_covers_every_live_exchange():
     """
     exchanges = {cls.__module__.split(".")[-2] for cls in LIVE_ENVS} - {"shared"}
     assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}
-    # NON_SLTP_ENVS drives the call-site guard below, and an empty parametrize SKIPS rather
-    # than fails -- a module rename would silently retire that guard.
+    # NON_SLTP_ENVS drives the call-site guard below. An EMPTY list is already a collection
+    # error (pyproject's empty_parameter_set_mark); a list that merely shrinks is not, and
+    # that is the failure this pins.
     assert len(NON_SLTP_ENVS) == 5
+    # FUTURES_ENVS drives the observation re-fork guard and is NOT covered by the exchange
+    # set above: a venue that stops inheriting TorchTradeFuturesLiveEnv keeps its exchange
+    # name here and silently drops its cases from that guard.
+    assert len(FUTURES_ENVS) == 12 and len(LIVE_ENVS) == 16
 
 
 @pytest.mark.parametrize("method", [
     "_check_termination", "_sync_action_level_after_reset", "_build_observation_specs",
+    # Everything the shared `_step` calls. Guarding `_step` itself is not enough: a venue
+    # that re-forks one of ITS callees still passes the `_step` identity check while the
+    # "a shared fix lands once" guarantee is already gone. Verified -- a byte-identical
+    # copy of a callee on one venue failed zero of 1076 tests.
+    "_record_position_after_trade", "_resolve_action_level",
+    "_wait_for_next_timestamp", "_finalize_step_flags",
 ])
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=lambda c: c.__name__)
 def test_no_live_env_overrides_shared_method(env_cls, method):
@@ -194,6 +244,10 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
         # what converts a failed fetch into a type `_halting` catches.
         "_current_mark_price",
         "_halting",
+        # The shared `_step`'s two state reads. Both apply the halt policy (#295); a venue
+        # copy of either is where that policy stops being one policy.
+        "_acquire_pre_trade_state",
+        "_acquire_post_bar_state",
     ],
 )
 @pytest.mark.parametrize("env_cls", FUTURES_ENVS, ids=lambda c: c.__name__)
@@ -2432,8 +2486,7 @@ def test_the_size_an_env_reports_actually_reaches_the_position(exchange):
     import importlib
 
     mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
-    cls = next(v for k, v in vars(mod).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
+    cls = _sole(mod, "TorchTradingEnv")
     call = next(
         (n for n in ast.walk(ast.parse(inspect.getsource(cls._step).lstrip()))
          if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
@@ -2478,9 +2531,8 @@ def test_a_real_step_lands_both_size_values_on_the_position(exchange, min_qty):
 
     module = importlib.import_module(f"torchtrade.envs.live.{exchange}.env")
     # not abstract, and defined here: `vars` also carries the imported base class
-    env_cls = next(v for k, v in vars(module).items()
-                   if k.endswith("TorchTradingEnv") and isinstance(v, type)
-                   and not getattr(v, "__abstractmethods__", None)
+    env_cls = _sole(module, "TorchTradingEnv",
+                    concrete=lambda v: not getattr(v, "__abstractmethods__", None)
                    and v.__module__ == module.__name__)
 
     trader = MagicMock()
@@ -2527,9 +2579,8 @@ def _build_env_with(env_cls, module, trader):
     # __module__, not just the name: `vars` also carries any config imported into the
     # module. Both env_sltp modules import their shared base, and without this filter
     # `next` returns THAT -- a test that silently stops testing the venue (#288).
-    config_cls = next(v for k, v in vars(module).items()
-                      if k.endswith("Config") and hasattr(v, "__dataclass_fields__")
-                      and v.__module__ == module.__name__)
+    config_cls = _sole(module, "Config",
+                       dataclass=lambda v: hasattr(v, "__dataclass_fields__"))
     try:
         config = config_cls(symbol="BTCUSDT", demo=True, time_frames=["1m"],
                             window_sizes=[10], execute_on="1m", leverage=5)
@@ -2637,8 +2688,7 @@ def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
     import importlib
 
     mod = importlib.import_module(f"torchtrade.envs.live.{exchange}.{module}")
-    cls = next(v for k, v in vars(mod).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
+    cls = _sole(mod, "TorchTradingEnv")
 
     # AST call POSITIONS, not a substring. A substring passed on a commented-out call and
     # on the real call moved AFTER the dispatch -- so it proved neither that the read
@@ -4001,8 +4051,7 @@ def test_each_venue_builds_its_observer_with_the_arguments_it_needs(venue, expec
     # The concrete plain env, not the abstract exchange base: the base still declares
     # `_step`/`_execute_trade_if_needed` abstract, so it cannot be instantiated at all.
     module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
-    cls = next(v for k, v in vars(module).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+    cls = _sole(module, "TorchTradingEnv")
 
     # A real instance via __new__, not a SimpleNamespace: `_observer_kwargs` calls
     # zero-arg `super()`, which needs the class in its MRO. __init__ is skipped so the
@@ -4080,8 +4129,7 @@ def test_init_trading_clients_wires_each_venue_as_before(
     import importlib
 
     module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
-    cls = next(v for k, v in vars(module).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
+    cls = _sole(module, "TorchTradingEnv")
 
     log = []
 
@@ -4194,26 +4242,30 @@ def test_the_shared_sltp_step_keeps_its_two_unpinned_contracts(venue):
 # the mixin's (no futures pre-trade acquisition, no mark). It overrides `_step` on purpose
 # and inherits `_reset`, which IS identical. Deleting alpaca's `_step` as "redundant"
 # would hand a spot env the futures step.
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
-def test_no_sltp_env_reforks_the_shared_step(venue):
-    """#288 folded four SLTP `_step`/`_reset` copies into SLTPMixin. Nothing noticed when
-    one of them did not fold.
+@pytest.mark.parametrize("method", ["_step", "_reset"])
+@pytest.mark.parametrize("cls,owner", [
+    *((c, TorchTradeFuturesLiveEnv) for c in PLAIN_FUTURES_ENVS),
+    *((c, SLTPMixin) for c in SLTP_FUTURES_ENVS),
+], ids=[c.__name__ for c in PLAIN_FUTURES_ENVS + SLTP_FUTURES_ENVS])
+def test_no_futures_env_reforks_a_shared_step_or_reset(cls, owner, method):
+    """#288 folded eight `_step`/`_reset` copies onto two owners. Nothing noticed when one
+    of them did not fold.
 
-    I reverted bybit's file mid-way through mutation testing and it kept its own copies.
-    The suite stayed green -- of course it did: the copy still worked. An incomplete fold
-    is invisible behaviourally, and stays invisible right up until someone fixes a bug in
-    the shared copy and bybit does not get it. That is #288's entire thesis.
+    Reverting bybit's file mid-way through mutation testing left it with private copies and
+    the suite stayed green -- of course it did, the copy still worked. An incomplete fold is
+    invisible behaviourally, right up until a fix lands on the shared copy and bybit does
+    not get it.
+
+    Identity against the owner, not `"_step" not in vars(cls)`. The two are equivalent
+    today only because SLTPMixin sits directly after the class in the MRO -- I checked,
+    there is nothing between them. Insert one intermediate base and absence-from-the-
+    subclass starts passing on a copy that really does shadow the owner; identity does not
+    care where in the MRO the copy is planted.
     """
-    import importlib
-
-    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.env_sltp")
-    cls = next(v for k, v in vars(mod).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
-
-    reforked = [name for name in ("_step", "_reset") if name in vars(cls)]
-    assert not reforked, (
-        f"{cls.__name__} defines its own {reforked}; SLTPMixin owns them, and a private "
-        f"copy is where a shared fix silently fails to land"
+    assert getattr(cls, method) is getattr(owner, method), (
+        f"{cls.__name__}.{method} resolves to {getattr(cls, method).__qualname__} rather "
+        f"than {owner.__name__}.{method}; a private copy is where a shared fix silently "
+        f"fails to land"
     )
 
 
@@ -4277,26 +4329,86 @@ def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
     )
 
 
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
-@pytest.mark.parametrize("level_idx,expected_sign", [(-1, 1.0), (0, -1.0)],
+# The venue names behind the registry, so a fifth exchange joins these tests on its own.
+PLAIN_VENUES = [c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS]
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+def test_the_plain_history_row_is_the_one_the_reward_function_scores(venue):
+    """Four mutations in the shared plain `_step` that failed ZERO tests.
+
+    The reward overwrite, the post-bar price, and the post-trade qty are all read back out
+    of `history` -- by the reward function on the next step, and by every analysis of the
+    episode after it. Each was silently droppable:
+
+      reward -> 0.0                       the placeholder `record_step` writes
+      drop `history.rewards[-1] = reward`  same, one line later
+      price=current_price                  the PRE-trade bar; `_acquire_post_bar_state`
+                                           spends 20 lines arguing this exact point (#278)
+      position=position_size               the PRE-trade qty, so an opening row reads flat
+
+    The SLTP fold pinned the reward one for its four venues and the plain fold shipped
+    without it -- the same "landed on some copies, not others" this issue exists to end.
+
+    Pre-trade and post-bar are given DIFFERENT prices (100 -> 120) on purpose: with one
+    price the two `price=` spellings are indistinguishable, which is why this went unseen.
+    """
+    from tests.envs.test_live_observation_failsafe import _real_futures_env
+    from torchtrade.envs.core.common_types import PositionStatus
+
+    env, trader = _real_futures_env(budget=0, venue=venue)
+    env.reward_function = lambda history: 4.25   # unmistakable, not a placeholder
+
+    opened = PositionStatus(
+        qty=0.05, notional_value=6000.0, entry_price=100.0, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=120.0, leverage=10,
+        margin_mode="isolated", liquidation_price=91.0,
+    )
+    bar = {"done": False}
+
+    trader.get_status.side_effect = lambda: {
+        "position_status": opened if bar["done"] else None
+    }
+    trader.get_mark_price.side_effect = lambda: 120.0 if bar["done"] else 100.0
+
+    real_wait = env._wait_for_next_timestamp
+    env._wait_for_next_timestamp = lambda: (bar.__setitem__("done", True), real_wait())[1]
+
+    td = env.reset()
+    out = env.step(td.set("action", torch.tensor(len(env.action_levels) - 1)))["next"]
+
+    assert out["reward"].item() == pytest.approx(4.25), (
+        f"{venue}: the step returned the placeholder reward, not reward_function's"
+    )
+    assert env.history.rewards[-1] == pytest.approx(4.25), (
+        f"{venue}: history kept `record_step`'s 0.0 placeholder; the reward function reads "
+        f"this row on the NEXT step"
+    )
+    assert env.history.base_prices[-1] == pytest.approx(120.0), (
+        f"{venue}: the row carries the pre-trade price 100.0, so price[t] would pair with "
+        f"portfolio_value[t] from a different bar (#278)"
+    )
+    assert env.history.positions[-1] == pytest.approx(0.05), (
+        f"{venue}: the opening row records the pre-trade qty, so it reads flat"
+    )
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+@pytest.mark.parametrize("want,expected_sign", [(1, 1.0), (-1, -1.0)],
                          ids=["full-long", "full-short"])
 def test_the_plain_history_row_records_the_action_actually_traded(
-    venue, level_idx, expected_sign
+    venue, want, expected_sign
 ):
     """`action` in the history row is what the reward function scores.
 
-    Flipping its sign in the shared plain `_step` fails ZERO tests. I pinned exactly this
-    on the SLTP path an hour ago and left the plain one -- the same "some copies, not
-    others" this issue is about, in the guard against it.
-
-    Indexed by VALUE: binance ships [-1, 0, 1] and the others [-1, -0.5, 0, 0.5, 1], so a
-    hardcoded index means different things per venue.
+    Flipping its sign in the shared plain `_step` fails ZERO tests.
     """
-    import torch
     from tests.envs.test_live_observation_failsafe import _real_futures_env
 
-    env, trader = _real_futures_env(budget=0, venue=venue)
-    action = len(env.action_levels) - 1 if level_idx == -1 else 0
+    env, _ = _real_futures_env(budget=0, venue=venue)
+    # By VALUE: binance ships [-1, 0, 1] and the others [-1, -0.5, 0, 0.5, 1], so a
+    # hardcoded index means a different position size per venue.
+    action = env.action_levels.index(want)
     td = env.reset()
     env.step(td.set("action", torch.tensor(action)))
 
@@ -4307,23 +4419,17 @@ def test_the_plain_history_row_records_the_action_actually_traded(
     )
 
 
-@pytest.mark.parametrize("shared_step,module", [
-    ("TorchTradeFuturesLiveEnv", "env"), ("SLTPMixin", "env_sltp"),
-], ids=["plain", "sltp"])
-def test_a_flat_bar_falls_back_to_the_pre_trade_price(shared_step, module):
+@pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
+def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
     """`new_price = new_price if new_price is not None else current_price`.
 
     `_acquire_post_bar_state` returns None for the mark when the account is flat -- there
     is no position to read one from. Dropping the fallback feeds None into
     `history.record_step(price=...)`, and every downstream reader of that row gets it.
-
-    Failed zero tests on BOTH shared steps: the comment explaining why the fallback exists
-    has been carried through four copies and two folds without anything asserting it.
     """
-    import torch
     from tests.envs.test_live_observation_failsafe import _real_futures_env
 
-    env, trader = _real_futures_env(budget=0, venue="binance", sltp=(module == "env_sltp"))
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=sltp)
     td = env.reset()
 
     # The mark goes unavailable only for the POST-bar read: the pre-trade read must
@@ -4347,38 +4453,9 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(shared_step, module):
     env._wait_for_next_timestamp = wait
     env.step(td.set("action", torch.tensor(0)))
 
-    # The VALUE, not just the type. `isinstance(..., (int, float))` passed on a fallback
-    # changed to `else 0.0` -- wrong but numeric -- while the docstring claimed the test
-    # verified "the pre-trade price". 100.0 is what the mock's get_mark_price returned on
-    # the pre-trade read, so it is the only correct answer here.
+    # 100.0 is what get_mark_price returned on the PRE-trade read. Asserting the value
+    # rather than the type: `isinstance(..., (int, float))` passes on an `else 0.0`.
     assert env.history.base_prices[-1] == pytest.approx(100.0), (
         f"a flat bar recorded {env.history.base_prices[-1]!r} rather than the pre-trade "
         f"price of 100.0"
-    )
-
-
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
-def test_no_plain_futures_env_reforks_the_shared_step(venue):
-    """The PLAIN `_step` must resolve to TorchTradeFuturesLiveEnv, not a venue copy.
-
-    I wrote `test_no_sltp_env_reforks_the_shared_step` for the SLTP fold and shipped the
-    plain fold without the equivalent -- the fifth time in this issue that a fix landed on
-    some copies and not others, this time in the guard against exactly that.
-
-    Mutation-proven necessary: appending a BYTE-IDENTICAL copy of the shared `_step` to
-    bitget/env.py passed all 819 tests in this file. An incomplete fold is invisible
-    behaviourally, because a copy that has not drifted yet works perfectly -- right up
-    until a shared fix fails to land on the venue holding one.
-
-    Not folded into `test_no_futures_env_reforks_the_shared_observation`: its FUTURES_ENVS
-    list includes the SLTP envs, which resolve `_step` to SLTPMixin by design.
-    """
-    import importlib
-
-    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
-    cls = next(v for k, v in vars(mod).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == mod.__name__)
-    assert cls._step is TorchTradeFuturesLiveEnv._step, (
-        f"{cls.__name__} re-forks _step instead of resolving the shared one; a private "
-        f"copy is where a shared fix silently fails to land"
     )

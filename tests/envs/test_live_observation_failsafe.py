@@ -172,10 +172,10 @@ def _real_futures_env(budget, venue="binance", sltp=False, position_status=None,
         f"torchtrade.envs.live.{venue}.env_sltp" if sltp
         else f"torchtrade.envs.live.{venue}.env"
     )
-    Env = next(v for k, v in vars(module).items()
-               if k.endswith("TorchTradingEnv") and v.__module__ == module.__name__)
-    Config = next(v for k, v in vars(module).items()
-                  if k.endswith("TradingEnvConfig") and v.__module__ == module.__name__)
+    from tests.envs.test_live_env_base import _sole
+
+    Env = _sole(module, "TorchTradingEnv")
+    Config = _sole(module, "TradingEnvConfig")
 
     observer = MagicMock()
     observer.get_keys.return_value = ["1m_10"]

@@ -3,8 +3,6 @@ import math
 from dataclasses import dataclass
 from typing import List, Optional, Union, Callable, Dict
 
-import torch
-from tensordict import TensorDictBase
 from torchrl.data import Categorical
 
 from torchtrade.envs.live.okx.observation import OKXObservationClass
@@ -112,7 +110,6 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
 
         self.action_levels = config.action_levels
         self.action_spec = Categorical(len(self.action_levels))
-
 
 
     def _calculate_fractional_position(self, action_value: float, current_price: float) -> tuple[float, float, str]:
