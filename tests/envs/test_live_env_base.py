@@ -4416,6 +4416,48 @@ def test_the_sizing_reserves_the_maintenance_margin_buffer():
     )
 
 
+# Computed on `main` before the fold and re-verified after it, on a 144-point grid of
+# venues x actions x prices x leverages. The grid itself was a throwaway script, which is
+# no evidence at all once it is deleted -- these eight numbers are the part worth keeping.
+# At 125x the four venues diverge by ~2.3%, which is the whole reason the fee could not be
+# folded along with the bodies.
+_GOLDEN_NOTIONALS = [
+    ("binance", 1, 9796.08156737305), ("binance", 125, 1166666.6666666665),
+    ("bitget", 1, 9794.12352588447),  ("bitget", 125, 1139534.8837209304),
+    ("bybit", 1, 9794.61296287042),   ("bybit", 125, 1146198.8304093566),
+    ("okx", 1, 9795.102448775613),    ("okx", 125, 1152941.1764705882),
+]
+
+
+@pytest.mark.parametrize("venue,leverage,expected", _GOLDEN_NOTIONALS,
+                         ids=[f"{v}-{l}x" for v, l, _ in _GOLDEN_NOTIONALS])
+def test_the_fold_did_not_move_a_single_sized_notional(venue, leverage, expected):
+    """What the four bodies sized before #288 folded them, to the last float bit.
+
+    A refactor's claim is that behaviour did not change, and the evidence for that claim
+    normally evaporates with the branch that made it. These are the pre-fold numbers,
+    committed, so the claim stays checkable and any later drift in the shared arithmetic
+    -- the fee, the buffer, the leverage term, the fee_multiplier form -- fails here with
+    the venue and the leverage named.
+    """
+    cls = _sole(importlib.import_module(f"torchtrade.envs.live.{venue}.env"),
+                "TorchTradingEnv")
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(leverage=leverage)
+    env.trader = MagicMock()
+    env.trader.get_account_balance.return_value = {"total_margin_balance": 10_000.0}
+    env.trader.round_quantity.side_effect = lambda q: q
+    env._halting = lambda read, cache_key=None: read()
+    env._get_min_notional = lambda: 0.0
+
+    _, notional, _ = env._calculate_fractional_position(1.0, 100.0)
+
+    assert notional == pytest.approx(expected, rel=1e-12), (
+        f"{venue} at {leverage}x now sizes {notional!r} where it sized {expected!r} before "
+        f"the fold"
+    )
+
+
 def test_the_shared_sizing_actually_uses_the_venues_fee():
     """And the fee must reach the arithmetic, not merely be declared on the class.
 
