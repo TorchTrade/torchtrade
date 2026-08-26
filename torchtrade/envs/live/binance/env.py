@@ -119,7 +119,6 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
      leverage, distance_to_liquidation]
     """
 
-
     def __init__(
         self,
         config: BinanceFuturesTradingEnvConfig,

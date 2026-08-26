@@ -90,7 +90,6 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
     """
 
-
     def __init__(
         self,
         config: BybitFuturesTradingEnvConfig,

@@ -3,7 +3,6 @@ from typing import Dict, List, Optional, Union, Callable
 import logging
 import math
 
-
 logger = logging.getLogger(__name__)
 from torchtrade.envs.utils.fractional_sizing import validate_action_levels
 from torchtrade.envs.utils.timeframe import TimeFrame

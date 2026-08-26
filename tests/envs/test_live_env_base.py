@@ -4282,7 +4282,7 @@ def _sizing_stub(cls, *, leverage=10, balance=10_000.0, min_notional=0.0):
     env.config = SimpleNamespace(leverage=leverage)
     env.trader = MagicMock()
     env.trader.get_account_balance.return_value = {"total_margin_balance": balance}
-    env.trader.round_quantity.side_effect = lambda q: q
+    env.trader.round_quantity.side_effect = lambda q: round(float(q), 3)
     env._halting = lambda read, cache_key=None: read()
     env._get_min_notional = lambda: min_notional
     return env
@@ -4298,9 +4298,13 @@ assert set(_EXPECTED_TAKER_FEES) == {c.__module__.split(".")[-2]
                                      for c in PLAIN_FUTURES_ENVS}
 
 
-@pytest.mark.parametrize("module", ["env", "env_sltp"])
+# `env_sltp` only. The plain classes' fees are pinned harder by the golden notionals,
+# which assert the arithmetic those fees produce; the SLTP classes are not in that table,
+# and `test_every_class_that_inherits_the_shared_sizing_can_run_it` would pass them at
+# TAKER_FEE = 0.0 since it only checks the method runs. This is their sole value check.
 @pytest.mark.parametrize("venue,fee", sorted(_EXPECTED_TAKER_FEES.items()))
-def test_each_venue_keeps_its_own_taker_fee(venue, fee, module):
+def test_each_sltp_class_keeps_its_venues_taker_fee(venue, fee):
+    module = "env_sltp"
     """The four sizing bodies were byte-identical TEXT and not identical BEHAVIOUR.
 
     `TAKER_FEE` resolved to a different value in each module, so folding them without
@@ -4342,17 +4346,26 @@ def test_every_class_that_inherits_the_shared_sizing_can_run_it(cls):
 # no evidence at all once it is deleted -- these eight numbers are the part worth keeping.
 # At 125x the four venues diverge by ~2.3%, which is the whole reason the fee could not be
 # folded along with the bodies.
-_GOLDEN_NOTIONALS = [
-    ("binance", 1, 9796.08156737305), ("binance", 125, 1166666.6666666665),
-    ("bitget", 1, 9794.12352588447),  ("bitget", 125, 1139534.8837209304),
-    ("bybit", 1, 9794.61296287042),   ("bybit", 125, 1146198.8304093566),
-    ("okx", 1, 9795.102448775613),    ("okx", 125, 1152941.1764705882),
+_GOLDEN_SIZINGS = [
+    # (venue, leverage, position_size, notional). SIZE as well as notional: notional alone
+    # is blind to binance's override, which transforms only the size -- deleting that
+    # override entirely left a notional-only golden 8/8 green. binance's sizes below are
+    # lot-rounded (97.961) where the other three are not, which is the override showing.
+    ("binance", 1, 97.961, 9796.08156737305),
+    ("binance", 125, 11666.667, 1166666.6666666665),
+    ("bitget", 1, 97.9412352588447, 9794.12352588447),
+    ("bitget", 125, 11395.348837209304, 1139534.8837209304),
+    ("bybit", 1, 97.94612962870419, 9794.61296287042),
+    ("bybit", 125, 11461.988304093566, 1146198.8304093566),
+    ("okx", 1, 97.95102448775612, 9795.102448775613),
+    ("okx", 125, 11529.411764705882, 1152941.1764705882),
 ]
 
 
-@pytest.mark.parametrize("venue,leverage,expected", _GOLDEN_NOTIONALS,
-                         ids=[f"{v}-{l}x" for v, l, _ in _GOLDEN_NOTIONALS])
-def test_the_fold_did_not_move_a_single_sized_notional(venue, leverage, expected):
+@pytest.mark.parametrize("venue,leverage,exp_size,exp_notional", _GOLDEN_SIZINGS,
+                         ids=[f"{v}-{l}x" for v, l, _, _ in _GOLDEN_SIZINGS])
+def test_the_fold_did_not_move_a_single_sized_position(venue, leverage, exp_size,
+                                                       exp_notional):
     """What the four bodies sized before #288 folded them, to the last float bit.
 
     A refactor's claim is that behaviour did not change, and the evidence for that claim
@@ -4365,11 +4378,18 @@ def test_the_fold_did_not_move_a_single_sized_notional(venue, leverage, expected
                 "TorchTradingEnv")
     env = _sizing_stub(cls, leverage=leverage)
 
-    _, notional, _ = env._calculate_fractional_position(1.0, 100.0)
+    size, notional, _ = env._calculate_fractional_position(1.0, 100.0)
 
-    assert notional == pytest.approx(expected, rel=1e-12), (
-        f"{venue} at {leverage}x now sizes {notional!r} where it sized {expected!r} before "
-        f"the fold"
+    # rel=1e-9, not 1e-12: reassociating the shared formula -- `capital * lev / mult` vs
+    # `(capital / mult) * lev` -- is behaviourally identical and can move the last ULPs.
+    # The smallest change that SHOULD fail here is a 0.01% buffer edit, six orders larger.
+    assert notional == pytest.approx(exp_notional, rel=1e-9), (
+        f"{venue} at {leverage}x now sizes a notional of {notional!r} where it sized "
+        f"{exp_notional!r} before the fold"
+    )
+    assert size == pytest.approx(exp_size, rel=1e-9), (
+        f"{venue} at {leverage}x now returns a position size of {size!r} where it returned "
+        f"{exp_size!r} before the fold"
     )
 
 

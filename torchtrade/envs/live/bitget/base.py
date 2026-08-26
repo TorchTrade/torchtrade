@@ -2,9 +2,11 @@
 
 from typing import Callable, Optional
 
-from .order_executor import TAKER_FEE
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
-from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+from torchtrade.envs.live.bitget.order_executor import (
+    TAKER_FEE,
+    BitgetFuturesOrderClass,
+)
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class BitgetBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):

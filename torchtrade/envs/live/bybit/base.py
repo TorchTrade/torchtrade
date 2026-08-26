@@ -2,9 +2,11 @@
 
 from typing import Callable, Optional
 
-from .order_executor import TAKER_FEE
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
-from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
+from torchtrade.envs.live.bybit.order_executor import (
+    TAKER_FEE,
+    BybitFuturesOrderClass,
+)
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class BybitBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):

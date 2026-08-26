@@ -2,9 +2,11 @@
 
 from typing import Callable, Optional
 
-from .order_executor import TAKER_FEE
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
-from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+from torchtrade.envs.live.binance.order_executor import (
+    TAKER_FEE,
+    BinanceFuturesOrderClass,
+)
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
 
 class BinanceBaseTorchTradingEnv(TorchTradeFuturesLiveEnv):

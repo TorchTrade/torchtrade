@@ -163,16 +163,8 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             portfolio_value=new_portfolio_value, position=new_qty,
         )
 
-    # Set by each venue's <Venue>BaseTorchTradingEnv, NOT by the plain leaf: the SLTP
-    # sibling's MRO runs SLTPMixin -> <Venue>Base -> here and never touches the leaf, so a
-    # fee set there resolves for half the classes that inherit this sizing and
-    # AttributeErrors for the other half.
-    #
-    # The four bodies this replaced were byte-identical TEXT with this name resolving to a
-    # different value per module -- 0.0004 / 0.0006 / 0.00055 / 0.0005. Folding them
-    # without lifting the fee would have silently re-priced three venues:
-    # `fee_multiplier = 1 + leverage * fee`, so at 125x binance and bitget size ~2.3%
-    # apart. The eight pre-fold notionals are pinned by test.
+    # Set on each venue's <Venue>BaseTorchTradingEnv, NOT on the plain leaf: the SLTP
+    # sibling's MRO runs SLTPMixin -> <Venue>Base -> here and never touches the leaf.
     TAKER_FEE: float
 
     def _calculate_fractional_position(
@@ -180,9 +172,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     ) -> tuple[float, float, str]:
         """Target position size from a fractional action, for all four futures venues.
 
-        binance extends this (min-notional refusal, then rounding the TARGET to lot size);
-        the other three round the DELTA at execution instead. That placement difference is
-        real and stays per venue -- only the sizing arithmetic is shared here.
         """
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
@@ -196,8 +185,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             info = self.trader.get_account_balance()
             total_balance = info["total_margin_balance"]
             # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
-            # balance sizes an inf target (#277). The name is load-bearing:
-            # test_futures_sizing_rejects_a_non_finite_balance greps for it.
+            # balance sizes an inf target (#277).
             if not math.isfinite(total_balance) or total_balance <= 0:
                 raise ValueError(
                     f"cannot size a trade against a portfolio value of {total_balance}"
