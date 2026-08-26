@@ -4248,6 +4248,61 @@ def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
     )
 
 
+@pytest.mark.parametrize("trade_info,expect_recorded", [
+    ({"executed": True, "success": True}, True),
+    ({"executed": True, "success": False}, False),   # the venue REFUSED the bracket
+    ({"executed": False}, False),                    # nothing was sent
+], ids=["accepted", "refused", "not-sent"])
+def test_a_refused_sltp_bracket_does_not_write_a_phantom_position(trade_info,
+                                                                  expect_recorded):
+    """`executed and success is not False` gates the SLTP position write.
+
+    Replacing that condition with `if True:` survives the whole suite: a bracket the venue
+    REFUSED then writes `position.current_position`, so the cache reads long while the
+    account is flat. That is invariant 2 inverted -- the cache overriding exchange truth --
+    and the next bar's duplicate-action guard trusts it.
+
+    The plain owner's identical guard in `_record_position_after_trade` is covered; this
+    one was not. Same rule, two owners, one pinned -- which is #288's thesis about what
+    duplication costs, in the gate rather than in the code.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
+    env._dispatch_sltp_trade = lambda action_tuple, current_price: trade_info
+
+    td = env.reset()
+    assert env.position.current_position == 0, "setup: expected to start flat"
+    env.active_stop_loss, env.active_take_profit = 111.0, 222.0
+    env.step(td.set("action", torch.tensor(1)))     # a bracket action, not the hold
+
+    recorded = env.position.current_position != 0
+    assert recorded is expect_recorded, (
+        f"trade_info={trade_info} left current_position="
+        f"{env.position.current_position}; a refused or unsent bracket must leave the "
+        f"cache flat, or the next bar's duplicate-action guard trusts a position that "
+        f"does not exist"
+    )
+
+
+def test_a_reset_clears_the_bracket_on_the_shared_sltp_owner():
+    """`_reset_sltp_state` is pinned for alpaca only, and alpaca does not share this copy.
+
+    alpaca is spot: it is deliberately absent from SLTP_FUTURES_ENVS, so the identity
+    guard does not reach it. Neuter the mixin copy the four FUTURES venues actually use
+    and the suite stays green -- stale SL/TP levels then survive into the next episode,
+    where they arm brackets the agent never chose.
+    """
+    env, _ = _real_futures_env(budget=0, venue="binance", sltp=True)
+    env.reset()
+    env.active_stop_loss, env.active_take_profit = 111.0, 222.0
+
+    env.reset()
+
+    assert (env.active_stop_loss, env.active_take_profit) == (0.0, 0.0), (
+        f"reset left SL/TP at ({env.active_stop_loss}, {env.active_take_profit}); a live "
+        f"bracket carried into the next episode arms on a position it never opened"
+    )
+
+
 def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
     """#295: the trade uses the qty and price the pre-trade read acquired, not its own.
 
@@ -4264,9 +4319,14 @@ def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
     the pre-trade one and the post-bar one. A third is a re-read, which is the window an
     outage slips through even when the values happen to agree.
     """
+    # mark 137.0 against entry 100.0 and a fetched mark of 100.0: with an open position
+    # the threaded price comes from `position_status.mark_price`, so any of the three
+    # plausible re-reads -- `_current_mark_price()` with no status, `get_mark_price()`,
+    # `entry_price` -- lands on 100.0 and is distinguishable. They were not when every
+    # number in the fixture was 100.0.
     held = PositionStatus(
         qty=0.05, notional_value=6000.0, entry_price=100.0, unrealized_pnl=0.0,
-        unrealized_pnl_pct=0.0, mark_price=100.0, leverage=10,
+        unrealized_pnl_pct=0.0, mark_price=137.0, leverage=10,
         margin_mode="isolated", liquidation_price=91.0,
     )
     moved = PositionStatus(
@@ -4307,9 +4367,15 @@ def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
         f"re-read the venue instead of taking what the pre-trade read acquired (#295), "
         f"and 0.0 means it was dropped"
     )
-    assert seen.get("current_price") == pytest.approx(100.0), (
-        f"the trade was handed current_price={seen.get('current_price')!r}; 999.0 means "
-        f"it re-read the mark rather than taking the threaded one (#295)"
+    assert seen.get("current_price") == pytest.approx(137.0), (
+        f"the trade was handed current_price={seen.get('current_price')!r}; 100.0 means "
+        f"it re-read the mark or fell back to entry_price rather than taking the threaded "
+        f"one (#295)"
+    )
+    assert reads["mark"] == 0, (
+        f"{reads['mark']} mark fetches in a step that holds a position; the mark comes "
+        f"off the status snapshot already read, and a fetch is a second round-trip that "
+        f"can halt the episode"
     )
     assert reads["status"] == 2, (
         f"{reads['status']} status reads in one step, not 2 (pre-trade and post-bar); an "

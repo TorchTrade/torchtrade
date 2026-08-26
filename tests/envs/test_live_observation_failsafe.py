@@ -532,6 +532,13 @@ def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down(venue):
     nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
                    .set("action", torch.tensor(full_long)))["next"]
 
+    # `status_unknown` alone is over-determined: the failing `get_status` raises it
+    # whether or not the sizing path is ever reached. Neutering the trade dispatch left
+    # this test green. The point of the test is that the trade STILL HAPPENS.
+    assert trader.trade.called, (
+        "the grace bar never reached the trade: this test passes on an env that gives up "
+        "on the outage, which is the opposite of what it is named for"
+    )
     assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
     assert not bool(nxt["terminated"]), "an outage is never a terminated episode"
 
@@ -560,6 +567,13 @@ def test_an_sltp_grace_bar_can_still_size_a_bracket_with_the_venue_down(venue):
     nxt = env.step(td.exclude("done", "terminated", "truncated", "reward")
                    .set("action", torch.tensor(1)))["next"]
 
+    # `status_unknown` alone is over-determined: the failing `get_status` raises it
+    # whether or not the sizing path is ever reached. Neutering the trade dispatch left
+    # this test green. The point of the test is that the trade STILL HAPPENS.
+    assert trader.trade.called, (
+        "the grace bar never reached the trade: this test passes on an env that gives up "
+        "on the outage, which is the opposite of what it is named for"
+    )
     assert nxt["status_unknown"].item() == 1.0, "the bar must be flagged, not crash"
     assert not bool(nxt["terminated"]), "an outage is never a terminated episode"
 
