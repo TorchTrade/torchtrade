@@ -220,10 +220,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         if self.config.trade_mode == "quantity":
             return float(self.config.quantity_per_trade)
         if self.config.trade_mode != "fractional":
-            # The config validates this in `__post_init__`, whose docstring says nothing
-            # downstream should guard. This is not that guard: it is the fall-through of
-            # an exhaustive dispatch, and deleting it would size an unknown mode as
-            # fractional rather than failing.
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
         # total_margin_balance, not total_wallet_balance: binance's wallet figure excludes
@@ -255,13 +251,16 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             )
             fee = self.TAKER_FEE
         # Same 0.98 maintenance buffer as `_calculate_fractional_position`.
-        return abs(calculate_fractional_position(PositionCalculationParams(
+        # No abs(): `position_fraction` is validated to (0, 1.0], so direction is always
+        # +1 here. Wrapping it would launder a corrupted fraction into a plausible positive
+        # quantity rather than letting a negative reach the venue and be refused.
+        return calculate_fractional_position(PositionCalculationParams(
             balance=balance * 0.98,
             action_value=self.config.position_fraction,
             current_price=current_price,
             leverage=self.config.leverage,
             transaction_fee=fee,
-        ))[0])
+        ))[0]
 
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).

@@ -2167,23 +2167,15 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
     cls = _sole(importlib.import_module(f"torchtrade.envs.live.{exchange}.env_sltp"),
                 "TorchTradingEnv")
     venue_src = inspect.getsource(cls._execute_trade_if_needed)
-    sizing_src = inspect.getsource(cls._resolve_bracket_quantity)
-
-    # Delegation, not just the resolved source. `inspect.getsource` follows inheritance,
-    # so it returns the shared helper even for a venue that has re-inlined its own
-    # unguarded copy and stopped calling it -- the one capability the file-text scan this
-    # replaced used to have.
+    # `inspect.getsource` follows inheritance, so it returns the shared helper even for a
+    # venue that has re-inlined its own unguarded copy and stopped calling it.
     assert "_resolve_bracket_quantity" in venue_src, (
         f"{exchange}'s trade path no longer delegates to the shared sizing; the assertion "
         f"below would then be reading a helper this venue does not call"
     )
-    assert "math.isfinite(balance)" in sizing_src, (
-        f"{exchange} SLTP sizing still lets a non-finite balance through"
-    )
     if exchange in ("binance", "bitget"):
         # These two size from a candle close, so _current_mark_price() never guards them.
-        # bybit and okx re-validate at the seam that uses it -- #295 threading moved the
-        # read out of _current_mark_price, so that check is live, not dead.
+        # bybit and okx re-validate at the seam instead (#295).
         assert "math.isfinite(current_price)" in venue_src, (
             f"{exchange} sizes from a candle close with no finiteness check"
         )
@@ -4335,9 +4327,8 @@ _GOLDEN_SIZINGS = [
 # Pre-fold values, read off `main` before #415 moved the block. One row per venue at a
 # single leverage: unlike the plain golden table, nothing downstream of this method varies
 # by venue except `TAKER_FEE`, so a leverage axis would be decoration rather than evidence.
-# Completeness pinned, not just the values: a fifth venue would otherwise drop out of this
-# table silently while the other SLTP tests picked it up. Shrinkage is the hazard, not
-# emptiness -- an empty parametrize is already a collection error here.
+# A fifth venue would otherwise drop out of this table silently while the other SLTP
+# tests picked it up.
 _GOLDEN_BRACKET_QUANTITIES = [
     ("binance", 489.02195608782426),
     ("bitget", 488.5343968095713),
@@ -4384,9 +4375,7 @@ def test_a_bracket_that_cannot_be_sized_is_a_failed_trade_on_every_venue(venue):
 
     Flipping `success` to True is NOT caught, and should not be: with `executed` False,
     `_record_position_after_trade` returns before reading `success`, so the two are
-    indistinguishable. A reviewer flagged it as a phantom-position risk; I traced it and
-    the cost does not follow.
-
+    indistinguishable.
     """
     env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
     env.config.trade_mode = "fractional"
@@ -4425,6 +4414,30 @@ def test_an_unrecognised_trade_mode_refuses_rather_than_sizing_as_fractional():
         env._resolve_bracket_quantity(100.0)
 
 
+@pytest.mark.parametrize("mode,per_trade,price,expected", [
+    ("notional", 500.0, 100.0, 5.0),
+    ("notional", 500.0, 37_512.5, 500.0 / 37_512.5),
+    ("quantity", 0.37, 100.0, 0.37),
+    ("quantity", 0.37, 37_512.5, 0.37),
+], ids=["notional-100", "notional-37512", "quantity-100", "quantity-37512"])
+def test_the_non_fractional_trade_modes_size_from_config(mode, per_trade, price, expected):
+    """The two branches every SLTP sizing test skipped.
+
+    Every other test here and in the four venue suites builds its config with
+    `trade_mode="fractional"`, so mutating `quantity_per_trade / price` to `*`, or
+    doubling the raw quantity, passed all 1000 tests in this file. Pre-existing -- neither
+    branch changed in the fold -- but the fold changed the blast radius: one wrong formula
+    now mis-sizes every SLTP bracket on all four venues at once.
+    """
+    cls = _sole(importlib.import_module("torchtrade.envs.live.binance.env_sltp"),
+                "TorchTradingEnv")
+    env = _bracket_stub(cls)
+    env.config.trade_mode = mode
+    env.config.quantity_per_trade = per_trade
+
+    assert env._resolve_bracket_quantity(price) == pytest.approx(expected, rel=1e-12)
+
+
 @pytest.mark.parametrize("venue,expected", _GOLDEN_BRACKET_QUANTITIES)
 def test_the_sltp_fold_did_not_move_a_bracket_quantity(venue, expected):
     """What each venue's SLTP bracket sized before #415 folded the four copies.
@@ -4458,12 +4471,11 @@ def test_an_unusable_balance_refuses_to_size_a_bracket(balance):
 
 @pytest.mark.parametrize("fee", [0.0007, 0.0],
                          ids=["higher-than-venue", "fee-free-replay"])
-def test_a_usable_trader_fee_overrides_the_venue_constant(fee):
+def test_a_usable_trader_fee_fees_the_venue_constant(fee):
     """The accept branch, which nothing has ever exercised.
 
     Only `ReplayOrderExecutor` carries `transaction_fee`, so on a real venue this branch
-    is skipped entirely -- and every SLTP test builds a bare MagicMock, whose attribute
-    floats to 1.0 and is rejected. So the fee override has been proven only in the
+    is skipped entirely -- So the fee fee has been proven only in the
     direction that ignores it.
     """
     cls = _sole(importlib.import_module("torchtrade.envs.live.binance.env_sltp"),
@@ -4472,20 +4484,16 @@ def test_a_usable_trader_fee_overrides_the_venue_constant(fee):
         PositionCalculationParams, calculate_fractional_position,
     )
 
-    override, venue_fee = fee, cls.TAKER_FEE
-    assert override != venue_fee, "setup: the override must differ from the venue constant"
-    # 0.0 is the accept-side boundary: `0 <= fee` not `0 < fee`. A fee-free replay
-    # executor falling back to the venue constant sizes 976.10 against 980.00 -- #278's
-    # shape, with a warning that calls a valid rate unusable.
+    assert fee != cls.TAKER_FEE, "setup: the fee must differ from the venue constant"
 
-    got = _bracket_stub(cls, fee=override)._resolve_bracket_quantity(100.0)
+    got = _bracket_stub(cls, fee=fee)._resolve_bracket_quantity(100.0)
     expected = abs(calculate_fractional_position(PositionCalculationParams(
         balance=10_000.0 * 0.98, action_value=1.0, current_price=100.0,
-        leverage=5, transaction_fee=override))[0])
+        leverage=5, transaction_fee=fee))[0])
 
     assert got == pytest.approx(expected, rel=1e-12), (
         f"sized {got!r} against the venue constant instead of the trader's own "
-        f"{override} rate; a replay executor charging more has every open refused (#278)"
+        f"{fee} rate; a replay executor charging more has every open refused (#278)"
     )
 
 
@@ -4513,8 +4521,7 @@ def test_an_unusable_trader_fee_degrades_to_the_venue_constant(bad):
 def test_a_flat_action_is_sized_without_touching_the_exchange(cls):
     """The `action_value == 0.0` short-circuit above the balance read.
 
-    Proposed for deletion twice as a duplicate of the guards on either side of it. It is
-    not a duplicate -- without it a flat action performs a balance read and raises on an
+    Without it a flat action performs a balance read and raises on an
     unusable balance rather than returning flat -- but the honest scope is narrower than
     I first claimed: all four callers pre-filter zero before calling, so NO production
     path reaches this today. It is defence against a caller that stops pre-filtering, and
