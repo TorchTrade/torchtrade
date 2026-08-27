@@ -4,7 +4,6 @@ import logging
 import math
 from typing import Dict, Optional, Tuple
 
-import torch
 from tensordict import TensorDictBase
 
 from torchtrade.envs.core.state import position_direction_from_status
@@ -30,7 +29,11 @@ class SLTPMixin:
     mixin now depends on the whole live-env surface, not just SLTP state:
         state   - position.current_position, active_stop_loss, active_take_profit,
                   action_map (dense index -> (side, sl, tp)), history, reward_function
-        venue   - trader.get_status(), _execute_trade_if_needed()
+        venue   - trader.get_status(); and _execute_trade_if_needed(), which this mixin
+                  now PROVIDES for binance/bitget and bybit/okx/alpaca override. The
+                  provided copy is futures-only: it needs _halting,
+                  _resolve_bracket_quantity and _last_confirmed_read, none of which
+                  alpaca (spot) has -- so alpaca's override is load-bearing, not style.
         step    - _acquire_pre_trade_state(), _acquire_post_bar_state(),
                   _wait_for_next_timestamp(), _check_termination(),
                   _finalize_step_flags()
@@ -174,7 +177,7 @@ class SLTPMixin:
     def _execute_trade_if_needed(
         self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]]
     ) -> Dict:
-        """Place the bracket. Two byte-identical copies (binance, bitget) folded here (#288).
+        """Place the bracket for the venues that price it off their own candle.
 
         The four SLTP venues split by SIGNATURE, not by exchange: binance and bitget price
         the bracket off the observer's own candle, while bybit and okx require the mark
@@ -205,11 +208,8 @@ class SLTPMixin:
         if self.config.lock_position_until_sltp and self.position.current_position != 0:
             return trade_info
 
-        # `include_close_action` puts ("close", None, None) in the action map for all four
-        # venues (sltp_config.py), but only bybit/okx ever handled it: on binance/bitget it
-        # fell past both `side == "long"` and `elif side == "short"` and returned
-        # executed=False. The policy asked to close, the position stayed open, and nothing
-        # said so. Sharing one copy is what made that visible (#288).
+        # Above the price read on purpose: a policy must still be able to flatten under
+        # a degraded feed, which a stale-bar ValueError would otherwise block (#288).
         if side == "close":
             if self.position.current_position == 0:
                 return trade_info
@@ -217,6 +217,7 @@ class SLTPMixin:
                 success = self.trader.close_position()
             except Exception as e:
                 logger.error(f"Close position failed for {self.config.symbol}: {e}")
+                trade_info["success"] = False
                 return trade_info
             if success:
                 # A realised close moves equity; the cached balance is now wrong by the
@@ -230,6 +231,11 @@ class SLTPMixin:
                     "executed": True, "side": close_side,
                     "success": True, "closed_position": True,
                 })
+            else:
+                # A rejected close left the position open. Without this it returns
+                # {"executed": False, "success": None} -- indistinguishable from HOLD,
+                # which is the exact silence this commit exists to remove.
+                trade_info["success"] = False
             return trade_info
 
         # Check if already in same position (ignore duplicate actions)
@@ -266,88 +272,60 @@ class SLTPMixin:
             trade_info["success"] = False
             return trade_info
 
-        # Close opposite position if switching directions
+        # Switching directions: flatten first. A non-zero position here IS the opposite
+        # one -- `side` is long or short by now, and the duplicate guard above already
+        # returned on a same-direction position -- so the per-side test binance and bitget
+        # both carried was an unreachable-false branch. bybit had already dropped it.
         if self.position.current_position != 0:
-            # We have an existing position that needs to be closed before opening new one
-            if (side == "long" and self.position.current_position == -1) or \
-               (side == "short" and self.position.current_position == 1):
-                try:
-                    close_success = self.trader.close_position()
-                except Exception as e:
-                    logger.error(f"Close position failed for {self.config.symbol}: {e}")
-                    return trade_info
-                if not close_success:
-                    return trade_info
-                # A realised close moves equity; the cached balance is now wrong by the
-                # trade's P&L. Reached only on success (#295).
-                self._last_confirmed_read.pop("balance", None)
-                self.position.current_position = 0
+            try:
+                close_success = self.trader.close_position()
+            except Exception as e:
+                logger.error(f"Close position failed for {self.config.symbol}: {e}")
+                return trade_info
+            if not close_success:
+                return trade_info
+            self._last_confirmed_read.pop("balance", None)
+            self.position.current_position = 0
 
-        if side == "long":
-            # Open LONG with SL/TP bracket order
-            stop_loss_price, take_profit_price = calculate_bracket_prices(
-                "long", current_price, stop_loss_pct, take_profit_pct
+        # One block, not one per side. The two branches carried identical arithmetic --
+        # only the literal differed -- which is why bybit and okx already ship this shape.
+        # `calculate_bracket_prices` runs BEFORE `trade()`, so a side that is neither long
+        # nor short raises there rather than reaching the venue as the `else` sell.
+        trade_side = "buy" if side == "long" else "sell"
+        stop_loss_price, take_profit_price = calculate_bracket_prices(
+            side, current_price, stop_loss_pct, take_profit_pct
+        )
+
+        try:
+            success = self.trader.trade(
+                side=trade_side,
+                quantity=quantity,
+                order_type="market",
+                take_profit=take_profit_price,
+                stop_loss=stop_loss_price,
             )
 
-            try:
-                success = self.trader.trade(
-                    side="buy",
-                    quantity=quantity,
-                    order_type="market",
-                    take_profit=take_profit_price,
-                    stop_loss=stop_loss_price,
-                )
+            if success:
+                # Only record SL/TP levels that actually placed on-exchange
+                bs = getattr(self.trader, "bracket_status",
+                             {"tp_placed": True, "sl_placed": True})
+                self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
+                self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
 
-                if success:
-                    # Only record SL/TP levels that actually placed on-exchange
-                    bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
-                    self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
-                    self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
-
-                trade_info.update({
-                    "executed": True,
-                    "quantity": quantity,
-                    "side": "buy",
-                    "success": success,
-                    "stop_loss": stop_loss_price,
-                    "take_profit": take_profit_price,
-                })
-            except Exception as e:
-                logger.error(f"Long trade failed for {self.config.symbol}: quantity={quantity}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
-                trade_info["success"] = False
-                return trade_info
-
-        elif side == "short":
-            # Open SHORT with SL/TP bracket order
-            stop_loss_price, take_profit_price = calculate_bracket_prices(
-                "short", current_price, stop_loss_pct, take_profit_pct
+            trade_info.update({
+                "executed": True,
+                "quantity": quantity,
+                "side": trade_side,
+                "success": success,
+                "stop_loss": stop_loss_price,
+                "take_profit": take_profit_price,
+            })
+        except Exception as e:
+            logger.error(
+                f"{side.capitalize()} trade failed for {self.config.symbol}: "
+                f"quantity={quantity}, SL={stop_loss_price:.2f}, "
+                f"TP={take_profit_price:.2f}, error={e}"
             )
-
-            try:
-                success = self.trader.trade(
-                    side="sell",
-                    quantity=quantity,
-                    order_type="market",
-                    take_profit=take_profit_price,
-                    stop_loss=stop_loss_price,
-                )
-
-                if success:
-                    bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
-                    self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
-                    self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
-
-                trade_info.update({
-                    "executed": True,
-                    "quantity": quantity,
-                    "side": "sell",
-                    "success": success,
-                    "stop_loss": stop_loss_price,
-                    "take_profit": take_profit_price,
-                })
-            except Exception as e:
-                logger.error(f"Short trade failed for {self.config.symbol}: quantity={quantity}, SL={stop_loss_price:.2f}, TP={take_profit_price:.2f}, error={e}")
-                trade_info["success"] = False
-                return trade_info
+            trade_info["success"] = False
 
         return trade_info

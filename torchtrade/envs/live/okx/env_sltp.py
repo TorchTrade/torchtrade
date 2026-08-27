@@ -112,6 +112,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
                 success = self.trader.close_position()
             except Exception as e:
                 logger.error(f"Close position failed for {self.config.symbol}: {e}")
+                trade_info["success"] = False
                 return trade_info
             if success:
                 # A realised close moves equity; the cached balance is now wrong by the
@@ -125,6 +126,10 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
                     "executed": True, "side": close_side,
                     "success": True, "closed_position": True,
                 })
+            else:
+                # A rejected close left the position open. Without this it returns
+                # success=None -- what HOLD returns -- so the refusal is invisible.
+                trade_info["success"] = False
             return trade_info
 
         # Check if already in same position

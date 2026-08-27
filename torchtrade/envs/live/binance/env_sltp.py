@@ -1,10 +1,8 @@
 from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Callable
-import logging
+from typing import Optional, Callable
 
 
-logger = logging.getLogger(__name__)
 from torchrl.data import Categorical
 
 from torchtrade.envs.live.binance.observation import BinanceObservationClass

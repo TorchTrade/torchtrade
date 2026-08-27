@@ -4658,6 +4658,28 @@ def test_the_dispatch_hook_is_inherited_where_it_is_not_deliberately_overridden(
     )
 
 
+@pytest.mark.parametrize("cls", _DISPATCH_INHERITORS, ids=lambda c: c.__name__)
+def test_the_folded_executor_is_inherited_and_not_re_forked(cls):
+    """`_execute_trade_if_needed` joined the mixin in #288, and nothing guarded it.
+
+    It cannot go in `_SHARED_METHOD_OWNERSHIP` -- bybit and okx legitimately override it
+    for the `*, current_price` fork -- so it needs this split form, the same one
+    `_dispatch_sltp_trade` already has. Verified the gap was real: appending a full copy
+    of the mixin's body back onto binance passed all 1202 tests. The sizing test only
+    greps the resolved source for `_resolve_bracket_quantity`, which a faithful re-fork
+    still contains.
+
+    This is the method the close-action bug lived in. A private copy is where the next
+    shared fix silently fails to land.
+    """
+    assert cls._execute_trade_if_needed is SLTPMixin._execute_trade_if_needed, (
+        f"{cls.__name__} defines its own _execute_trade_if_needed. Only bybit and okx "
+        f"have a reason to (the keyword-only current_price); if this venue now needs one, "
+        f"move it into _DISPATCH_OVERRIDERS deliberately rather than re-forking the copy "
+        f"that #288 just folded"
+    )
+
+
 @pytest.mark.parametrize("cls", _DISPATCH_OVERRIDERS, ids=lambda c: c.__name__)
 def test_the_dispatch_overriders_thread_the_price_they_were_given(cls):
     """And the two that DO override must consume the threaded price, not re-read it.
@@ -4820,8 +4842,9 @@ def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
     It does not prove a venue's executor then uses those values rather than re-reading;
     that is the venues' own contract, covered behaviourally by the SLTP grace-bar tests.
 
-    `_execute_trade_if_needed` is NOT shared, so this contract belongs where the shared
-    `_step` is owned rather than in one venue's file.
+    `_execute_trade_if_needed` is shared by binance and bitget as of #288 and overridden
+    by bybit/okx, so this contract belongs where the shared `_step` is owned rather than
+    in one venue's file -- and more so now that two venues resolve it from the mixin.
 
     The venue reports something DIFFERENT after the first read. That is the whole design:
     with the fixture's constant mocks a re-read returns the identical value, so the first
@@ -5038,8 +5061,39 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
     )
 
 
-@pytest.mark.parametrize("venue",
-                         [c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS])
+# binance/bitget resolve the folded copy; bybit/okx keep overrides (the `*, current_price`
+# fork). Both halves must hold: an override that stopped closing, and an inheritor that
+# re-forked a private copy, are the same bug in opposite directions.
+_CLOSE_INHERITORS = ["binance", "bitget"]
+_CLOSE_OVERRIDERS = ["bybit", "okx"]
+assert sorted(_CLOSE_INHERITORS + _CLOSE_OVERRIDERS) == sorted(
+    c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS), (
+    "a fifth futures SLTP venue appeared and is in neither close-action list"
+)
+
+
+def _close_env(venue, position):
+    """An SLTP env with `include_close_action` set BEFORE construction, so the action map
+    really contains the close slot rather than the test asserting a tuple it invented.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True,
+                                    include_close_action=True)
+    env.position.current_position = position
+    env.active_stop_loss, env.active_take_profit = 90.0, 110.0
+    env._last_confirmed_read["balance"] = 12345.0
+    return env, trader
+
+
+def _fire_close(env):
+    """Drive the CLOSE slot the action map actually emits, through either signature."""
+    idx, tup = next((i, a) for i, a in env.action_map.items() if a[0] == "close")
+    kw = ({"current_price": 100.0}
+          if "current_price" in inspect.signature(env._execute_trade_if_needed).parameters
+          else {})
+    return env._execute_trade_if_needed(tup, **kw), idx
+
+
+@pytest.mark.parametrize("venue", _CLOSE_INHERITORS + _CLOSE_OVERRIDERS)
 @pytest.mark.parametrize("position,expect_side", [(1, "sell"), (-1, "buy")],
                          ids=["long", "short"])
 def test_the_close_action_actually_closes_on_every_sltp_venue(venue, position, expect_side):
@@ -5048,28 +5102,103 @@ def test_the_close_action_actually_closes_on_every_sltp_venue(venue, position, e
     "short"` and returned executed=False: the policy asked to close, the position stayed
     open, and nothing said so (#288).
 
-    Parametrised over BOTH directions because the close side is derived from the sign --
-    a fold that reached for bybit's `"buy" if side == "long" else "sell"` without the
-    early return would turn the silent no-op into a wrong SELL on an open short.
+    BOTH directions, because the close side comes from the position sign -- reaching for
+    bybit's OPEN-side idiom (`"buy" if side == "long" else "sell"`) turns the silent
+    no-op into a wrong BUY on an open short, doubling the position instead of flattening
+    it. Only the short case kills that.
 
-    Asserting `close_position` was called AND the position went flat: a trade_info flag
-    alone would pass on an env that reports success without touching the exchange.
+    Every assertion here kills a distinct mutant: `called` alone catches a close that is
+    reported but never sent; `executed` alone catches the inverse; the flat check catches
+    a dropped state write; the bracket check catches levels that survive the close and
+    read as armed next step; the balance check is the #295 cache invalidation, without
+    which the next bracket sizes off pre-close equity.
     """
-    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
-    env.config.include_close_action = True
-    env.position.current_position = position
-    env.active_stop_loss, env.active_take_profit = 90.0, 110.0
-
-    kw = ({"current_price": 100.0}
-          if "current_price" in inspect.signature(env._execute_trade_if_needed).parameters
-          else {})
-    info = env._execute_trade_if_needed(("close", None, None), **kw)
+    env, trader = _close_env(venue, position)
+    info, _ = _fire_close(env)
 
     assert trader.close_position.called, (
         f"{venue}: a close action never reached the exchange -- the position is still open."
     )
     assert info["executed"] and info["side"] == expect_side
+    assert info["closed_position"] is True
     assert env.position.current_position == 0
     assert env.active_stop_loss == 0.0 and env.active_take_profit == 0.0, (
         f"{venue}: bracket levels survived the close and will be read as live next step."
     )
+    assert "balance" not in env._last_confirmed_read, (
+        f"{venue}: a realised close moved equity but the cached balance survived -- the "
+        f"next bracket sizes off pre-close equity (#295)."
+    )
+
+
+@pytest.mark.parametrize("venue", _CLOSE_INHERITORS + _CLOSE_OVERRIDERS)
+@pytest.mark.parametrize("outcome", ["refused", "raised"])
+def test_a_close_the_venue_rejects_is_not_reported_as_a_close(venue, outcome):
+    """`close_position()` returning False is a real production path -- both bybit's and
+    okx's executors return it when the re-query shows the position still open.
+
+    Reported as a success it is invariant #2 inverted: the env marks itself flat, clears
+    the brackets, and hands the policy a phantom-flat account while the venue still holds
+    the position. Nothing asserted this branch on ANY of the three implementations.
+
+    Both failure shapes, because they used to report differently: a REFUSED close and a
+    RAISED one both left `success=None` -- the value HOLD returns -- and the first patch
+    for this set it on the refusal path of the mixin only, which would have made binance
+    and bitget disagree with bybit and okx in a shared field. That is the same
+    "fix landed on some copies" shape #288 exists to remove, so it is pinned across all
+    four venues and both paths.
+    """
+    env, trader = _close_env(venue, 1)
+    if outcome == "refused":
+        trader.close_position.return_value = False
+    else:
+        trader.close_position.side_effect = RuntimeError("venue rejected the close")
+    info, _ = _fire_close(env)
+
+    assert not info["executed"], f"{venue}: a refused close reported as executed."
+    assert info["success"] is False, (
+        f"{venue}: a refused close returns success={info['success']!r}, which is what HOLD "
+        f"returns -- the refusal is invisible to the caller."
+    )
+    assert env.position.current_position == 1, (
+        f"{venue}: the position is still open at the venue but the env marked itself flat."
+    )
+    assert env.active_stop_loss == 90.0 and env.active_take_profit == 110.0, (
+        f"{venue}: brackets cleared on a close that did not happen."
+    )
+
+
+@pytest.mark.parametrize("venue", _CLOSE_INHERITORS + _CLOSE_OVERRIDERS)
+def test_a_close_on_a_flat_account_does_not_reach_the_venue(venue):
+    """The early return that makes the fold safe. Without it a CLOSE while flat spends a
+    round-trip every bar the policy picks it, and returns executed=True on a step that
+    traded nothing.
+
+    It is also the guard that stops `close_side` being derived from a zero position.
+    """
+    env, trader = _close_env(venue, 0)
+    info, _ = _fire_close(env)
+
+    assert not trader.close_position.called, (
+        f"{venue}: a close on a flat account still called the exchange."
+    )
+    assert not info["executed"]
+
+
+@pytest.mark.parametrize("venue", _CLOSE_INHERITORS + _CLOSE_OVERRIDERS)
+def test_position_locking_outranks_the_close_action(venue):
+    """`lock_position_until_sltp` means exits happen ONLY via SL/TP/liquidation -- it is
+    the OneStep-parity mode. A close action must not be a way around it.
+
+    This is why the close branch sits BELOW the lock guard and not above it. bybit and okx
+    each pinned this in their own file; binance and bitget pinned nothing, and the guard
+    they now share was unordered by any test.
+    """
+    env, trader = _close_env(venue, 1)
+    env.config.lock_position_until_sltp = True
+    info, _ = _fire_close(env)
+
+    assert not trader.close_position.called, (
+        f"{venue}: a close action bypassed lock_position_until_sltp."
+    )
+    assert env.position.current_position == 1
