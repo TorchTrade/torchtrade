@@ -679,18 +679,6 @@ class TestBybitSLTPLockPosition:
             mock_env_trader.trade.assert_not_called()
             mock_env_trader.close_position.assert_not_called()
 
-    def test_locked_ignores_close_action(self, locked_env, mock_env_trader):
-        """With lock=True, close action while in position should be ignored."""
-        with patch.object(locked_env, "_wait_for_next_timestamp"):
-            locked_env.reset()
-            locked_env.position.current_position = 1
-            mock_env_trader.reset_mock()  # Clear calls from reset/init
-
-            trade_info = locked_env._execute_trade_if_needed(("close", None, None), current_price=50000.0)
-
-            assert trade_info["executed"] is False
-            mock_env_trader.close_position.assert_not_called()
-
     def test_locked_allows_open_from_flat(self, locked_env, mock_env_trader):
         """With lock=True, opening a position from flat should still work."""
         with patch.object(locked_env, "_wait_for_next_timestamp"):

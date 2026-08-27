@@ -291,8 +291,13 @@ class SLTPMixin:
                 close_success = self.trader.close_position()
             except Exception as e:
                 logger.error(f"Close position failed for {self.config.symbol}: {e}")
+                trade_info["success"] = False
                 return trade_info
             if not close_success:
+                # Same contract as `_close_action`: without this the caller cannot tell a
+                # refused flatten from a HOLD, and the entry below must NOT go out -- the
+                # opposite position is still open at the venue.
+                trade_info["success"] = False
                 return trade_info
             self._last_confirmed_read.pop("balance", None)
             self.position.current_position = 0

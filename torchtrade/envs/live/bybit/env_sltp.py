@@ -131,8 +131,12 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
                 close_success = self.trader.close_position()
             except Exception as e:
                 logger.error(f"Close position failed for {self.config.symbol}: {e}")
+                trade_info["success"] = False
                 return trade_info
             if not close_success:
+                # Same contract as `_close_action`: a refused flatten must not read as
+                # HOLD, and the entry below must NOT go out.
+                trade_info["success"] = False
                 return trade_info
             # A realised close moves equity; the cached balance is now wrong by the
             # trade's P&L. Reached only on success (#295).
