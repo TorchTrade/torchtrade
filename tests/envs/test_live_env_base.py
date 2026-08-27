@@ -4217,9 +4217,13 @@ _SHARED_METHOD_OWNERSHIP = [
     # and target rounding), which its own behavioural test pins.
     *((c, TorchTradeFuturesLiveEnv, "_calculate_fractional_position")
       for c in PLAIN_FUTURES_ENVS if c.__module__.split(".")[-2] != "binance"),
+    # `_close_action` belongs in this uniform table where `_execute_trade_if_needed`
+    # cannot: all four venues share the close, only the price acquisition forked. It was
+    # three byte-identical copies (mixin, bybit, okx) until #288 -- one more than the two
+    # the fold set out to remove, and the copy the `success=False` contract first missed.
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
         "_step", "_reset", "_resolve_action_tuple", "_record_sltp_position",
-        "_reset_sltp_state",
+        "_reset_sltp_state", "_close_action",
     )),
 ]
 # By NAME, not by count. Dropping `_reset` from the matrix above passed 936 tests: the
@@ -4236,6 +4240,7 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("SLTPMixin", "_resolve_action_tuple"),
     ("SLTPMixin", "_record_sltp_position"),
     ("SLTPMixin", "_reset_sltp_state"),
+    ("SLTPMixin", "_close_action"),
 }
 
 
@@ -5061,15 +5066,10 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
     )
 
 
-# binance/bitget resolve the folded copy; bybit/okx keep overrides (the `*, current_price`
-# fork). Both halves must hold: an override that stopped closing, and an inheritor that
-# re-forked a private copy, are the same bug in opposite directions.
-_CLOSE_INHERITORS = ["binance", "bitget"]
-_CLOSE_OVERRIDERS = ["bybit", "okx"]
-assert sorted(_CLOSE_INHERITORS + _CLOSE_OVERRIDERS) == sorted(
-    c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS), (
-    "a fifth futures SLTP venue appeared and is in neither close-action list"
-)
+# Derived, not listed: a fifth venue joins these tests by existing rather than by
+# tripping an assert that tells someone to go edit a list. The inheritor/overrider split
+# is already expressed once, at _DISPATCH_INHERITORS.
+_SLTP_VENUES = sorted(c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS)
 
 
 def _close_env(venue, position):
@@ -5086,14 +5086,14 @@ def _close_env(venue, position):
 
 def _fire_close(env):
     """Drive the CLOSE slot the action map actually emits, through either signature."""
-    idx, tup = next((i, a) for i, a in env.action_map.items() if a[0] == "close")
+    tup = next(a for a in env.action_map.values() if a[0] == "close")
     kw = ({"current_price": 100.0}
           if "current_price" in inspect.signature(env._execute_trade_if_needed).parameters
           else {})
-    return env._execute_trade_if_needed(tup, **kw), idx
+    return env._execute_trade_if_needed(tup, **kw)
 
 
-@pytest.mark.parametrize("venue", _CLOSE_INHERITORS + _CLOSE_OVERRIDERS)
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
 @pytest.mark.parametrize("position,expect_side", [(1, "sell"), (-1, "buy")],
                          ids=["long", "short"])
 def test_the_close_action_actually_closes_on_every_sltp_venue(venue, position, expect_side):
@@ -5114,7 +5114,7 @@ def test_the_close_action_actually_closes_on_every_sltp_venue(venue, position, e
     which the next bracket sizes off pre-close equity.
     """
     env, trader = _close_env(venue, position)
-    info, _ = _fire_close(env)
+    info = _fire_close(env)
 
     assert trader.close_position.called, (
         f"{venue}: a close action never reached the exchange -- the position is still open."
@@ -5131,7 +5131,7 @@ def test_the_close_action_actually_closes_on_every_sltp_venue(venue, position, e
     )
 
 
-@pytest.mark.parametrize("venue", _CLOSE_INHERITORS + _CLOSE_OVERRIDERS)
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
 @pytest.mark.parametrize("outcome", ["refused", "raised"])
 def test_a_close_the_venue_rejects_is_not_reported_as_a_close(venue, outcome):
     """`close_position()` returning False is a real production path -- both bybit's and
@@ -5153,7 +5153,7 @@ def test_a_close_the_venue_rejects_is_not_reported_as_a_close(venue, outcome):
         trader.close_position.return_value = False
     else:
         trader.close_position.side_effect = RuntimeError("venue rejected the close")
-    info, _ = _fire_close(env)
+    info = _fire_close(env)
 
     assert not info["executed"], f"{venue}: a refused close reported as executed."
     assert info["success"] is False, (
@@ -5168,7 +5168,7 @@ def test_a_close_the_venue_rejects_is_not_reported_as_a_close(venue, outcome):
     )
 
 
-@pytest.mark.parametrize("venue", _CLOSE_INHERITORS + _CLOSE_OVERRIDERS)
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
 def test_a_close_on_a_flat_account_does_not_reach_the_venue(venue):
     """The early return that makes the fold safe. Without it a CLOSE while flat spends a
     round-trip every bar the policy picks it, and returns executed=True on a step that
@@ -5177,7 +5177,7 @@ def test_a_close_on_a_flat_account_does_not_reach_the_venue(venue):
     It is also the guard that stops `close_side` being derived from a zero position.
     """
     env, trader = _close_env(venue, 0)
-    info, _ = _fire_close(env)
+    info = _fire_close(env)
 
     assert not trader.close_position.called, (
         f"{venue}: a close on a flat account still called the exchange."
@@ -5185,7 +5185,7 @@ def test_a_close_on_a_flat_account_does_not_reach_the_venue(venue):
     assert not info["executed"]
 
 
-@pytest.mark.parametrize("venue", _CLOSE_INHERITORS + _CLOSE_OVERRIDERS)
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
 def test_position_locking_outranks_the_close_action(venue):
     """`lock_position_until_sltp` means exits happen ONLY via SL/TP/liquidation -- it is
     the OneStep-parity mode. A close action must not be a way around it.
@@ -5196,7 +5196,7 @@ def test_position_locking_outranks_the_close_action(venue):
     """
     env, trader = _close_env(venue, 1)
     env.config.lock_position_until_sltp = True
-    info, _ = _fire_close(env)
+    info = _fire_close(env)
 
     assert not trader.close_position.called, (
         f"{venue}: a close action bypassed lock_position_until_sltp."

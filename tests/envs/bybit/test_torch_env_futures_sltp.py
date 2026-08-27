@@ -354,35 +354,6 @@ class TestBybitDuplicateActionPrevention:
         assert mock_trader.trade.call_args.kwargs["side"] == expected_side
 
 
-class TestBybitSLTPCloseAction:
-    """Tests for close action when include_close_action=True."""
-
-    @pytest.fixture
-    def env_with_close(self, mock_env_observer, mock_env_trader):
-        from torchtrade.envs.live.bybit.env_sltp import (
-            BybitFuturesSLTPTorchTradingEnv,
-            BybitFuturesSLTPTradingEnvConfig,
-        )
-
-        config = BybitFuturesSLTPTradingEnvConfig(
-            symbol="BTCUSDT",
-            time_frames=["1m"],
-            window_sizes=[10],
-            stoploss_levels=(-0.02,),
-            takeprofit_levels=(0.03,),
-            include_close_action=True,
-        )
-
-        with patch("time.sleep"), \
-             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = BybitFuturesSLTPTorchTradingEnv(
-                config=config, observer=mock_env_observer, trader=mock_env_trader,
-            )
-
-        # Reset mock call counts from __init__ cleanup so tests only see
-        # calls from the action under test
-        mock_env_trader.reset_mock()
-        return env
 
 class TestBybitSLTPMarkPrice:
     """Test that SLTP bracket orders use mark price instead of candle close."""

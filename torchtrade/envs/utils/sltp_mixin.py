@@ -174,6 +174,43 @@ class SLTPMixin:
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
 
+    def _close_action(self, trade_info: dict) -> dict:
+        """Flatten the position. One copy for all four futures SLTP venues (#288).
+
+        Was three byte-identical copies -- the mixin's, bybit's and okx's -- which is one
+        more than the two this PR set out to fold. It had already cost a round: the
+        `success=False` contract below first landed on the mixin alone, so binance and
+        bitget disagreed with bybit and okx about what a refused close reports.
+
+        Sits ABOVE the caller's price read on purpose. A policy must still be able to
+        flatten under a degraded feed, which a stale-bar ValueError would otherwise block.
+        """
+        if self.position.current_position == 0:
+            return trade_info
+        try:
+            success = self.trader.close_position()
+        except Exception as e:
+            logger.error(f"Close position failed for {self.config.symbol}: {e}")
+            trade_info["success"] = False
+            return trade_info
+        if success:
+            # A realised close moves equity; the cached balance is now wrong by the
+            # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
+            self._last_confirmed_read.pop("balance", None)
+            close_side = "sell" if self.position.current_position > 0 else "buy"
+            self.position.current_position = 0
+            self.active_stop_loss = 0.0
+            self.active_take_profit = 0.0
+            trade_info.update({
+                "executed": True, "side": close_side,
+                "success": True, "closed_position": True,
+            })
+        else:
+            # Otherwise a refused close returns success=None -- what HOLD returns -- and
+            # the refusal is invisible to the caller.
+            trade_info["success"] = False
+        return trade_info
+
     def _execute_trade_if_needed(
         self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]]
     ) -> Dict:
@@ -208,46 +245,15 @@ class SLTPMixin:
         if self.config.lock_position_until_sltp and self.position.current_position != 0:
             return trade_info
 
-        # Above the price read on purpose: a policy must still be able to flatten under
-        # a degraded feed, which a stale-bar ValueError would otherwise block (#288).
         if side == "close":
-            if self.position.current_position == 0:
-                return trade_info
-            try:
-                success = self.trader.close_position()
-            except Exception as e:
-                logger.error(f"Close position failed for {self.config.symbol}: {e}")
-                trade_info["success"] = False
-                return trade_info
-            if success:
-                # A realised close moves equity; the cached balance is now wrong by the
-                # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
-                self._last_confirmed_read.pop("balance", None)
-                close_side = "sell" if self.position.current_position > 0 else "buy"
-                self.position.current_position = 0
-                self.active_stop_loss = 0.0
-                self.active_take_profit = 0.0
-                trade_info.update({
-                    "executed": True, "side": close_side,
-                    "success": True, "closed_position": True,
-                })
-            else:
-                # A rejected close left the position open. Without this it returns
-                # {"executed": False, "success": None} -- indistinguishable from HOLD,
-                # which is the exact silence this commit exists to remove.
-                trade_info["success"] = False
+            return self._close_action(trade_info)
+
+        if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
-        # Check if already in same position (ignore duplicate actions)
-        if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
-            return trade_info  # Already in this position, ignore duplicate action
-
-        # Under `_halting`, read AND verdict (#295). `get_observations` raises ValueError
-        # on a short window or a stale last bar, and this sat outside the policy -- so a
-        # degraded feed escaped as a bare ValueError in EVERY trade_mode, since this runs
-        # before the mode branch. bybit/okx take a threaded mark instead; these two price
-        # brackets off the candle close deliberately, so the read stays rather than being
-        # replaced by the mark.
+        # Read AND verdict under `_halting` (#295): `get_observations` raises on a short
+        # window or a stale bar, and outside the policy that escapes as a bare ValueError.
+        # bybit/okx take a threaded mark; these two price off the candle close on purpose.
         def read_close():
             obs = self.observer.get_observations(return_base_ohlc=True)
             current_price = float(obs["base_features"][-1, 3])
@@ -272,10 +278,9 @@ class SLTPMixin:
             trade_info["success"] = False
             return trade_info
 
-        # Switching directions: flatten first. A non-zero position here IS the opposite
-        # one -- `side` is long or short by now, and the duplicate guard above already
-        # returned on a same-direction position -- so the per-side test binance and bitget
-        # both carried was an unreachable-false branch. bybit had already dropped it.
+        # Switching directions: flatten first. No per-side test, because a non-zero
+        # position here IS the opposite one -- `side` is long or short by now, and the
+        # duplicate guard above already returned on a same-direction position.
         if self.position.current_position != 0:
             try:
                 close_success = self.trader.close_position()
@@ -287,10 +292,9 @@ class SLTPMixin:
             self._last_confirmed_read.pop("balance", None)
             self.position.current_position = 0
 
-        # One block, not one per side. The two branches carried identical arithmetic --
-        # only the literal differed -- which is why bybit and okx already ship this shape.
-        # `calculate_bracket_prices` runs BEFORE `trade()`, so a side that is neither long
-        # nor short raises there rather than reaching the venue as the `else` sell.
+        # `calculate_bracket_prices` runs BEFORE `trade()`, which is what makes the
+        # `else "sell"` safe: a side that is neither long nor short raises there rather
+        # than reaching the venue as a sell order.
         trade_side = "buy" if side == "long" else "sell"
         stop_loss_price, take_profit_price = calculate_bracket_prices(
             side, current_price, stop_loss_pct, take_profit_pct

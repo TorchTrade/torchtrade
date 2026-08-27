@@ -252,24 +252,6 @@ class TestOKXDuplicateActionPrevention:
         assert mock_trader.trade.call_args.kwargs["side"] == expected_side
 
 
-class TestOKXSLTPCloseAction:
-    """Tests for close action when include_close_action=True."""
-
-    @pytest.fixture
-    def env_with_close(self, mock_env_observer, mock_env_trader):
-        from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig
-
-        config = OKXFuturesSLTPTradingEnvConfig(
-            symbol="BTC-USDT-SWAP", time_frames=["1m"], window_sizes=[10],
-            stoploss_levels=(-0.02,), takeprofit_levels=(0.03,), include_close_action=True,
-        )
-        with patch("time.sleep"), \
-             patch.object(OKXFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = OKXFuturesSLTPTorchTradingEnv(
-                config=config, observer=mock_env_observer, trader=mock_env_trader,
-            )
-        mock_env_trader.reset_mock()
-        return env
 
 class TestOKXSLTPNotionalTradeMode:
     """Test notional (USD) trade mode for OKX SLTP environment."""

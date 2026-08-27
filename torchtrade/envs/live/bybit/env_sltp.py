@@ -102,35 +102,9 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         if self.config.lock_position_until_sltp and self.position.current_position != 0:
             return trade_info
 
-        # CLOSE action - close any open position
         if side == "close":
-            if self.position.current_position == 0:
-                return trade_info
-            try:
-                success = self.trader.close_position()
-            except Exception as e:
-                logger.error(f"Close position failed for {self.config.symbol}: {e}")
-                trade_info["success"] = False
-                return trade_info
-            if success:
-                # A realised close moves equity; the cached balance is now wrong by the
-                # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
-                self._last_confirmed_read.pop("balance", None)
-                close_side = "sell" if self.position.current_position > 0 else "buy"
-                self.position.current_position = 0
-                self.active_stop_loss = 0.0
-                self.active_take_profit = 0.0
-                trade_info.update({
-                    "executed": True, "side": close_side,
-                    "success": True, "closed_position": True,
-                })
-            else:
-                # A rejected close left the position open. Without this it returns
-                # success=None -- what HOLD returns -- so the refusal is invisible.
-                trade_info["success"] = False
-            return trade_info
+            return self._close_action(trade_info)
 
-        # Check if already in same position
         if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
