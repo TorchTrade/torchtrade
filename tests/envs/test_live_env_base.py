@@ -5305,17 +5305,29 @@ def test_a_policy_can_still_flatten_when_the_feed_is_degraded(venue):
     assert info["executed"] and env.position.current_position == 0
 
 
-@pytest.mark.parametrize("venue", ["binance", "bitget"])
-def test_an_unrecognised_side_reaches_no_venue_call_at_all(venue):
-    """Collapsing the per-side test made the direction-switch flatten unconditional, so a
-    side that is neither long nor short flattened the position and THEN raised on the way
-    to reopening it -- worse than the silent no-op it replaced, because it moves money.
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("sizeable", [True, False], ids=["sizeable", "unsizeable"])
+def test_an_unrecognised_side_reaches_no_venue_call_at_all(venue, sizeable):
+    """A bad side must fail the same way on every path, before touching the venue.
 
-    Pricing the bracket first restores fail-closed. Unreachable through the action map,
-    but ~40 tests call this method directly with hand-built tuples, so "unreachable" here
-    rests on the caller rather than on the method.
+    It did neither. Leaving validation to `calculate_bracket_prices` made it
+    PATH-DEPENDENT: on the sizing-refusal path that call is never reached, so the same
+    input raised on one path and returned success=False on another. And because the
+    helper runs after the direction-switch flatten, bybit and okx CLOSED a live position
+    and then raised on the way to reopening it -- a silent no-op replaced by one that
+    moves money.
+
+    Unreachable through the action map, which emits only None/close/long/short. But ~40
+    tests call this method directly with hand-built tuples, so "unreachable" rests on the
+    caller rather than on the method, and the guard belongs at the boundary either way
+    (CLAUDE.md invariant 4).
+
+    Both axes are the test: `unsizeable` is the path that used to swallow it, and the
+    four venues are three separate implementations that used to disagree.
     """
     env, trader = _close_env(venue, 1)
+    if not sizeable:
+        env._resolve_bracket_quantity = lambda price: None
 
     with pytest.raises(ValueError, match="Invalid side"):
         env._dispatch_sltp_trade(("bogus", -0.02, 0.03), 100.0)

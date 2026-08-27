@@ -244,6 +244,14 @@ class SLTPMixin:
         if side == "close":
             return self._close_action(trade_info)
 
+        # Validated HERE, not by `calculate_bracket_prices` further down, because that is
+        # path-dependent: on the sizing-refusal path it is never reached, so the same bad
+        # side raises on one path and returns success=False on another. Above every venue
+        # call, so it cannot flatten a live position and then fail on the way to
+        # reopening it (which is what bybit and okx did).
+        if side not in self.SIDE_DIRECTION:
+            raise ValueError(f"Invalid side: {side}. Must be 'long' or 'short'.")
+
         if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
@@ -274,15 +282,6 @@ class SLTPMixin:
             trade_info["success"] = False
             return trade_info
 
-        # Priced BEFORE anything reaches the venue -- including the flatten below, not
-        # just `trade()`. `calculate_bracket_prices` rejects any side that is neither
-        # long nor short, so a bad side fails closed here rather than closing a position
-        # and then raising on the way to reopening it.
-        trade_side = "buy" if side == "long" else "sell"
-        stop_loss_price, take_profit_price = calculate_bracket_prices(
-            side, current_price, stop_loss_pct, take_profit_pct
-        )
-
         # Switching directions: flatten first. No per-side test, because a non-zero
         # position here IS the opposite one -- `side` is long or short by now, and the
         # duplicate guard above already returned on a same-direction position.
@@ -301,6 +300,11 @@ class SLTPMixin:
                 return trade_info
             self._last_confirmed_read.pop("balance", None)
             self.position.current_position = 0
+
+        trade_side = "buy" if side == "long" else "sell"
+        stop_loss_price, take_profit_price = calculate_bracket_prices(
+            side, current_price, stop_loss_pct, take_profit_pct
+        )
 
         try:
             success = self.trader.trade(

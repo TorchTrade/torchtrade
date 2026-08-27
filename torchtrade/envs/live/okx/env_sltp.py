@@ -107,6 +107,11 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
         if side == "close":
             return self._close_action(trade_info)
 
+        # Same boundary guard as SLTPMixin's -- see there for why it is not left to
+        # `calculate_bracket_prices` further down.
+        if side not in self.SIDE_DIRECTION:
+            raise ValueError(f"Invalid side: {side}. Must be 'long' or 'short'.")
+
         if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
