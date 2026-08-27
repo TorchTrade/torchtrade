@@ -4285,16 +4285,6 @@ def _sizing_stub(cls, *, leverage=10, balance=10_000.0, min_notional=0.0,
     return env
 
 
-# Derived from the registry so a fifth venue fails here rather than on its first live
-# trade. The values stay literal: the failure guarded against is every venue reading ONE
-# fee, which a derived expected value would reproduce.
-_EXPECTED_TAKER_FEES = {
-    "binance": 0.0004, "bitget": 0.0006, "bybit": 0.00055, "okx": 0.0005,
-}
-assert set(_EXPECTED_TAKER_FEES) == {c.__module__.split(".")[-2]
-                                     for c in PLAIN_FUTURES_ENVS}
-
-
 @pytest.mark.parametrize("cls", PLAIN_FUTURES_ENVS + SLTP_FUTURES_ENVS,
                          ids=lambda c: c.__name__)
 def test_every_class_that_inherits_the_shared_sizing_can_run_it(cls):
@@ -4336,14 +4326,20 @@ _GOLDEN_SIZINGS = [
 # Pre-fold values, read off `main` before #415 moved the block. One row per venue at a
 # single leverage: unlike the plain golden table, nothing downstream of this method varies
 # by venue except `TAKER_FEE`, so a leverage axis would be decoration rather than evidence.
-PLAIN_VENUES_SLTP = [c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS]
-
+# Completeness pinned, not just the values: a fifth venue would otherwise drop out of this
+# table silently while the other SLTP tests picked it up. Shrinkage is the hazard, not
+# emptiness -- an empty parametrize is already a collection error here.
 _GOLDEN_BRACKET_QUANTITIES = [
     ("binance", 489.02195608782426),
     ("bitget", 488.5343968095713),
     ("bybit", 488.6561954624782),
     ("okx", 488.77805486284296),
 ]
+
+
+assert {v for v, _ in _GOLDEN_BRACKET_QUANTITIES} == {
+    c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS
+}
 
 
 def _bracket_stub(cls, *, balance=10_000.0, leverage=5, fee=...):
@@ -4367,25 +4363,22 @@ def _bracket_stub(cls, *, balance=10_000.0, leverage=5, fee=...):
     return env
 
 
-@pytest.mark.parametrize("venue", PLAIN_VENUES_SLTP)
+@pytest.mark.parametrize("venue",
+                         [c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS])
 def test_a_bracket_that_cannot_be_sized_is_a_failed_trade_on_every_venue(venue):
     """The `None` contract #415 introduced, at the four call sites rather than the helper.
 
     Returning 0.0 instead of refusing submits a zero-quantity order. That dies here for
-    bybit and bitget; for okx it is caught by its own min-qty short-circuit, and for
-    binance the executor refuses below the step size -- so the four venues are protected
-    by three different mechanisms and only two of them are this test's doing.
+    binance, bitget and bybit -- none of the three has a guard between the sizing call and
+    `trader.trade`. okx alone survives it, absorbed by its own min-qty short-circuit, so
+    okx's protection is not this test's doing and needs its own coverage.
 
     Flipping `success` to True is NOT caught, and should not be: with `executed` False,
     `_record_position_after_trade` returns before reading `success`, so the two are
     indistinguishable. A reviewer flagged it as a phantom-position risk; I traced it and
     the cost does not follow.
 
-    total_margin_balance 0.0 is not a contrived input: it is what a venue reports while
-    liquidating you, per the comment on the guard that produces the None.
     """
-    from tests.envs.test_live_observation_failsafe import _real_futures_env
-
     env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
     env.config.trade_mode = "fractional"
     trader.get_account_balance.return_value = {
@@ -4404,6 +4397,23 @@ def test_a_bracket_that_cannot_be_sized_is_a_failed_trade_on_every_venue(venue):
         f"{venue} recorded position {env.position.current_position} for a bracket that "
         f"was never placed; the next bar's duplicate-action guard trusts that"
     )
+
+
+def test_an_unrecognised_trade_mode_refuses_rather_than_sizing_as_fractional():
+    """The dispatch's fall-through, which deleting was killed by nothing.
+
+    `fractional` is the fall-through branch, not an explicit one, so removing the raise
+    does not surface an error -- it sizes an unknown mode against real equity using the
+    fractional path. The config validates `trade_mode` at construction, but it is a
+    mutable dataclass field and both this file's stubs set it directly.
+    """
+    cls = _sole(importlib.import_module("torchtrade.envs.live.binance.env_sltp"),
+                "TorchTradingEnv")
+    env = _bracket_stub(cls)
+    env.config.trade_mode = "margin"
+
+    with pytest.raises(ValueError, match="Unsupported trade_mode"):
+        env._resolve_bracket_quantity(100.0)
 
 
 @pytest.mark.parametrize("venue,expected", _GOLDEN_BRACKET_QUANTITIES)

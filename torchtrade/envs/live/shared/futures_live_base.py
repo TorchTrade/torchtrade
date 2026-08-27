@@ -173,8 +173,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """Target position size from a fractional action, for all four futures venues.
         """
         # Above the balance read on purpose: a flat action must not need the exchange.
-        # No caller reaches this today -- all four pre-filter zero -- so it guards a
-        # caller that stops doing so, not a live path.
+        # No caller reaches this today -- all four pre-filter zero.
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
 
@@ -213,16 +212,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         None means the account cannot be sized against, and the caller reports a FAILED
         TRADE rather than halting. The plain path raises inside the `_halting` closure so
-        the same input becomes a halt instead. That divergence predates this fold and is
-        preserved by it, not endorsed: a venue reporting equity 0.0 mid-liquidation gets
-        `success=False` here, no grace counter and no truncation, and retries next bar.
-        Moving the verdict inside the closure is #295's shape and belongs in its own PR.
+        the same input becomes a halt instead -- a divergence this fold preserves rather
+        than endorses (#416).
         """
         if self.config.trade_mode == "notional":
             return float(self.config.quantity_per_trade) / current_price
         if self.config.trade_mode == "quantity":
             return float(self.config.quantity_per_trade)
         if self.config.trade_mode != "fractional":
+            # The config validates this in `__post_init__`, whose docstring says nothing
+            # downstream should guard. This is not that guard: it is the fall-through of
+            # an exhaustive dispatch, and deleting it would size an unknown mode as
+            # fractional rather than failing.
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
         # total_margin_balance, not total_wallet_balance: binance's wallet figure excludes
@@ -246,8 +247,6 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             fee = self.TAKER_FEE if raw is None else float(raw)
         except (TypeError, ValueError):
             fee = None
-        # NaN and both infinities fail this range test on their own; an isfinite term here
-        # could never change an outcome.
         if fee is None or not 0 <= fee < 1:
             logger.warning(
                 f"{self.config.symbol}: trader.transaction_fee={raw!r} is not a usable "
