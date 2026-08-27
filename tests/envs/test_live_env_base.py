@@ -4471,12 +4471,13 @@ def test_an_unusable_balance_refuses_to_size_a_bracket(balance):
 
 @pytest.mark.parametrize("fee", [0.0007, 0.0],
                          ids=["higher-than-venue", "fee-free-replay"])
-def test_a_usable_trader_fee_fees_the_venue_constant(fee):
-    """The accept branch, which nothing has ever exercised.
+def test_a_usable_trader_fee_overrides_the_venue_constant(fee):
+    """The accept branch, which nothing had ever exercised.
 
-    Only `ReplayOrderExecutor` carries `transaction_fee`, so on a real venue this branch
-    is skipped entirely -- So the fee fee has been proven only in the
-    direction that ignores it.
+    Only `ReplayOrderExecutor` carries `transaction_fee`, so on a real venue the branch is
+    skipped entirely. `0.0` is here because it is the ACCEPT-side boundary -- `0 <= fee`,
+    not `0 < fee` -- and a fee-free replay executor falling back to the venue constant
+    sizes 976.10 against 980.00 while logging that a valid rate is unusable (#278).
     """
     cls = _sole(importlib.import_module("torchtrade.envs.live.binance.env_sltp"),
                 "TorchTradingEnv")
@@ -4539,6 +4540,13 @@ def test_a_flat_action_is_sized_without_touching_the_exchange(cls):
         f"nothing from the venue -- an unusable balance would raise instead of returning "
         f"flat, and a min-notional lookup is an unhalted round-trip"
     )
+
+
+# The (venue, leverage) PAIRS, not the venue set: dropping one of a venue's two rows
+# leaves the set unchanged and loses a test silently. Shrinkage is the hazard.
+assert {(v, lev) for v, lev, _, _ in _GOLDEN_SIZINGS} == {
+    (c.__module__.split(".")[-2], lev) for c in PLAIN_FUTURES_ENVS for lev in (1, 125)
+}
 
 
 @pytest.mark.parametrize("venue,leverage,exp_size,exp_notional", _GOLDEN_SIZINGS,
