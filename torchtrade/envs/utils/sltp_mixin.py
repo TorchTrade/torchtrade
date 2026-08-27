@@ -29,11 +29,7 @@ class SLTPMixin:
     mixin now depends on the whole live-env surface, not just SLTP state:
         state   - position.current_position, active_stop_loss, active_take_profit,
                   action_map (dense index -> (side, sl, tp)), history, reward_function
-        venue   - trader.get_status(); and _execute_trade_if_needed(), which this mixin
-                  now PROVIDES for binance/bitget and bybit/okx/alpaca override. The
-                  provided copy is futures-only: it needs _halting,
-                  _resolve_bracket_quantity and _last_confirmed_read, none of which
-                  alpaca (spot) has -- so alpaca's override is load-bearing, not style.
+        venue   - trader.get_status()
         step    - _acquire_pre_trade_state(), _acquire_post_bar_state(),
                   _wait_for_next_timestamp(), _check_termination(),
                   _finalize_step_flags()
@@ -198,7 +194,6 @@ class SLTPMixin:
             # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
             self._last_confirmed_read.pop("balance", None)
             close_side = "sell" if self.position.current_position > 0 else "buy"
-            self.position.current_position = 0
             self.active_stop_loss = 0.0
             self.active_take_profit = 0.0
             trade_info.update({
@@ -278,6 +273,15 @@ class SLTPMixin:
             trade_info["success"] = False
             return trade_info
 
+        # Priced BEFORE anything reaches the venue -- including the flatten below, not
+        # just `trade()`. `calculate_bracket_prices` rejects any side that is neither
+        # long nor short, so a bad side fails closed here rather than closing a position
+        # and then raising on the way to reopening it.
+        trade_side = "buy" if side == "long" else "sell"
+        stop_loss_price, take_profit_price = calculate_bracket_prices(
+            side, current_price, stop_loss_pct, take_profit_pct
+        )
+
         # Switching directions: flatten first. No per-side test, because a non-zero
         # position here IS the opposite one -- `side` is long or short by now, and the
         # duplicate guard above already returned on a same-direction position.
@@ -291,14 +295,6 @@ class SLTPMixin:
                 return trade_info
             self._last_confirmed_read.pop("balance", None)
             self.position.current_position = 0
-
-        # `calculate_bracket_prices` runs BEFORE `trade()`, which is what makes the
-        # `else "sell"` safe: a side that is neither long nor short raises there rather
-        # than reaching the venue as a sell order.
-        trade_side = "buy" if side == "long" else "sell"
-        stop_loss_price, take_profit_price = calculate_bracket_prices(
-            side, current_price, stop_loss_pct, take_profit_pct
-        )
 
         try:
             success = self.trader.trade(
