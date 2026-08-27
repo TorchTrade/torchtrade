@@ -2167,11 +2167,15 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
     cls = _sole(importlib.import_module(f"torchtrade.envs.live.{exchange}.env_sltp"),
                 "TorchTradingEnv")
     venue_src = inspect.getsource(cls._execute_trade_if_needed)
-    # `inspect.getsource` follows inheritance, so it returns the shared helper even for a
-    # venue that has re-inlined its own unguarded copy and stopped calling it.
-    assert "_resolve_bracket_quantity" in venue_src, (
-        f"{exchange}'s trade path no longer delegates to the shared sizing; the assertion "
-        f"below would then be reading a helper this venue does not call"
+    # An AST call, not a substring. `inspect.getsource` follows inheritance, so it returns
+    # the shared helper even for a venue that has stopped calling it -- and a substring
+    # check passes on an inlined copy that merely MENTIONS the name in a comment.
+    calls = [n for n in ast.walk(ast.parse(textwrap.dedent(venue_src)))
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "_resolve_bracket_quantity"]
+    assert calls, (
+        f"{exchange}'s trade path does not CALL the shared sizing; an inlined copy that "
+        f"names it in a comment would satisfy a text search"
     )
     if exchange in ("binance", "bitget"):
         # These two size from a candle close, so _current_mark_price() never guards them.
@@ -4412,6 +4416,54 @@ def test_an_unrecognised_trade_mode_refuses_rather_than_sizing_as_fractional():
 
     with pytest.raises(ValueError, match="Unsupported trade_mode"):
         env._resolve_bracket_quantity(100.0)
+
+
+def test_okx_refuses_a_sub_minimum_bracket_rather_than_letting_it_be_clamped_up():
+    """okx keeps a min-qty branch the other three do not, and deleting it stayed green.
+
+    It is not redundant caution: okx's `_format_size` FLOORS then clamps UP to `min_qty`,
+    so a 0.0001 target becomes a 0.001 order -- ten times the intended position, silently.
+    binance raises below the step, bitget floors and lets the venue reject, bybit sends
+    the raw value. okx is the only venue where a sub-minimum quantity becomes a LARGER
+    position rather than a rejected one.
+    """
+    from tests.envs.test_live_observation_failsafe import _real_futures_env
+
+    env, trader = _real_futures_env(budget=0, venue="okx", sltp=True)
+    env.config.trade_mode = "quantity"
+    env.config.quantity_per_trade = 0.0001          # below the 0.001 min_qty
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+
+    td = env.reset()
+    env.active_stop_loss, env.active_take_profit = 111.0, 222.0
+    env.step(td.set("action", torch.tensor(1)))
+
+    assert not trader.trade.called, (
+        "okx submitted a sub-minimum bracket; its executor clamps that UP to min_qty, so "
+        "the venue would have opened a position ten times the size asked for"
+    )
+
+
+@pytest.mark.parametrize("fraction", [-0.5, 0.0], ids=["negative", "zero"])
+def test_a_non_positive_sized_quantity_is_refused_not_handed_to_the_venue(fraction):
+    """The one deliberate behaviour change in #415, pinned.
+
+    `position_fraction` is validated to (0, 1.0] at construction, so this is unreachable
+    from a well-formed config -- but the four venue formatters disagree about what a
+    negative quantity means, and one of them turns it into a trade: okx floors -244.5 and
+    clamps up to min_qty, yielding a 0.001 LONG. bitget and bybit forward it and rely on
+    the exchange. Refusing in the shared helper is the only outcome that is the same on
+    all four.
+
+    Re-adding `abs()` here is what this catches: it would return a plausible positive
+    quantity instead.
+    """
+    cls = _sole(importlib.import_module("torchtrade.envs.live.binance.env_sltp"),
+                "TorchTradingEnv")
+    env = _bracket_stub(cls)
+    env.config.position_fraction = fraction
+
+    assert env._resolve_bracket_quantity(100.0) is None
 
 
 @pytest.mark.parametrize("mode,per_trade,price,expected", [

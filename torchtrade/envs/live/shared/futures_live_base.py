@@ -252,15 +252,28 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             fee = self.TAKER_FEE
         # Same 0.98 maintenance buffer as `_calculate_fractional_position`.
         # No abs(): `position_fraction` is validated to (0, 1.0], so direction is always
-        # +1 here. Wrapping it would launder a corrupted fraction into a plausible positive
-        # quantity rather than letting a negative reach the venue and be refused.
-        return calculate_fractional_position(PositionCalculationParams(
+        # +1 and the wrap would be dead -- but a dead `abs()` is not harmless, it launders
+        # a corrupted fraction into a plausible positive order.
+        #
+        # Refusing here rather than letting a bad value reach the venue, because the four
+        # formatters disagree about what a negative quantity means: okx FLOORS it and then
+        # clamps up to min_qty, turning -244.5 into a 0.001 long; bitget and bybit pass it
+        # through and rely on the exchange to reject. One deterministic refusal beats three
+        # different downstream behaviours.
+        quantity = calculate_fractional_position(PositionCalculationParams(
             balance=balance * 0.98,
             action_value=self.config.position_fraction,
             current_price=current_price,
             leverage=self.config.leverage,
             transaction_fee=fee,
         ))[0]
+        if not quantity > 0:
+            logger.error(
+                f"{self.config.symbol}: sizing produced {quantity!r}, refusing rather than "
+                f"handing it to the venue formatter"
+            )
+            return None
+        return quantity
 
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).
