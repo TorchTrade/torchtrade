@@ -2169,12 +2169,21 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
     venue_src = inspect.getsource(cls._execute_trade_if_needed)
     sizing_src = inspect.getsource(cls._resolve_bracket_quantity)
 
+    # Delegation, not just the resolved source. `inspect.getsource` follows inheritance,
+    # so it returns the shared helper even for a venue that has re-inlined its own
+    # unguarded copy and stopped calling it -- the one capability the file-text scan this
+    # replaced used to have.
+    assert "_resolve_bracket_quantity" in venue_src, (
+        f"{exchange}'s trade path no longer delegates to the shared sizing; the assertion "
+        f"below would then be reading a helper this venue does not call"
+    )
     assert "math.isfinite(balance)" in sizing_src, (
         f"{exchange} SLTP sizing still lets a non-finite balance through"
     )
     if exchange in ("binance", "bitget"):
         # These two size from a candle close, so _current_mark_price() never guards them.
-        # bybit and okx go through it, which makes a second price check there dead code.
+        # bybit and okx re-validate at the seam that uses it -- #295 threading moved the
+        # read out of _current_mark_price, so that check is live, not dead.
         assert "math.isfinite(current_price)" in venue_src, (
             f"{exchange} sizes from a candle close with no finiteness check"
         )
