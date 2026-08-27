@@ -2157,15 +2157,21 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
     about -- and binance/bitget size from a candle close, so the validated mark-price
     accessor never entered their path at all.
     """
-    src = (pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent
-           / "live" / exchange / "env_sltp.py").read_text()
-    assert "math.isfinite(balance)" in src, (
+    # The RESOLVED methods, following the delegation. A file scan of `env_sltp.py` broke
+    # the moment #288 folded the bracket sizing onto the shared base -- the guard stopped
+    # seeing its own subject, which is the failure it exists to prevent in the code.
+    cls = _sole(importlib.import_module(f"torchtrade.envs.live.{exchange}.env_sltp"),
+                "TorchTradingEnv")
+    venue_src = inspect.getsource(cls._execute_trade_if_needed)
+    sizing_src = inspect.getsource(cls._resolve_bracket_quantity)
+
+    assert "math.isfinite(balance)" in sizing_src, (
         f"{exchange} SLTP sizing still lets a non-finite balance through"
     )
     if exchange in ("binance", "bitget"):
         # These two size from a candle close, so _current_mark_price() never guards them.
         # bybit and okx go through it, which makes a second price check there dead code.
-        assert "math.isfinite(current_price)" in src, (
+        assert "math.isfinite(current_price)" in venue_src, (
             f"{exchange} sizes from a candle close with no finiteness check"
         )
 

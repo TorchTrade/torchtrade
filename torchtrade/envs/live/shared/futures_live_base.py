@@ -208,6 +208,72 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             transaction_fee=self.TAKER_FEE,
         ))
 
+    def _resolve_bracket_quantity(self, current_price: float):
+        """The quantity an SLTP bracket opens with, for all four futures venues (#288).
+
+        Four copies, code-identical: only a comment and okx's own min-qty check after it
+        differed. Returns None when the account cannot be sized against, which the caller
+        reports as a failed trade rather than a halt -- that asymmetry with the plain path
+        (which raises inside `_halting`) is pre-existing and preserved here deliberately.
+
+        `self.TAKER_FEE` rather than the module constant: the venues' fees differ, and the
+        class attribute #413 put on `<Venue>Base` is inherited by the SLTP siblings.
+        """
+        if self.config.trade_mode == "notional":
+            return float(self.config.quantity_per_trade) / current_price
+        if self.config.trade_mode == "quantity":
+            return float(self.config.quantity_per_trade)
+        if self.config.trade_mode != "fractional":
+            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
+
+        # Size on total_margin_balance (equity), matching offline sizing and the non-SLTP
+        # live path. Binance's total_wallet_balance excludes unrealized PnL and would
+        # under-size; bitget/bybit/okx map both keys to equity, so the switch is a no-op
+        # there. Under `_halting` -- the read that SIZES a bracket (#295).
+        balance = float(
+            self._halting(self.trader.get_account_balance, cache_key="balance")[
+                "total_margin_balance"
+            ]
+        )
+        # current_price already raised in `_current_mark_price()`; balance has no such
+        # accessor, and `nan <= 0` is False (#347).
+        if not math.isfinite(balance) or balance <= 0:
+            logger.error(
+                f"Invalid price={current_price} or balance={balance} for "
+                f"{self.config.symbol}"
+            )
+            return None
+
+        # Reserve what the trader will CHARGE, or say so. ReplayOrderExecutor carries its
+        # own rate, so reserving a constant left a higher-fee caller with every open
+        # refused (#278). `float()` alone is unsafe -- MagicMock implements __float__ and
+        # returns 1.0 -- but an isinstance chain is worse: it rejects np.float32 and
+        # Decimal, reproducing #278 with no diagnostic at all.
+        raw = getattr(self.trader, "transaction_fee", None)
+        fee = self.TAKER_FEE
+        if raw is not None:
+            try:
+                candidate = float(raw)
+            except (TypeError, ValueError):
+                candidate = None
+            if candidate is not None and math.isfinite(candidate) and 0 <= candidate < 1:
+                fee = candidate
+            else:
+                logger.warning(
+                    f"{self.config.symbol}: trader.transaction_fee={raw!r} is not a "
+                    f"usable rate; reserving the venue constant {self.TAKER_FEE}. If the "
+                    f"trader charges more, opens will be refused."
+                )
+        # 0.98 as the non-SLTP path uses, so a full-fraction open leaves some maintenance
+        # buffer instead of zero.
+        return abs(calculate_fractional_position(PositionCalculationParams(
+            balance=balance * 0.98,
+            action_value=self.config.position_fraction,
+            current_price=current_price,
+            leverage=self.config.leverage,
+            transaction_fee=fee,
+        ))[0])
+
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).
 

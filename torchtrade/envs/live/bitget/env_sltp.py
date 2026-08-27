@@ -1,8 +1,3 @@
-from torchtrade.envs.utils.fractional_sizing import (
-    PositionCalculationParams,
-    calculate_fractional_position,
-)
-from torchtrade.envs.live.bitget.order_executor import TAKER_FEE
 import math
 from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
@@ -179,59 +174,10 @@ class BitgetFuturesSLTPTorchTradingEnv(SLTPMixin, BitgetBaseTorchTradingEnv):
         # slot to serve from. Its own slot, because it is a candle close, not the mark.
         current_price = self._halting(read_close, cache_key="candle_close")
 
-        # Resolve quantity based on trade_mode
-        if self.config.trade_mode == "fractional":
-            # Size on total_margin_balance (equity), matching offline sizing and the non-SLTP
-            # live path. Binance's total_wallet_balance excludes unrealized PnL and would under-size;
-            # bitget/bybit/okx map both keys to equity, so the switch is a no-op there.
-            # Under `_halting` -- the read that SIZES a bracket (#295).
-            balance = float(
-                self._halting(self.trader.get_account_balance, cache_key="balance")[
-                    "total_margin_balance"
-                ]
-            )
-            if not math.isfinite(balance) or balance <= 0:
-                logger.error(f"Invalid price={current_price} or balance={balance} for {self.config.symbol}")
-                trade_info["success"] = False
-                return trade_info
-            # Reserve what will actually be CHARGED: ReplayOrderExecutor carries its own
-            # rate, so reserving a constant left a higher-fee caller with every open
-            # refused -- #278 reproduced. 0.98 as the non-SLTP path uses, so a
-            # full-fraction open leaves some maintenance buffer instead of zero.
-            # Reserve what the trader will CHARGE, or say so. float() alone is unsafe --
-            # MagicMock implements __float__ and returns 1.0 -- but an isinstance chain
-            # is worse: it rejects np.float32 and Decimal, which reproduces #278 with no
-            # diagnostic at all (the only log is the executor's "Insufficient balance",
-            # which reads like a small account rather than an under-reserving sizer).
-            # Coerce, range-check, and WARN on the fallback.
-            raw = getattr(self.trader, "transaction_fee", None)
-            fee = TAKER_FEE
-            if raw is not None:
-                try:
-                    candidate = float(raw)
-                except (TypeError, ValueError):
-                    candidate = None
-                if candidate is not None and math.isfinite(candidate) and 0 <= candidate < 1:
-                    fee = candidate
-                else:
-                    logger.warning(
-                        f"{self.config.symbol}: trader.transaction_fee={raw!r} is not a "
-                        f"usable rate; reserving the venue constant {TAKER_FEE}. If the "
-                        f"trader charges more, opens will be refused."
-                    )
-            quantity = abs(calculate_fractional_position(PositionCalculationParams(
-                balance=balance * 0.98,
-                action_value=self.config.position_fraction,
-                current_price=current_price,
-                leverage=self.config.leverage,
-                transaction_fee=fee,
-            ))[0])
-        elif self.config.trade_mode == "notional":
-            quantity = float(self.config.quantity_per_trade) / current_price
-        elif self.config.trade_mode == "quantity":
-            quantity = float(self.config.quantity_per_trade)
-        else:
-            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
+        quantity = self._resolve_bracket_quantity(current_price)
+        if quantity is None:
+            trade_info["success"] = False
+            return trade_info
 
         # Close opposite position if switching directions
         if self.position.current_position != 0:
