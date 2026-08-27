@@ -280,13 +280,13 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             action_tuple = ("long", -0.02, 0.03)
             trade_info = env._execute_trade_if_needed(action_tuple)
 
-            if trade_info["executed"]:
-                # Current price is ~50050
-                expected_sl = 50050 * (1 - 0.02)  # ~49049
-                expected_tp = 50050 * (1 + 0.03)  # ~51551.5
+            assert trade_info["executed"], "the trade never fired -- the assertions below would be vacuous"
+            # Current price is ~50050
+            expected_sl = 50050 * (1 - 0.02)  # ~49049
+            expected_tp = 50050 * (1 + 0.03)  # ~51551.5
 
-                assert trade_info["stop_loss"] == pytest.approx(expected_sl, rel=1e-2)
-                assert trade_info["take_profit"] == pytest.approx(expected_tp, rel=1e-2)
+            assert trade_info["stop_loss"] == pytest.approx(expected_sl, rel=1e-9)
+            assert trade_info["take_profit"] == pytest.approx(expected_tp, rel=1e-9)
 
     def test_bracket_order_prices_short(self, env, mock_trader, mock_observer):
         """Test bracket order prices are calculated correctly for SHORT."""
@@ -298,13 +298,13 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             action_tuple = ("short", 0.03, -0.02)
             trade_info = env._execute_trade_if_needed(action_tuple)
 
-            if trade_info["executed"]:
-                # Current price is ~50050
-                expected_sl = 50050 * (1 + 0.03)  # ~51551.5 (above entry)
-                expected_tp = 50050 * (1 - 0.02)  # ~49049 (below entry)
+            assert trade_info["executed"], "the trade never fired -- the assertions below would be vacuous"
+            # Current price is ~50050
+            expected_sl = 50050 * (1 + 0.03)  # ~51551.5 (above entry)
+            expected_tp = 50050 * (1 - 0.02)  # ~49049 (below entry)
 
-                assert trade_info["stop_loss"] == pytest.approx(expected_sl, rel=1e-2)
-                assert trade_info["take_profit"] == pytest.approx(expected_tp, rel=1e-2)
+            assert trade_info["stop_loss"] == pytest.approx(expected_sl, rel=1e-9)
+            assert trade_info["take_profit"] == pytest.approx(expected_tp, rel=1e-9)
 
     def test_active_sltp_tracking(self, env, mock_trader):
         """Test that active SL/TP levels are tracked."""
@@ -315,12 +315,12 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
             action_tuple = ("long", -0.02, 0.03)
             trade_info = env._execute_trade_if_needed(action_tuple)
 
-            if trade_info["executed"]:
-                # Active SL/TP should be set
-                assert env.active_stop_loss > 0
-                assert env.active_take_profit > 0
-                assert env.active_stop_loss == trade_info["stop_loss"]
-                assert env.active_take_profit == trade_info["take_profit"]
+            assert trade_info["executed"], "the trade never fired -- the assertions below would be vacuous"
+            # Active SL/TP should be set
+            assert env.active_stop_loss > 0
+            assert env.active_take_profit > 0
+            assert env.active_stop_loss == trade_info["stop_loss"]
+            assert env.active_take_profit == trade_info["take_profit"]
 
     def test_sltp_reset_on_position_close(self, env, mock_trader):
         """Test that SL/TP are reset when position closes."""

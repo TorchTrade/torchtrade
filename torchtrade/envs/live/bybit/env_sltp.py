@@ -102,30 +102,14 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         if self.config.lock_position_until_sltp and self.position.current_position != 0:
             return trade_info
 
-        # CLOSE action - close any open position
         if side == "close":
-            if self.position.current_position == 0:
-                return trade_info
-            try:
-                success = self.trader.close_position()
-            except Exception as e:
-                logger.error(f"Close position failed for {self.config.symbol}: {e}")
-                return trade_info
-            if success:
-                # A realised close moves equity; the cached balance is now wrong by the
-                # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
-                self._last_confirmed_read.pop("balance", None)
-                close_side = "sell" if self.position.current_position > 0 else "buy"
-                self.position.current_position = 0
-                self.active_stop_loss = 0.0
-                self.active_take_profit = 0.0
-                trade_info.update({
-                    "executed": True, "side": close_side,
-                    "success": True, "closed_position": True,
-                })
-            return trade_info
+            return self._close_action(trade_info)
 
-        # Check if already in same position
+        # Same boundary guard as SLTPMixin's -- see there for why it is not left to
+        # `calculate_bracket_prices` further down.
+        if side not in self.SIDE_DIRECTION:
+            raise ValueError(f"Invalid side: {side}. Must be 'long' or 'short'.")
+
         if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
@@ -152,8 +136,12 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
                 close_success = self.trader.close_position()
             except Exception as e:
                 logger.error(f"Close position failed for {self.config.symbol}: {e}")
+                trade_info["success"] = False
                 return trade_info
             if not close_success:
+                # Same contract as `_close_action`: a refused flatten must not read as
+                # HOLD, and the entry below must NOT go out.
+                trade_info["success"] = False
                 return trade_info
             # A realised close moves equity; the cached balance is now wrong by the
             # trade's P&L. Reached only on success (#295).

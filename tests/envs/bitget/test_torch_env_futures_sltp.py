@@ -306,8 +306,8 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
             expected_sl = current_price * (1 - 0.02)  # 49049
             expected_tp = current_price * (1 + 0.03)  # 51551.5
 
-            assert call_kwargs["stop_loss"] == pytest.approx(expected_sl, rel=1e-2)
-            assert call_kwargs["take_profit"] == pytest.approx(expected_tp, rel=1e-2)
+            assert call_kwargs["stop_loss"] == pytest.approx(expected_sl, rel=1e-9)
+            assert call_kwargs["take_profit"] == pytest.approx(expected_tp, rel=1e-9)
 
     def test_active_sltp_tracking(self, env, mock_trader):
         """Test that active SL/TP levels are tracked."""

@@ -3992,8 +3992,13 @@ def test_every_successful_close_invalidates_the_cached_balance():
     EXEMPT = {"_halting", "_reset", "_finish_futures_init"}
     root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
     offenders = []
+    # The mixin is in the list because #288 MOVED the close there: globbing only
+    # live/*/env_sltp.py silently stopped scanning the copy binance and bitget now run,
+    # while still scanning bybit's identical line. A path list keyed on where code used
+    # to live stops finding it the moment a fold moves it.
     for path in sorted(root.glob("*/env_sltp.py")) + [
-        root / "shared" / "futures_live_base.py"
+        root / "shared" / "futures_live_base.py",
+        root.parent / "utils" / "sltp_mixin.py",
     ]:
         for fn in ast.walk(ast.parse(path.read_text())):
             if not isinstance(fn, ast.FunctionDef) or fn.name in EXEMPT:
@@ -4217,9 +4222,13 @@ _SHARED_METHOD_OWNERSHIP = [
     # and target rounding), which its own behavioural test pins.
     *((c, TorchTradeFuturesLiveEnv, "_calculate_fractional_position")
       for c in PLAIN_FUTURES_ENVS if c.__module__.split(".")[-2] != "binance"),
+    # `_close_action` belongs in this uniform table where `_execute_trade_if_needed`
+    # cannot: all four venues share the close, only the price acquisition forked. It was
+    # three byte-identical copies (mixin, bybit, okx) until #288 -- one more than the two
+    # the fold set out to remove, and the copy the `success=False` contract first missed.
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
         "_step", "_reset", "_resolve_action_tuple", "_record_sltp_position",
-        "_reset_sltp_state",
+        "_reset_sltp_state", "_close_action",
     )),
 ]
 # By NAME, not by count. Dropping `_reset` from the matrix above passed 936 tests: the
@@ -4236,6 +4245,7 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("SLTPMixin", "_resolve_action_tuple"),
     ("SLTPMixin", "_record_sltp_position"),
     ("SLTPMixin", "_reset_sltp_state"),
+    ("SLTPMixin", "_close_action"),
 }
 
 
@@ -4658,6 +4668,28 @@ def test_the_dispatch_hook_is_inherited_where_it_is_not_deliberately_overridden(
     )
 
 
+@pytest.mark.parametrize("cls", _DISPATCH_INHERITORS, ids=lambda c: c.__name__)
+def test_the_folded_executor_is_inherited_and_not_re_forked(cls):
+    """`_execute_trade_if_needed` joined the mixin in #288, and nothing guarded it.
+
+    It cannot go in `_SHARED_METHOD_OWNERSHIP` -- bybit and okx legitimately override it
+    for the `*, current_price` fork -- so it needs this split form, the same one
+    `_dispatch_sltp_trade` already has. Verified the gap was real: appending a full copy
+    of the mixin's body back onto binance passed all 1202 tests. The sizing test only
+    greps the resolved source for `_resolve_bracket_quantity`, which a faithful re-fork
+    still contains.
+
+    This is the method the close-action bug lived in. A private copy is where the next
+    shared fix silently fails to land.
+    """
+    assert cls._execute_trade_if_needed is SLTPMixin._execute_trade_if_needed, (
+        f"{cls.__name__} defines its own _execute_trade_if_needed. Only bybit and okx "
+        f"have a reason to (the keyword-only current_price); if this venue now needs one, "
+        f"move it into _DISPATCH_OVERRIDERS deliberately rather than re-forking the copy "
+        f"that #288 just folded"
+    )
+
+
 @pytest.mark.parametrize("cls", _DISPATCH_OVERRIDERS, ids=lambda c: c.__name__)
 def test_the_dispatch_overriders_thread_the_price_they_were_given(cls):
     """And the two that DO override must consume the threaded price, not re-read it.
@@ -4820,8 +4852,9 @@ def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
     It does not prove a venue's executor then uses those values rather than re-reading;
     that is the venues' own contract, covered behaviourally by the SLTP grace-bar tests.
 
-    `_execute_trade_if_needed` is NOT shared, so this contract belongs where the shared
-    `_step` is owned rather than in one venue's file.
+    `_execute_trade_if_needed` is shared by binance and bitget as of #288 and overridden
+    by bybit/okx, so this contract belongs where the shared `_step` is owned rather than
+    in one venue's file -- and more so now that two venues resolve it from the mixin.
 
     The venue reports something DIFFERENT after the first read. That is the whole design:
     with the fixture's constant mocks a re-read returns the identical value, so the first
@@ -5036,3 +5069,271 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
         f"a flat bar recorded {env.history.base_prices[-1]!r} rather than the pre-trade "
         f"mark of 137.0 (100.0 would mean it took the observer's close instead)"
     )
+
+
+# Derived, not listed: a fifth venue joins these tests by existing rather than by
+# tripping an assert that tells someone to go edit a list. The inheritor/overrider split
+# is already expressed once, at _DISPATCH_INHERITORS.
+_SLTP_VENUES = sorted(c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS)
+
+
+def _close_env(venue, position):
+    """An SLTP env with `include_close_action` set BEFORE construction, so the action map
+    really contains the close slot rather than the test asserting a tuple it invented.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True,
+                                    include_close_action=True)
+    env.position.current_position = position
+    env.active_stop_loss, env.active_take_profit = 90.0, 110.0
+    env._last_confirmed_read["balance"] = 12345.0
+    return env, trader
+
+
+def _fire_close(env):
+    """Drive the CLOSE slot the action map actually emits, through either signature.
+
+    Asserts the INDEX, not just that a close tuple exists somewhere. That index is what
+    the policy emits: swapping the HOLD and CLOSE slots means a checkpoint trained before
+    the swap flattens its position every bar it means to hold, and loads without
+    complaint. The two deleted per-venue `test_close_action_in_action_map` tests were the
+    only thing catching it -- discovering the slot instead of pinning it lost that.
+    """
+    assert env.action_map[0] == (None, None, None), (
+        f"slot 0 is {env.action_map[0]}, not HOLD -- every trained policy's indices shift"
+    )
+    assert env.action_map[1] == ("close", None, None), (
+        f"slot 1 is {env.action_map[1]}, not CLOSE"
+    )
+    # Through `_dispatch_sltp_trade`, the seam `_step` uses: it has uniform arity on all
+    # four venues and already owns the `*, current_price` split. Sniffing the signature
+    # here re-derived that split in the test, which is the duplication #288 removes.
+    return env._dispatch_sltp_trade(env.action_map[1], 100.0)
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("position,expect_side", [(1, "sell"), (-1, "buy")],
+                         ids=["long", "short"])
+def test_the_close_action_actually_closes_on_every_sltp_venue(venue, position, expect_side):
+    """`include_close_action` emits ("close", None, None) for all four venues; only two
+    handled it. On binance and bitget it fell past `side == "long"` and `elif side ==
+    "short"` and returned executed=False: the policy asked to close, the position stayed
+    open, and nothing said so (#288).
+
+    BOTH directions, because the close side comes from the position sign. Deriving it
+    from anything else -- or hardcoding "sell" -- is caught by the short case and by
+    nothing else in the suite.
+
+    Every assertion here kills a distinct mutant: `called` alone catches a close that is
+    reported but never sent; `executed` alone catches the inverse; the flat check catches
+    a dropped state write; the bracket check catches levels that survive the close and
+    read as armed next step; the balance check is the #295 cache invalidation, without
+    which the next bracket sizes off pre-close equity.
+    """
+    env, trader = _close_env(venue, position)
+    info = _fire_close(env)
+
+    assert trader.close_position.called, (
+        f"{venue}: a close action never reached the exchange -- the position is still open."
+    )
+    assert info["executed"] and info["side"] == expect_side
+    assert info["closed_position"] is True
+    assert env.position.current_position == 0
+    assert env.active_stop_loss == 0.0 and env.active_take_profit == 0.0, (
+        f"{venue}: bracket levels survived the close and will be read as live next step."
+    )
+    assert "balance" not in env._last_confirmed_read, (
+        f"{venue}: a realised close moved equity but the cached balance survived -- the "
+        f"next bracket sizes off pre-close equity (#295)."
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("outcome", ["refused", "raised"])
+def test_a_close_the_venue_rejects_is_not_reported_as_a_close(venue, outcome):
+    """`close_position()` returning False is a real production path -- both bybit's and
+    okx's executors return it when the re-query shows the position still open.
+
+    Reported as a success it is invariant #2 inverted: the env marks itself flat, clears
+    the brackets, and hands the policy a phantom-flat account while the venue still holds
+    the position. Nothing asserted this branch on ANY of the three implementations.
+
+    Both failure shapes, because they used to report differently: a REFUSED close and a
+    RAISED one both left `success=None`, the value HOLD returns. All four venues now run
+    ONE `_close_action`, so they cannot disagree -- the params are kept anyway, so that a
+    future re-fork shows up behaviourally and not only in the ownership guard.
+    """
+    env, trader = _close_env(venue, 1)
+    if outcome == "refused":
+        trader.close_position.return_value = False
+    else:
+        trader.close_position.side_effect = RuntimeError("venue rejected the close")
+    info = _fire_close(env)
+
+    assert not info["executed"], f"{venue}: a refused close reported as executed."
+    assert info["success"] is False, (
+        f"{venue}: a refused close returns success={info['success']!r}, which is what HOLD "
+        f"returns -- the refusal is invisible to the caller."
+    )
+    assert env.position.current_position == 1, (
+        f"{venue}: the position is still open at the venue but the env marked itself flat."
+    )
+    assert env.active_stop_loss == 90.0 and env.active_take_profit == 110.0, (
+        f"{venue}: brackets cleared on a close that did not happen."
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_a_close_on_a_flat_account_does_not_reach_the_venue(venue):
+    """The early return that makes the fold safe. Without it a CLOSE while flat spends a
+    round-trip every bar the policy picks it, and returns executed=True on a step that
+    traded nothing.
+
+    It is also the guard that stops `close_side` being derived from a zero position.
+    """
+    env, trader = _close_env(venue, 0)
+    info = _fire_close(env)
+
+    assert not trader.close_position.called, (
+        f"{venue}: a close on a flat account still called the exchange."
+    )
+    assert not info["executed"]
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_position_locking_outranks_the_close_action(venue):
+    """`lock_position_until_sltp` means exits happen ONLY via SL/TP/liquidation -- it is
+    the OneStep-parity mode. A close action must not be a way around it.
+
+    This is why the close branch sits BELOW the lock guard and not above it. bybit and okx
+    each pinned this in their own file; binance and bitget pinned nothing, and the guard
+    they now share was unordered by any test.
+    """
+    env, trader = _close_env(venue, 1)
+    env.config.lock_position_until_sltp = True
+    info = _fire_close(env)
+
+    assert not trader.close_position.called, (
+        f"{venue}: a close action bypassed lock_position_until_sltp."
+    )
+    assert env.position.current_position == 1
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("outcome", ["refused", "raised"])
+def test_a_failed_flatten_does_not_send_the_entry_that_follows_it(venue, outcome):
+    """The SAME `close_position()` call as the close action, forty lines lower, and it had
+    no failure test on any venue.
+
+    Flipping long to short flattens first, then enters. If the flatten is refused and the
+    entry goes out anyway, the venue holds the old position AND the new one -- doubled or
+    hedged exposure with leverage on it -- and `_record_position_after_trade` then writes
+    the new direction over a live opposite position, so `account_state` reports the lie
+    too. That is invariant 3 inverted, on the money path.
+
+    Asserting `trade.called` is False is the point: the flatten failing is only safe if
+    the entry is abandoned with it.
+    """
+    env, trader = _close_env(venue, 1)          # long open
+    if outcome == "refused":
+        trader.close_position.return_value = False
+    else:
+        trader.close_position.side_effect = RuntimeError("venue refused the flatten")
+
+    info = env._dispatch_sltp_trade(("short", 0.03, -0.02), 100.0)
+
+    assert not trader.trade.called, (
+        f"{venue}: the flatten failed but the entry was sent anyway -- the venue now holds "
+        f"both sides."
+    )
+    assert env.position.current_position == 1, (
+        f"{venue}: the env marked itself flat on a flatten the venue refused."
+    )
+    assert info["success"] is False, (
+        f"{venue}: a refused flatten returns success={info['success']!r}, which is what "
+        f"HOLD returns -- indistinguishable from doing nothing."
+    )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit"])
+@pytest.mark.parametrize("sl_placed,tp_placed", [(True, False), (False, True), (False, False)],
+                         ids=["tp-rejected", "sl-rejected", "both-rejected"])
+def test_a_bracket_leg_the_venue_rejected_is_not_recorded_as_live(venue, sl_placed, tp_placed):
+    """binance's and bitget's executors really do place the two legs separately and report
+    `bracket_status` per leg; a leg can be rejected while the entry fills.
+
+    Recording it anyway hands the policy a position it believes is protected by a stop
+    that does not exist. Every one of these three mutants survived the whole suite before
+    this test: alpaca was the only SLTP env pinning it.
+
+    okx is excluded, not forgotten -- its brackets attach atomically (`attachAlgoOrds`),
+    so it has no per-leg status to misread.
+    """
+    env, trader = _close_env(venue, 0)
+    trader.bracket_status = {"sl_placed": sl_placed, "tp_placed": tp_placed}
+    trader.trade.return_value = True
+
+    info = env._dispatch_sltp_trade(("long", -0.02, 0.03), 100.0)
+    assert info["executed"], f"{venue}: setup failed, the entry never went out"
+
+    assert (env.active_stop_loss != 0.0) is sl_placed, (
+        f"{venue}: sl_placed={sl_placed} but active_stop_loss={env.active_stop_loss} -- "
+        f"the policy reads a stop the venue never accepted."
+    )
+    assert (env.active_take_profit != 0.0) is tp_placed, (
+        f"{venue}: tp_placed={tp_placed} but active_take_profit={env.active_take_profit}"
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_a_policy_can_still_flatten_when_the_feed_is_degraded(venue):
+    """`_close_action`'s docstring says it sits above the price read so a stale bar cannot
+    block the one action that reduces risk. That was comment-only: moving the dispatch
+    below `self._halting(read_close, ...)` changed nothing the suite could see.
+
+    A degraded feed is exactly when a policy most needs the exit, so the ordering is a
+    behaviour, not a layout preference.
+    """
+    env, trader = _close_env(venue, 1)
+    env.observer.get_observations.side_effect = ValueError("stale bar")
+
+    info = env._dispatch_sltp_trade(env.action_map[1], 100.0)
+
+    assert trader.close_position.called, (
+        f"{venue}: the feed went stale and the close was blocked with it -- the policy "
+        f"cannot exit precisely when it most needs to."
+    )
+    assert info["executed"] and env.position.current_position == 0
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("sizeable", [True, False], ids=["sizeable", "unsizeable"])
+def test_an_unrecognised_side_reaches_no_venue_call_at_all(venue, sizeable):
+    """A bad side must fail the same way on every path, before touching the venue.
+
+    It did neither. Leaving validation to `calculate_bracket_prices` made it
+    PATH-DEPENDENT: on the sizing-refusal path that call is never reached, so the same
+    input raised on one path and returned success=False on another. And because the
+    helper runs after the direction-switch flatten, bybit and okx CLOSED a live position
+    and then raised on the way to reopening it -- a silent no-op replaced by one that
+    moves money.
+
+    Unreachable through the action map, which emits only None/close/long/short. But ~40
+    tests call this method directly with hand-built tuples, so "unreachable" rests on the
+    caller rather than on the method, and the guard belongs at the boundary either way
+    (CLAUDE.md invariant 4).
+
+    Both axes are the test: `unsizeable` is the path that used to swallow it, and the
+    four venues are three separate implementations that used to disagree.
+    """
+    env, trader = _close_env(venue, 1)
+    if not sizeable:
+        env._resolve_bracket_quantity = lambda price: None
+
+    with pytest.raises(ValueError, match="Invalid side"):
+        env._dispatch_sltp_trade(("bogus", -0.02, 0.03), 100.0)
+
+    assert not trader.close_position.called, (
+        f"{venue}: a bad side flattened the position before raising."
+    )
+    assert not trader.trade.called
+    assert env.position.current_position == 1

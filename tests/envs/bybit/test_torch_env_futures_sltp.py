@@ -354,61 +354,6 @@ class TestBybitDuplicateActionPrevention:
         assert mock_trader.trade.call_args.kwargs["side"] == expected_side
 
 
-class TestBybitSLTPCloseAction:
-    """Tests for close action when include_close_action=True."""
-
-    @pytest.fixture
-    def env_with_close(self, mock_env_observer, mock_env_trader):
-        from torchtrade.envs.live.bybit.env_sltp import (
-            BybitFuturesSLTPTorchTradingEnv,
-            BybitFuturesSLTPTradingEnvConfig,
-        )
-
-        config = BybitFuturesSLTPTradingEnvConfig(
-            symbol="BTCUSDT",
-            time_frames=["1m"],
-            window_sizes=[10],
-            stoploss_levels=(-0.02,),
-            takeprofit_levels=(0.03,),
-            include_close_action=True,
-        )
-
-        with patch("time.sleep"), \
-             patch.object(BybitFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = BybitFuturesSLTPTorchTradingEnv(
-                config=config, observer=mock_env_observer, trader=mock_env_trader,
-            )
-
-        # Reset mock call counts from __init__ cleanup so tests only see
-        # calls from the action under test
-        mock_env_trader.reset_mock()
-        return env
-
-    def test_close_action_in_action_map(self, env_with_close):
-        """Close action must be present in action map at index 1."""
-        assert env_with_close.action_map[0] == (None, None, None)  # HOLD
-        assert env_with_close.action_map[1] == ("close", None, None)  # CLOSE
-
-    def test_close_action_closes_position(self, env_with_close, mock_env_trader):
-        """Close action must close an existing position."""
-        env_with_close.position.current_position = 1
-
-        trade_info = env_with_close._execute_trade_if_needed(("close", None, None), current_price=50000.0)
-
-        assert trade_info["executed"] is True
-        assert trade_info["closed_position"] is True
-        mock_env_trader.close_position.assert_called_once()
-        assert env_with_close.position.current_position == 0
-
-    def test_close_action_no_position(self, env_with_close, mock_env_trader):
-        """Close action with no position should be a no-op."""
-        env_with_close.position.current_position = 0
-
-        trade_info = env_with_close._execute_trade_if_needed(("close", None, None), current_price=50000.0)
-
-        assert trade_info["executed"] is False
-        mock_env_trader.close_position.assert_not_called()
-
 
 class TestBybitSLTPMarkPrice:
     """Test that SLTP bracket orders use mark price instead of candle close."""
@@ -732,18 +677,6 @@ class TestBybitSLTPLockPosition:
 
             assert trade_info["executed"] is False
             mock_env_trader.trade.assert_not_called()
-            mock_env_trader.close_position.assert_not_called()
-
-    def test_locked_ignores_close_action(self, locked_env, mock_env_trader):
-        """With lock=True, close action while in position should be ignored."""
-        with patch.object(locked_env, "_wait_for_next_timestamp"):
-            locked_env.reset()
-            locked_env.position.current_position = 1
-            mock_env_trader.reset_mock()  # Clear calls from reset/init
-
-            trade_info = locked_env._execute_trade_if_needed(("close", None, None), current_price=50000.0)
-
-            assert trade_info["executed"] is False
             mock_env_trader.close_position.assert_not_called()
 
     def test_locked_allows_open_from_flat(self, locked_env, mock_env_trader):
