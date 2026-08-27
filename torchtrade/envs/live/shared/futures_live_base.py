@@ -173,8 +173,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """Target position size from a fractional action, for all four futures venues.
         """
         # Above the balance read on purpose: a flat action must not need the exchange.
-        # No caller reaches this today -- all four pre-filter zero -- so it guards a
-        # caller that stops doing so, not a live path.
+        # No caller reaches this today -- all four pre-filter zero.
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
 
@@ -207,6 +206,74 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             leverage=self.config.leverage,
             transaction_fee=self.TAKER_FEE,
         ))
+
+    def _resolve_bracket_quantity(self, current_price: float) -> float | None:
+        """The quantity an SLTP bracket opens with, for all four futures venues (#288).
+
+        None means the account cannot be sized against, and the caller reports a FAILED
+        TRADE rather than halting. The plain path raises inside the `_halting` closure so
+        the same input becomes a halt instead -- a divergence this fold preserves rather
+        than endorses (#416).
+        """
+        if self.config.trade_mode == "notional":
+            return float(self.config.quantity_per_trade) / current_price
+        if self.config.trade_mode == "quantity":
+            return float(self.config.quantity_per_trade)
+        if self.config.trade_mode != "fractional":
+            raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
+
+        # total_margin_balance, not total_wallet_balance: binance's wallet figure excludes
+        # unrealized PnL and would under-size. Under `_halting` -- the read that SIZES a
+        # bracket (#295).
+        balance = float(
+            self._halting(self.trader.get_account_balance, cache_key="balance")[
+                "total_margin_balance"
+            ]
+        )
+        # isfinite, not just `<= 0`: `nan <= 0` is False, so a NaN balance would size a
+        # NaN bracket (#347). Callers validate current_price before calling.
+        if not math.isfinite(balance) or balance <= 0:
+            logger.error(f"Cannot size against balance={balance} for {self.config.symbol}")
+            return None
+
+        # Reserve what the trader will CHARGE: ReplayOrderExecutor carries its own rate,
+        # so reserving the venue constant refused every open for a higher-fee caller (#278).
+        raw = getattr(self.trader, "transaction_fee", None)
+        try:
+            fee = self.TAKER_FEE if raw is None else float(raw)
+        except (TypeError, ValueError):
+            fee = None
+        if fee is None or not 0 <= fee < 1:
+            logger.warning(
+                f"{self.config.symbol}: trader.transaction_fee={raw!r} is not a usable "
+                f"rate; reserving the venue constant {self.TAKER_FEE}. If the trader "
+                f"charges more, opens will be refused."
+            )
+            fee = self.TAKER_FEE
+        # Same 0.98 maintenance buffer as `_calculate_fractional_position`.
+        # No abs(): `position_fraction` is validated to (0, 1.0], so direction is always
+        # +1 and the wrap would be dead -- but a dead `abs()` is not harmless, it launders
+        # a corrupted fraction into a plausible positive order.
+        #
+        # Refusing here rather than letting a bad value reach the venue, because the four
+        # formatters disagree about what a negative quantity means: okx FLOORS it and then
+        # clamps up to min_qty, turning -244.5 into a 0.001 long; bitget and bybit pass it
+        # through and rely on the exchange to reject. One deterministic refusal beats three
+        # different downstream behaviours.
+        quantity = calculate_fractional_position(PositionCalculationParams(
+            balance=balance * 0.98,
+            action_value=self.config.position_fraction,
+            current_price=current_price,
+            leverage=self.config.leverage,
+            transaction_fee=fee,
+        ))[0]
+        if not quantity > 0:
+            logger.error(
+                f"{self.config.symbol}: sizing produced {quantity!r}, refusing rather than "
+                f"handing it to the venue formatter"
+            )
+            return None
+        return quantity
 
     def _finish_futures_init(self) -> None:
         """The tail every futures env ran verbatim after `super().__init__` (#288).
