@@ -5036,3 +5036,40 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
         f"a flat bar recorded {env.history.base_prices[-1]!r} rather than the pre-trade "
         f"mark of 137.0 (100.0 would mean it took the observer's close instead)"
     )
+
+
+@pytest.mark.parametrize("venue",
+                         [c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS])
+@pytest.mark.parametrize("position,expect_side", [(1, "sell"), (-1, "buy")],
+                         ids=["long", "short"])
+def test_the_close_action_actually_closes_on_every_sltp_venue(venue, position, expect_side):
+    """`include_close_action` emits ("close", None, None) for all four venues; only two
+    handled it. On binance and bitget it fell past `side == "long"` and `elif side ==
+    "short"` and returned executed=False: the policy asked to close, the position stayed
+    open, and nothing said so (#288).
+
+    Parametrised over BOTH directions because the close side is derived from the sign --
+    a fold that reached for bybit's `"buy" if side == "long" else "sell"` without the
+    early return would turn the silent no-op into a wrong SELL on an open short.
+
+    Asserting `close_position` was called AND the position went flat: a trade_info flag
+    alone would pass on an env that reports success without touching the exchange.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
+    env.config.include_close_action = True
+    env.position.current_position = position
+    env.active_stop_loss, env.active_take_profit = 90.0, 110.0
+
+    kw = ({"current_price": 100.0}
+          if "current_price" in inspect.signature(env._execute_trade_if_needed).parameters
+          else {})
+    info = env._execute_trade_if_needed(("close", None, None), **kw)
+
+    assert trader.close_position.called, (
+        f"{venue}: a close action never reached the exchange -- the position is still open."
+    )
+    assert info["executed"] and info["side"] == expect_side
+    assert env.position.current_position == 0
+    assert env.active_stop_loss == 0.0 and env.active_take_profit == 0.0, (
+        f"{venue}: bracket levels survived the close and will be read as live next step."
+    )
