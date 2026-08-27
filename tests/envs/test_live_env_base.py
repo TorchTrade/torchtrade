@@ -214,6 +214,10 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
         # The SLTP bracket sizing (#288). Reached only by the four SLTP siblings, but the
         # identity check is over FUTURES_ENVS, and the plain envs inherit it unused --
         # a venue re-forking it for either path fails here.
+        #
+        # okx is exempted below, the same way binance is for `_calculate_fractional_position`:
+        # it EXTENDS via super() to refuse a sub-minimum quantity, which is behaviour it
+        # already had inline. Extending is not re-forking; a full copy still fails.
         "_resolve_bracket_quantity",
     ],
 )
@@ -226,6 +230,20 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     account_state test still passes -- so fail here instead. (alpaca is spot: it keeps its own
     _get_observation and is correctly absent from FUTURES_ENVS.)
     """
+    # The exemption is keyed on the CLASS that defines an override, not on the venue:
+    # keyed on the venue it also swallowed okx's two plain envs, which define nothing and
+    # would have passed while asserting nothing about them.
+    if method == "_resolve_bracket_quantity" and method in vars(env_cls):
+        assert env_cls.__name__ == "OKXFuturesSLTPTorchTradingEnv", (
+            f"{env_cls.__name__} overrides {method}; only okx's SLTP env is exempt "
+            f"(sub-minimum refusal, #414). Add it here deliberately or drop the override."
+        )
+        # Exempt, but not unguarded: it must still DELEGATE, which a re-forked copy of the
+        # arithmetic would not. Same bargain binance's sizing override makes.
+        assert "super()._resolve_bracket_quantity" in inspect.getsource(
+            env_cls._resolve_bracket_quantity
+        ), "okx's sizing override no longer delegates -- it is a re-fork now"
+        return
     assert getattr(env_cls, method) is getattr(TorchTradeFuturesLiveEnv, method), (
         f"{env_cls.__name__} re-forks {method} instead of sharing TorchTradeFuturesLiveEnv's. "
         f"Drop the override, or the unification no longer covers it."
@@ -2177,11 +2195,24 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
         f"{exchange}'s trade path does not CALL the shared sizing; an inlined copy that "
         f"names it in a comment would satisfy a text search"
     )
+    # The guard lives on `_bracket_entry_price` as of the bybit/okx fold, and this scan
+    # follows it there rather than naming a method. That is the second time this test's
+    # subject moved out from under it: once when #288 folded the sizing onto the shared
+    # base, once here. Resolve-then-scan, never a file or a fixed method name.
+    price_src = inspect.getsource(cls._bracket_entry_price)
+    assert "math.isfinite" in price_src, (
+        f"{exchange} resolves its entry price with no finiteness check"
+    )
     if exchange in ("binance", "bitget"):
         # These two size from a candle close, so _current_mark_price() never guards them.
-        # bybit and okx re-validate at the seam instead (#295).
-        assert "math.isfinite(current_price)" in venue_src, (
-            f"{exchange} sizes from a candle close with no finiteness check"
+        # bybit and okx re-validate the threaded mark instead (#295).
+        assert "get_observations" in price_src, (
+            f"{exchange} should price off its own candle close, not a threaded mark"
+        )
+    else:
+        assert "get_observations" not in price_src, (
+            f"{exchange} re-reads the observer inside the trade path, which is exactly "
+            f"what #295 removed -- it must use the mark `_step` already acquired"
         )
 
 
@@ -4369,6 +4400,10 @@ def _bracket_stub(cls, *, balance=10_000.0, leverage=5, fee=...):
                                  quantity_per_trade=0, leverage=leverage, symbol="X")
     env.trader = MagicMock()
     env.trader.get_account_balance.return_value = {"total_margin_balance": balance}
+    # A real lot size, because okx's sizing compares against it. Left to the bare
+    # MagicMock, `qty < trader.get_lot_size()["min_qty"]` raises TypeError -- the same
+    # family as the `float(MagicMock())` accident this docstring already warns about.
+    env.trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
     if fee is ...:
         del env.trader.transaction_fee
     else:
@@ -5254,7 +5289,7 @@ def test_a_failed_flatten_does_not_send_the_entry_that_follows_it(venue, outcome
     )
 
 
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit"])
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
 @pytest.mark.parametrize("sl_placed,tp_placed", [(True, False), (False, True), (False, False)],
                          ids=["tp-rejected", "sl-rejected", "both-rejected"])
 def test_a_bracket_leg_the_venue_rejected_is_not_recorded_as_live(venue, sl_placed, tp_placed):
@@ -5265,8 +5300,12 @@ def test_a_bracket_leg_the_venue_rejected_is_not_recorded_as_live(venue, sl_plac
     that does not exist. Every one of these three mutants survived the whole suite before
     this test: alpaca was the only SLTP env pinning it.
 
-    okx is excluded, not forgotten -- its brackets attach atomically (`attachAlgoOrds`),
-    so it has no per-leg status to misread.
+    okx used to be excluded here: it attaches brackets atomically (`attachAlgoOrds`) and
+    its own executor never sets `bracket_status`, so it recorded both legs unconditionally.
+    Folding it onto the shared executor put it behind the same gate, which changes nothing
+    for a real okx trader (108/108 differential cases identical, the attribute is absent so
+    the all-True default applies) and FIXES the injected case: `ReplayOrderExecutor` does
+    report per-leg status, and okx was recording a stop it had been told was not placed.
     """
     env, trader = _close_env(venue, 0)
     trader.bracket_status = {"sl_placed": sl_placed, "tp_placed": tp_placed}

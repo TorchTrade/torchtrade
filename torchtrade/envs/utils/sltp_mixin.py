@@ -207,15 +207,65 @@ class SLTPMixin:
             trade_info["success"] = False
         return trade_info
 
-    def _execute_trade_if_needed(
-        self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]]
-    ) -> Dict:
-        """Place the bracket for the venues that price it off their own candle.
+    def _bracket_entry_price(self, current_price: Optional[float]) -> float:
+        """The price that sizes the order and prices both brackets.
 
-        The four SLTP venues split by SIGNATURE, not by exchange: binance and bitget price
-        the bracket off the observer's own candle, while bybit and okx require the mark
-        threaded in by the caller (`*, current_price`) -- see #295, where re-reading it
-        inside the trade path bypassed the halt policy. Those two override this.
+        THE one thing the four SLTP venues disagreed about, and the reason they carried
+        two ~110-line copies of the executor between them (#288). binance and bitget read
+        their own candle close under the halt policy; bybit and okx are handed the mark
+        `_step` already acquired and must not re-read it (#295, where re-reading inside
+        the trade path bypassed the policy). Everything downstream is identical.
+        """
+        def read_close():
+            obs = self.observer.get_observations(return_base_ohlc=True)
+            price = float(obs["base_features"][-1, 3])
+            # This price divides the notional sizing AND prices both brackets in every
+            # mode, including the "quantity" default which checked nothing. dropna() does
+            # not clear a candle close of inf (#347). The name is load-bearing:
+            # test_sltp_sizing_rejects_a_non_finite_price_or_balance greps for it.
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError(
+                    f"unusable close price ({price}) for {self.config.symbol}"
+                )
+            return price
+
+        # cache_key is load-bearing, not decoration: without it `cached` is None, grace
+        # cannot apply, and this still raises -- it just raises a nicer type. The claimed
+        # behaviour is "serve the last CONFIRMED close and flag the bar", which needs a
+        # slot to serve from. Its own slot, because it is a candle close, not the mark.
+        return self._halting(read_close, cache_key="candle_close")
+
+    def _validated_mark_price(self, current_price: Optional[float]) -> float:
+        """The other implementation of `_bracket_entry_price`: use the threaded mark.
+
+        Lives here rather than in bybit's and okx's files because it was byte-identical in
+        both -- two copies is how this method got to two ~110-line copies in the first
+        place. The venues that want it say so with one line:
+
+            _bracket_entry_price = SLTPMixin._validated_mark_price
+
+        Re-reading the price instead is what #295 removed: the second read bypassed the
+        halt policy, so a halted bar still traded. Validated because a venue can report a
+        nonsense mark, and this value both sizes the order and prices both brackets.
+        """
+        current_price = float(current_price)
+        if not math.isfinite(current_price) or current_price <= 0:
+            raise ValueError(
+                f"venue reported an unusable mark price ({current_price})"
+            )
+        return current_price
+
+    def _execute_trade_if_needed(
+        self,
+        action_tuple: Tuple[Optional[str], Optional[float], Optional[float]],
+        *,
+        current_price: Optional[float] = None,
+    ) -> Dict:
+        """Place the bracket. One copy for all four futures SLTP venues (#288).
+
+        `current_price` is the mark `_step` acquired, passed by the venues that price off
+        it and ignored by the ones that read their own candle -- see
+        `_bracket_entry_price`, the only thing that ever varied here.
 
         Args:
             action_tuple: (side, stop_loss_pct, take_profit_pct); (None, None, None) is HOLD.
@@ -258,24 +308,7 @@ class SLTPMixin:
         # Read AND verdict under `_halting` (#295): `get_observations` raises on a short
         # window or a stale bar, and outside the policy that escapes as a bare ValueError.
         # bybit/okx take a threaded mark; these two price off the candle close on purpose.
-        def read_close():
-            obs = self.observer.get_observations(return_base_ohlc=True)
-            current_price = float(obs["base_features"][-1, 3])
-            # This price divides the notional sizing AND prices both brackets in every
-            # mode, including the "quantity" default which checked nothing. dropna() does
-            # not clear a candle close of inf (#347). The name is load-bearing:
-            # test_sltp_sizing_rejects_a_non_finite_price_or_balance greps for it.
-            if not math.isfinite(current_price) or current_price <= 0:
-                raise ValueError(
-                    f"unusable close price ({current_price}) for {self.config.symbol}"
-                )
-            return current_price
-
-        # cache_key is load-bearing, not decoration: without it `cached` is None, grace
-        # cannot apply, and this still raises -- it just raises a nicer type. The claimed
-        # behaviour is "serve the last CONFIRMED close and flag the bar", which needs a
-        # slot to serve from. Its own slot, because it is a candle close, not the mark.
-        current_price = self._halting(read_close, cache_key="candle_close")
+        current_price = self._bracket_entry_price(current_price)
 
         quantity = self._resolve_bracket_quantity(current_price)
         if quantity is None:
