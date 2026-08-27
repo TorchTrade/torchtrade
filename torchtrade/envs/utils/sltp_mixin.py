@@ -194,6 +194,7 @@ class SLTPMixin:
             # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
             self._last_confirmed_read.pop("balance", None)
             close_side = "sell" if self.position.current_position > 0 else "buy"
+            self.position.current_position = 0
             self.active_stop_loss = 0.0
             self.active_take_profit = 0.0
             trade_info.update({
