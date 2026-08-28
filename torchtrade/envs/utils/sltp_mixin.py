@@ -20,10 +20,10 @@ class SLTPMixin:
     -- alpaca included, which is why deleting its own `_reset` mattered: with both in the
     MRO, `_reset_sltp_state` ran twice per reset.
 
-    The one venue-specific piece is `_dispatch_sltp_trade`. bybit and okx forward the
-    mark `_step` already acquired under the halt policy; binance and bitget price their
-    brackets off a candle close and take the default. That split is deliberate and is a
-    #409 decision, not an accident to unify here.
+    Two venue-specific pieces remain, both deliberate: `_bracket_entry_price` (bybit and
+    okx use the mark `_step` already acquired under the halt policy; binance and bitget
+    price off their own candle close -- #409/#295), and okx's `_resolve_bracket_quantity`
+    override, which refuses a sub-minimum bracket instead of letting the venue reject it.
 
     Required of the inheriting class -- the full list, because owning `_step` means this
     mixin now depends on the whole live-env surface, not just SLTP state:
@@ -53,15 +53,6 @@ class SLTPMixin:
         """The position the ACTION targets, never the order side (#276)."""
         self.position.current_position = self.SIDE_DIRECTION.get(side, 0)
 
-    def _dispatch_sltp_trade(self, action_tuple, current_price: float):
-        """Hand the action to the venue's executor. The ONE thing `_step` varies by venue.
-
-        Default: the venue prices its own bracket off a candle close and does not want the
-        mark (binance, bitget). bybit and okx take the threaded price -- see #295, where
-        re-reading it inside the trade path bypassed the halt policy.
-        """
-        return self._execute_trade_if_needed(action_tuple)
-
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Four byte-identical copies (#288)."""
         result = super()._reset(tensordict, **kwargs)
@@ -70,7 +61,7 @@ class SLTPMixin:
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """One step. Four copies, 100% identical within each venue pair and 88% across --
-        the 12% was solely the dispatch call, which `_dispatch_sltp_trade` now owns (#288).
+        the 12% was solely the price source, which `_bracket_entry_price` now owns (#288).
 
         This is the file where #295 kept finding a fix applied to some copies and not
         others: the unguarded balance read, the mark re-read, the close that left the
@@ -85,7 +76,9 @@ class SLTPMixin:
 
         action_tuple = self._resolve_action_tuple(tensordict)
 
-        trade_info = self._dispatch_sltp_trade(action_tuple, current_price)
+        trade_info = self._execute_trade_if_needed(
+            action_tuple, current_price=current_price
+        )
 
         # Eagerly update position from the trade result so the rest of this step sees the
         # new state without waiting for the next sync cycle.
@@ -141,13 +134,11 @@ class SLTPMixin:
         position_closed = (prev_position != 0 and self.position.current_position == 0)
         if position_closed:
             logger.info("Position closed by SL/TP or external action")
-            self.active_stop_loss = 0.0
-            self.active_take_profit = 0.0
-            # The exchange closed it, so the realised P&L has already moved equity and the
-            # cached sizing balance is stale by exactly that amount. This closure path is
-            # the one the ENV never asked for -- a bracket firing, or a manual close -- so
-            # it has no `close_position()` call for the close-site guard to find (#295).
-            getattr(self, "_last_confirmed_read", {}).pop("balance", None)
+            # Third caller. This closure is the one the ENV never asked for -- a bracket
+            # firing, or a manual close -- so it has no `close_position()` call for the
+            # close-site guard to find (#295), but the realised P&L moved equity just the
+            # same. `current_position` is already 0 here via position_direction_from_status.
+            self._mark_flat()
 
         # Detect direction flip (e.g., long→short via external action).
         # Reset SL/TP since the old bracket levels are stale for the new direction.
@@ -190,13 +181,8 @@ class SLTPMixin:
             trade_info["success"] = False
             return trade_info
         if success:
-            # A realised close moves equity; the cached balance is now wrong by the
-            # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
-            self._last_confirmed_read.pop("balance", None)
             close_side = "sell" if self.position.current_position > 0 else "buy"
-            self.position.current_position = 0
-            self.active_stop_loss = 0.0
-            self.active_take_profit = 0.0
+            self._mark_flat()
             trade_info.update({
                 "executed": True, "side": close_side,
                 "success": True, "closed_position": True,
@@ -207,15 +193,75 @@ class SLTPMixin:
             trade_info["success"] = False
         return trade_info
 
-    def _execute_trade_if_needed(
-        self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]]
-    ) -> Dict:
-        """Place the bracket for the venues that price it off their own candle.
+    def _mark_flat(self) -> None:
+        """Record that the position is gone: cache, direction, and both bracket legs.
 
-        The four SLTP venues split by SIGNATURE, not by exchange: binance and bitget price
-        the bracket off the observer's own candle, while bybit and okx require the mark
-        threaded in by the caller (`*, current_price`) -- see #295, where re-reading it
-        inside the trade path bypassed the halt policy. Those two override this.
+        The balance goes because a realised close moves equity and the cached sizing
+        balance is now wrong by the trade's P&L. Callers must only reach this after
+        `close_position()` returned truthy -- a failed close leaves the position (#295).
+        """
+        self._last_confirmed_read.pop("balance", None)
+        self.position.current_position = 0
+        self.active_stop_loss = 0.0
+        self.active_take_profit = 0.0
+
+    # bybit and okx set True: `_step` already took the mark under the halt policy and the
+    # trade path must not read a price again (#295). A class attribute rather than two
+    # implementations, because binding one as `_bracket_entry_price = SLTPMixin.<other>`
+    # meant a subclass calling `super()._bracket_entry_price()` silently got the CANDLE
+    # version -- the exact regression the split exists to prevent. It also keeps
+    # `_bracket_entry_price` a single shared method, so it sits in the uniform ownership
+    # table instead of needing a bespoke guard of its own.
+    _PRICES_OFF_THREADED_MARK = False
+
+    def _bracket_entry_price(self, current_price: Optional[float]) -> float:
+        """The price that sizes the order and prices both brackets.
+
+        The price source is the venue split; everything downstream of it is shared.
+
+        The mark branch's raise is unreachable from `_step`: `_current_mark_price` already
+        carries the identical guard inside `_halting`, and the grace path serves a
+        previously validated value. Only a direct caller reaches it.
+        """
+        if self._PRICES_OFF_THREADED_MARK:
+            current_price = float(current_price)
+            if not math.isfinite(current_price) or current_price <= 0:
+                raise ValueError(
+                    f"venue reported an unusable mark price ({current_price})"
+                )
+            return current_price
+
+        def read_close():
+            obs = self.observer.get_observations(return_base_ohlc=True)
+            price = float(obs["base_features"][-1, 3])
+            # This price divides the notional sizing AND prices both brackets in every
+            # mode, including the "quantity" default which checked nothing. dropna() does
+            # not clear a candle close of inf (#347). The name is load-bearing:
+            # test_sltp_sizing_rejects_a_non_finite_price_or_balance greps for it.
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError(
+                    f"unusable close price ({price}) for {self.config.symbol}"
+                )
+            return price
+
+        # cache_key is load-bearing, not decoration: without it `cached` is None, grace
+        # cannot apply, and this still raises -- it just raises a nicer type. Its own slot,
+        # because it is a candle close, not the mark.
+        return self._halting(read_close, cache_key="candle_close")
+
+    def _execute_trade_if_needed(
+        self,
+        action_tuple: Tuple[Optional[str], Optional[float], Optional[float]],
+        *,
+        current_price: Optional[float] = None,
+    ) -> Dict:
+        """Place the bracket. One copy for all four futures SLTP venues (#288).
+
+        `current_price` is the mark `_step` acquired, passed by the venues that price off
+        it and ignored by the ones that read their own candle -- see
+        `_bracket_entry_price`, the price source. okx additionally varies
+        `_resolve_bracket_quantity` (sub-minimum refusal), so there are two seams,
+        not one -- this PR's own structural test exempts the second by name.
 
         Args:
             action_tuple: (side, stop_loss_pct, take_profit_pct); (None, None, None) is HOLD.
@@ -255,27 +301,7 @@ class SLTPMixin:
         if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
-        # Read AND verdict under `_halting` (#295): `get_observations` raises on a short
-        # window or a stale bar, and outside the policy that escapes as a bare ValueError.
-        # bybit/okx take a threaded mark; these two price off the candle close on purpose.
-        def read_close():
-            obs = self.observer.get_observations(return_base_ohlc=True)
-            current_price = float(obs["base_features"][-1, 3])
-            # This price divides the notional sizing AND prices both brackets in every
-            # mode, including the "quantity" default which checked nothing. dropna() does
-            # not clear a candle close of inf (#347). The name is load-bearing:
-            # test_sltp_sizing_rejects_a_non_finite_price_or_balance greps for it.
-            if not math.isfinite(current_price) or current_price <= 0:
-                raise ValueError(
-                    f"unusable close price ({current_price}) for {self.config.symbol}"
-                )
-            return current_price
-
-        # cache_key is load-bearing, not decoration: without it `cached` is None, grace
-        # cannot apply, and this still raises -- it just raises a nicer type. The claimed
-        # behaviour is "serve the last CONFIRMED close and flag the bar", which needs a
-        # slot to serve from. Its own slot, because it is a candle close, not the mark.
-        current_price = self._halting(read_close, cache_key="candle_close")
+        current_price = self._bracket_entry_price(current_price)
 
         quantity = self._resolve_bracket_quantity(current_price)
         if quantity is None:
@@ -298,8 +324,10 @@ class SLTPMixin:
                 # opposite position is still open at the venue.
                 trade_info["success"] = False
                 return trade_info
-            self._last_confirmed_read.pop("balance", None)
-            self.position.current_position = 0
+            # Brackets go with the position. If the replacement entry below then fails,
+            # the next sync is flat -> flat, so `_sync_position_from_exchange` never
+            # clears them and they are left stale. okx alone did this before the fold.
+            self._mark_flat()
 
         trade_side = "buy" if side == "long" else "sell"
         stop_loss_price, take_profit_price = calculate_bracket_prices(

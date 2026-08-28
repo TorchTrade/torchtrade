@@ -38,6 +38,7 @@ from torchtrade.envs.core.live import (
     TorchTradeLiveEnv,
 )
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.utils.liquidation import (
     cross_liquidation_price,
@@ -214,6 +215,10 @@ def test_no_live_env_overrides_shared_method(env_cls, method):
         # The SLTP bracket sizing (#288). Reached only by the four SLTP siblings, but the
         # identity check is over FUTURES_ENVS, and the plain envs inherit it unused --
         # a venue re-forking it for either path fails here.
+        #
+        # okx is exempted below, the same way binance is for `_calculate_fractional_position`:
+        # it EXTENDS via super() to refuse a sub-minimum quantity, which is behaviour it
+        # already had inline. Extending is not re-forking; a full copy still fails.
         "_resolve_bracket_quantity",
     ],
 )
@@ -226,6 +231,20 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     account_state test still passes -- so fail here instead. (alpaca is spot: it keeps its own
     _get_observation and is correctly absent from FUTURES_ENVS.)
     """
+    # The exemption is keyed on the CLASS that defines an override, not on the venue:
+    # keyed on the venue it also swallowed okx's two plain envs, which define nothing and
+    # would have passed while asserting nothing about them.
+    if method == "_resolve_bracket_quantity" and method in vars(env_cls):
+        assert env_cls.__name__ == "OKXFuturesSLTPTorchTradingEnv", (
+            f"{env_cls.__name__} overrides {method}; only okx's SLTP env is exempt "
+            f"(sub-minimum refusal, #414). Add it here deliberately or drop the override."
+        )
+        # Exempt, but not unguarded: it must still DELEGATE, which a re-forked copy of the
+        # arithmetic would not. Same bargain binance's sizing override makes.
+        assert "super()._resolve_bracket_quantity" in inspect.getsource(
+            env_cls._resolve_bracket_quantity
+        ), "okx's sizing override no longer delegates -- it is a re-fork now"
+        return
     assert getattr(env_cls, method) is getattr(TorchTradeFuturesLiveEnv, method), (
         f"{env_cls.__name__} re-forks {method} instead of sharing TorchTradeFuturesLiveEnv's. "
         f"Drop the override, or the unification no longer covers it."
@@ -263,7 +282,7 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
     """
     step = env_cls._step
     sync = _first_call_position(step, {"_sync_position_from_exchange"})
-    # NOT `_dispatch_sltp_trade`: this is parametrized over NON_SLTP_ENVS, which cannot
+    # NOT the SLTP executor: this is parametrized over NON_SLTP_ENVS, which cannot
     # contain an SLTP env, so adding it read as coverage that could never bind.
     trade = _first_call_position(step, {"_execute_trade_if_needed"})
 
@@ -309,13 +328,13 @@ def test_every_live_step_validates_its_action_before_it_trades(env_cls):
     step = env_cls._step
     resolve = _first_call_position(step, {
         "_resolve_action_level", "_resolve_action_index", "_resolve_action_tuple"})
-    # `_dispatch_sltp_trade` is the SLTP trade call as of #288: the shared `_step` hands
+    # `_execute_trade_if_needed` is the SLTP trade call: the shared `_step` hands
     # off through it so bybit/okx can thread the mark. Naming only the executor made this
     # guard find no trade call at all on the four SLTP venues, which is a TypeError rather
     # than a missed ordering -- loud, but only because the list that feeds it was fixed
     # first. Keyed on the wrong name it would simply have stopped constraining anything.
     trade = _first_call_position(
-        step, {"_execute_trade_if_needed", "_dispatch_sltp_trade"}
+        step, {"_execute_trade_if_needed"}
     )
 
     assert resolve is not None, (
@@ -2177,12 +2196,11 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
         f"{exchange}'s trade path does not CALL the shared sizing; an inlined copy that "
         f"names it in a comment would satisfy a text search"
     )
-    if exchange in ("binance", "bitget"):
-        # These two size from a candle close, so _current_mark_price() never guards them.
-        # bybit and okx re-validate at the seam instead (#295).
-        assert "math.isfinite(current_price)" in venue_src, (
-            f"{exchange} sizes from a candle close with no finiteness check"
-        )
+    # The finiteness grep that used to live here is gone. It was dominated by
+    # `test_an_unusable_entry_price_refuses_instead_of_sizing_from_it`, added the same
+    # round: a guard that NAMES math.isfinite and refuses nothing passes the grep and
+    # fails the behavioural test, and a correct guard written without the literal fails
+    # the grep on working code. It generated false positives in both directions.
 
 
 @pytest.mark.parametrize("exchange,side_key,side", [
@@ -2673,7 +2691,7 @@ def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
     # this already existed two hundred lines up; I reached for `in source` anyway.
     acquire = _first_call_position(cls._step, {"_acquire_pre_trade_state"})
     trade = _first_call_position(
-        cls._step, {"_execute_trade_if_needed", "_dispatch_sltp_trade"}
+        cls._step, {"_execute_trade_if_needed"}
     )
     assert acquire is not None, (
         f"{exchange}/{module}'s resolved _step reads the venue before trading without "
@@ -3359,7 +3377,7 @@ SLTP_CONFIGS = [
 
 # Reproduced from main before the extraction. One literal now sets each of these for four
 # live venues, so a typo moves all four at once: mutating bankrupt_threshold 0.1 -> 0.5
-# (a 5x move in every venue's force-close point) passed 1432 tests before this pin.
+# (a 5x move in every venue's force-close point) passed the whole suite before this pin.
 SHARED_DEFAULTS = {
     "time_frames": [TimeFrame(1, TimeFrameUnit.Hour)],
     "execute_on": TimeFrame(1, TimeFrameUnit.Hour),
@@ -4000,6 +4018,10 @@ def test_every_successful_close_invalidates_the_cached_balance():
         root / "shared" / "futures_live_base.py",
         root.parent / "utils" / "sltp_mixin.py",
     ]:
+        # alpaca/base.py is omitted ON PURPOSE and would fail if added: its two
+        # `close_position()` calls are construction-time and in `_reset`, both exempt by
+        # the ordering argument above -- but EXEMPT is keyed by function NAME and one of
+        # them lives in `__init__`. Stated so the next reader does not "fix" the list.
         for fn in ast.walk(ast.parse(path.read_text())):
             if not isinstance(fn, ast.FunctionDef) or fn.name in EXEMPT:
                 continue
@@ -4008,11 +4030,17 @@ def test_every_successful_close_invalidates_the_cached_balance():
                       and n.func.attr == "close_position"]
             if not closes:
                 continue
+            # A direct `.pop("balance")` OR a call to `_mark_flat`, which is the one
+            # place that pop is allowed to live. Counting only the literal pop made this
+            # guard fail the moment the pop was folded into a helper -- the third time in
+            # this issue that a structural check stopped finding its subject because the
+            # subject moved. Delegation is the thing being asserted, so accept it.
             invalidations = [n for n in ast.walk(fn)
                              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                             and n.func.attr == "pop" and n.args
-                             and isinstance(n.args[0], ast.Constant)
-                             and n.args[0].value == "balance"]
+                             and ((n.func.attr == "pop" and n.args
+                                   and isinstance(n.args[0], ast.Constant)
+                                   and n.args[0].value == "balance")
+                                  or n.func.attr == "_mark_flat")]
             if len(invalidations) < len(closes):
                 offenders.append(f"{path.parent.name}/{path.name}::{fn.name} "
                                  f"({len(closes)} closes, {len(invalidations)} invalidations)")
@@ -4208,10 +4236,9 @@ def test_dependency_injection_still_skips_construction_entirely():
 # would hand a spot env the futures step.
 # Per OWNER, because the two own different method sets.
 #
-# `_dispatch_sltp_trade` is deliberately ABSENT. It is the venue-variation hook -- its own
-# docstring calls it "the ONE thing `_step` varies by venue" -- and bybit and okx really do
-# override it, to thread the price rather than re-read it (#295). Guarding it would demand
-# a fold of the one method that exists not to be folded.
+# `_dispatch_sltp_trade` is gone: once `_bracket_entry_price` took over the venue
+# split it was a forwarder with one caller and zero overrides, so `_step` calls
+# the executor directly now.
 _SHARED_METHOD_OWNERSHIP = [
     # `_record_and_score` is owned by TorchTradeLiveEnv and reached by all TEN stepping
     # envs, alpaca included -- the only tail in this file that alpaca shares (#288).
@@ -4229,9 +4256,24 @@ _SHARED_METHOD_OWNERSHIP = [
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
         "_step", "_reset", "_resolve_action_tuple", "_record_sltp_position",
         "_reset_sltp_state", "_close_action",
+        # `_mark_flat` is here because it was introduced UNGUARDED three commits into this
+        # PR and a verbatim copy pasted onto bybit passed the whole suite -- the round-1
+        # finding, reproduced on the method written to fix the round-1 finding. It has
+        # three callers now, so a private copy would silently drift on one of them.
+        "_mark_flat",
+        # Both joined the uniform table when the fold removed the last venue overrides.
+        # They had their own inheritor/overrider guards, keyed on a binance+bitget vs
+        # bybit+okx split that no longer exists -- so they guarded nothing on the two
+        # venues the fold had just changed. A faithful copy of the executor pasted back
+        # onto bybit passed the whole suite while those guards were still in place.
+        # `_bracket_entry_price` could only join once the venue split moved from two bound
+        # implementations to one method reading `_PRICES_OFF_THREADED_MARK`. Being the one
+        # shared method that could NOT sit in this table is exactly the condition that
+        # left it needing a bespoke guard, which is how the round-1 gap happened.
+        "_execute_trade_if_needed", "_bracket_entry_price",
     )),
 ]
-# By NAME, not by count. Dropping `_reset` from the matrix above passed 936 tests: the
+# By NAME, not by count. Dropping `_reset` from the matrix above passed everything: the
 # registry-length pins guard the ENV axis, and nothing guarded the METHOD axis. This also
 # says out loud what is meant to be shared, so adding a genuinely shared method is a
 # deliberate edit here rather than an arithmetic fix.
@@ -4246,6 +4288,9 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("SLTPMixin", "_record_sltp_position"),
     ("SLTPMixin", "_reset_sltp_state"),
     ("SLTPMixin", "_close_action"),
+    ("SLTPMixin", "_mark_flat"),
+    ("SLTPMixin", "_execute_trade_if_needed"),
+    ("SLTPMixin", "_bracket_entry_price"),
 }
 
 
@@ -4369,6 +4414,10 @@ def _bracket_stub(cls, *, balance=10_000.0, leverage=5, fee=...):
                                  quantity_per_trade=0, leverage=leverage, symbol="X")
     env.trader = MagicMock()
     env.trader.get_account_balance.return_value = {"total_margin_balance": balance}
+    # A real lot size, because okx's sizing compares against it. Left to the bare
+    # MagicMock, `qty < trader.get_lot_size()["min_qty"]` raises TypeError -- the same
+    # family as the `float(MagicMock())` accident this docstring already warns about.
+    env.trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
     if fee is ...:
         del env.trader.transaction_fee
     else:
@@ -4487,7 +4536,7 @@ def test_the_non_fractional_trade_modes_size_from_config(mode, per_trade, price,
 
     Every other test here and in the four venue suites builds its config with
     `trade_mode="fractional"`, so mutating `quantity_per_trade / price` to `*`, or
-    doubling the raw quantity, passed all 1000 tests in this file. Pre-existing -- neither
+    doubling the raw quantity, passed this whole file. Pre-existing -- neither
     branch changed in the fold -- but the fold changed the blast radius: one wrong formula
     now mis-sizes every SLTP bracket on all four venues at once.
     """
@@ -4641,75 +4690,46 @@ def test_the_fold_did_not_move_a_single_sized_position(venue, leverage, exp_size
     )
 
 
-# binance and bitget take the mixin's `_dispatch_sltp_trade`; bybit and okx override it to
-# thread the price (#295). That split is intended, so the hook is out of the uniform table
-# above -- but "intended for two venues" is not "unguarded for the other two": a later
-# private override in binance or bitget would otherwise evade every guard in this file.
-_DISPATCH_INHERITORS = [c for c in SLTP_FUTURES_ENVS
-                        if c.__module__.split(".")[-2] in ("binance", "bitget")]
-_DISPATCH_OVERRIDERS = [c for c in SLTP_FUTURES_ENVS
-                        if c.__module__.split(".")[-2] in ("bybit", "okx")]
-assert len(_DISPATCH_INHERITORS) == len(_DISPATCH_OVERRIDERS) == 2
+# `_dispatch_sltp_trade` and `_execute_trade_if_needed` used to split binance/bitget from
+# bybit/okx, and had their own inheritor/overrider lists here. That split is gone: the mixin
+# forwards the mark unconditionally and `_bracket_entry_price` decides whether to use it, so
+# `_execute_trade_if_needed` lives in the uniform table above, so a private copy on ANY
+# venue fails; `_dispatch_sltp_trade` is gone entirely.
+#
+# The variation did not disappear, it moved -- and a guard that does not move with it stops
+# guarding. Appending a faithful copy of the shared executor back onto bybit passed the
+# whole suite while the old lists were still keyed on the pre-fold split.
+_MARK_PRICED = ("bybit", "okx")
 
 
-@pytest.mark.parametrize("cls", _DISPATCH_INHERITORS, ids=lambda c: c.__name__)
-def test_the_dispatch_hook_is_inherited_where_it_is_not_deliberately_overridden(cls):
-    """The venue-variation hook is still owned, for the venues that do not vary.
+@pytest.mark.parametrize("cls", SLTP_FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_each_venue_prices_its_bracket_from_the_source_it_intends(cls):
+    """`_bracket_entry_price` is the one thing the four SLTP venues vary (#288).
 
-    bybit and okx override `_dispatch_sltp_trade` to pass the threaded price rather than
-    let the executor re-read it (#295). binance and bitget price their brackets off a
-    candle close and take the mixin's default -- so for them a private copy is a re-fork
-    like any other, and nothing said so.
+    bybit and okx must resolve `_validated_mark_price` -- the mark `_step` already took
+    under the halt policy. Re-reading it inside the trade path is what #295 removed, and
+    an accidental fall-back to the mixin default is exactly that regression: it would read
+    the observer again, silently, and still pass every behavioural test because the mocked
+    close and the mocked mark agree.
+
+    binance and bitget must resolve the default. Assigning them the mark version would
+    price brackets off a value their `_step` never validated.
     """
-    assert cls._dispatch_sltp_trade is SLTPMixin._dispatch_sltp_trade, (
-        f"{cls.__name__} defines its own _dispatch_sltp_trade. Only bybit and okx have a "
-        f"reason to (the #295 threaded price); if this venue now needs one too, move it "
-        f"into _DISPATCH_OVERRIDERS deliberately rather than letting the hook drift"
+    venue = cls.__module__.split(".")[-2]
+    assert cls._PRICES_OFF_THREADED_MARK is (venue in _MARK_PRICED), (
+        f"{cls.__name__} has _PRICES_OFF_THREADED_MARK="
+        f"{cls._PRICES_OFF_THREADED_MARK}, which is backwards for this venue"
     )
-
-
-@pytest.mark.parametrize("cls", _DISPATCH_INHERITORS, ids=lambda c: c.__name__)
-def test_the_folded_executor_is_inherited_and_not_re_forked(cls):
-    """`_execute_trade_if_needed` joined the mixin in #288, and nothing guarded it.
-
-    It cannot go in `_SHARED_METHOD_OWNERSHIP` -- bybit and okx legitimately override it
-    for the `*, current_price` fork -- so it needs this split form, the same one
-    `_dispatch_sltp_trade` already has. Verified the gap was real: appending a full copy
-    of the mixin's body back onto binance passed all 1202 tests. The sizing test only
-    greps the resolved source for `_resolve_bracket_quantity`, which a faithful re-fork
-    still contains.
-
-    This is the method the close-action bug lived in. A private copy is where the next
-    shared fix silently fails to land.
-    """
-    assert cls._execute_trade_if_needed is SLTPMixin._execute_trade_if_needed, (
-        f"{cls.__name__} defines its own _execute_trade_if_needed. Only bybit and okx "
-        f"have a reason to (the keyword-only current_price); if this venue now needs one, "
-        f"move it into _DISPATCH_OVERRIDERS deliberately rather than re-forking the copy "
-        f"that #288 just folded"
-    )
-
-
-@pytest.mark.parametrize("cls", _DISPATCH_OVERRIDERS, ids=lambda c: c.__name__)
-def test_the_dispatch_overriders_thread_the_price_they_were_given(cls):
-    """And the two that DO override must consume the threaded price, not re-read it.
-
-    Excluding them from the ownership table costs the identity check; this replaces it
-    with what identity was standing in for.
-    """
-    call = next(
-        (n for n in ast.walk(ast.parse(
-            inspect.getsource(cls._dispatch_sltp_trade).lstrip()))
-         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-         and n.func.attr == "_execute_trade_if_needed"),
-        None,
-    )
-    assert call is not None, f"{cls.__name__}'s override never dispatches the trade"
-    assert any(kw.arg == "current_price" and isinstance(kw.value, ast.Name)
-               for kw in call.keywords), (
-        f"{cls.__name__} overrides _dispatch_sltp_trade but does not forward the threaded "
-        f"current_price -- the only reason the override exists (#295); re-reading it "
-        f"inside the trade path bypasses the halt policy"
+    # The list above is hand-maintained, so a FIFTH mark-priced venue that forgets the
+    # flag would pass the check by being absent from it. That is the #295 shape, so it is
+    # asserted from the other direction too: a venue whose `_step` threads a mark it never
+    # uses is either mis-flagged or has a dead argument, and both want a human.
+    threads_mark = "current_price" in inspect.signature(
+        cls._execute_trade_if_needed
+    ).parameters
+    assert threads_mark, (
+        f"{cls.__name__} no longer takes the threaded mark at all; _MARK_PRICED and the "
+        f"flag can no longer mean anything for it"
     )
 
 
@@ -4765,7 +4785,7 @@ def test_no_sltp_env_writes_the_dead_position_closed_field():
 def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
     """`action_value` is what the reward function reads out of `history.actions`.
 
-    Flipping the long/short sign here fails ZERO of 4196 tests -- found while mutating the
+    Flipping the long/short sign here fails ZERO tests -- found while mutating the
     freshly-folded `_step`, and pre-existing rather than introduced by the fold. It is the
     worst shape of bug this repo records: plausible numbers at the wrong sign, so the
     reward inverts silently and nothing crashes.
@@ -4808,7 +4828,7 @@ def test_a_refused_sltp_bracket_does_not_write_a_phantom_position(trade_info,
     duplication costs, in the gate rather than in the code.
     """
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
-    env._dispatch_sltp_trade = lambda action_tuple, current_price: trade_info
+    env._execute_trade_if_needed = lambda action_tuple, current_price=None: trade_info
 
     td = env.reset()
     assert env.position.current_position == 0, "setup: expected to start flat"
@@ -4852,9 +4872,8 @@ def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
     It does not prove a venue's executor then uses those values rather than re-reading;
     that is the venues' own contract, covered behaviourally by the SLTP grace-bar tests.
 
-    `_execute_trade_if_needed` is shared by binance and bitget as of #288 and overridden
-    by bybit/okx, so this contract belongs where the shared `_step` is owned rather than
-    in one venue's file -- and more so now that two venues resolve it from the mixin.
+    `_execute_trade_if_needed` is shared by all four venues as of #288, so this contract
+    belongs where the shared `_step` is owned rather than in one venue's file.
 
     The venue reports something DIFFERENT after the first read. That is the whole design:
     with the fixture's constant mocks a re-read returns the identical value, so the first
@@ -5073,7 +5092,7 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
 
 # Derived, not listed: a fifth venue joins these tests by existing rather than by
 # tripping an assert that tells someone to go edit a list. The inheritor/overrider split
-# is already expressed once, at _DISPATCH_INHERITORS.
+# is already expressed once, at _MARK_PRICED.
 _SLTP_VENUES = sorted(c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS)
 
 
@@ -5104,10 +5123,9 @@ def _fire_close(env):
     assert env.action_map[1] == ("close", None, None), (
         f"slot 1 is {env.action_map[1]}, not CLOSE"
     )
-    # Through `_dispatch_sltp_trade`, the seam `_step` uses: it has uniform arity on all
-    # four venues and already owns the `*, current_price` split. Sniffing the signature
-    # here re-derived that split in the test, which is the duplication #288 removes.
-    return env._dispatch_sltp_trade(env.action_map[1], 100.0)
+    # Through the executor with the mark threaded, exactly as `_step` calls it. Sniffing
+    # the signature here re-derived a venue split the test has no business knowing.
+    return env._execute_trade_if_needed(env.action_map[1], current_price=100.0)
 
 
 @pytest.mark.parametrize("venue", _SLTP_VENUES)
@@ -5239,7 +5257,7 @@ def test_a_failed_flatten_does_not_send_the_entry_that_follows_it(venue, outcome
     else:
         trader.close_position.side_effect = RuntimeError("venue refused the flatten")
 
-    info = env._dispatch_sltp_trade(("short", 0.03, -0.02), 100.0)
+    info = env._execute_trade_if_needed(("short", 0.03, -0.02), current_price=100.0)
 
     assert not trader.trade.called, (
         f"{venue}: the flatten failed but the entry was sent anyway -- the venue now holds "
@@ -5252,9 +5270,16 @@ def test_a_failed_flatten_does_not_send_the_entry_that_follows_it(venue, outcome
         f"{venue}: a refused flatten returns success={info['success']!r}, which is what "
         f"HOLD returns -- indistinguishable from doing nothing."
     )
+    # The exact inverse of the bug the sibling test pins: clearing here would report a
+    # position the venue still holds, with its brackets still resting, as unprotected.
+    # Hoisting the clear above the `if not close_success` check survived the whole suite.
+    assert env.active_stop_loss == 90.0 and env.active_take_profit == 110.0, (
+        f"{venue}: brackets cleared on a flatten the venue refused -- the position and "
+        f"its bracket legs are both still live at the exchange."
+    )
 
 
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit"])
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
 @pytest.mark.parametrize("sl_placed,tp_placed", [(True, False), (False, True), (False, False)],
                          ids=["tp-rejected", "sl-rejected", "both-rejected"])
 def test_a_bracket_leg_the_venue_rejected_is_not_recorded_as_live(venue, sl_placed, tp_placed):
@@ -5265,14 +5290,24 @@ def test_a_bracket_leg_the_venue_rejected_is_not_recorded_as_live(venue, sl_plac
     that does not exist. Every one of these three mutants survived the whole suite before
     this test: alpaca was the only SLTP env pinning it.
 
-    okx is excluded, not forgotten -- its brackets attach atomically (`attachAlgoOrds`),
-    so it has no per-leg status to misread.
+    okx used to be excluded here: it attaches brackets atomically (`attachAlgoOrds`) and
+    its own executor never sets `bracket_status`, so it recorded both legs unconditionally.
+    The fold puts it behind the same gate.
+
+    This pins a CONTRACT; it does not fix an observed failure, and an earlier version of
+    this docstring claimed it did. No trader in the repo can currently report a rejected
+    leg on this path: bybit's and okx's executors never set `bracket_status` at all, and
+    `ReplayOrderExecutor` sets `sl_placed = stop_loss is not None` while
+    `calculate_bracket_prices` always returns two floats -- so replay reports all-True
+    too. The only producer is the injected stub below. The gate is worth having because
+    binance and bitget DO place the legs separately, and a venue that starts doing so
+    should not need this test written for it afterwards.
     """
     env, trader = _close_env(venue, 0)
     trader.bracket_status = {"sl_placed": sl_placed, "tp_placed": tp_placed}
     trader.trade.return_value = True
 
-    info = env._dispatch_sltp_trade(("long", -0.02, 0.03), 100.0)
+    info = env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=100.0)
     assert info["executed"], f"{venue}: setup failed, the entry never went out"
 
     assert (env.active_stop_loss != 0.0) is sl_placed, (
@@ -5296,7 +5331,7 @@ def test_a_policy_can_still_flatten_when_the_feed_is_degraded(venue):
     env, trader = _close_env(venue, 1)
     env.observer.get_observations.side_effect = ValueError("stale bar")
 
-    info = env._dispatch_sltp_trade(env.action_map[1], 100.0)
+    info = env._execute_trade_if_needed(env.action_map[1], current_price=100.0)
 
     assert trader.close_position.called, (
         f"{venue}: the feed went stale and the close was blocked with it -- the policy "
@@ -5330,10 +5365,139 @@ def test_an_unrecognised_side_reaches_no_venue_call_at_all(venue, sizeable):
         env._resolve_bracket_quantity = lambda price: None
 
     with pytest.raises(ValueError, match="Invalid side"):
-        env._dispatch_sltp_trade(("bogus", -0.02, 0.03), 100.0)
+        env._execute_trade_if_needed(("bogus", -0.02, 0.03), current_price=100.0)
 
     assert not trader.close_position.called, (
         f"{venue}: a bad side flattened the position before raising."
     )
     assert not trader.trade.called
     assert env.position.current_position == 1
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_a_completed_switch_arms_the_new_positions_brackets(venue):
+    """The other side of the clear: when the entry SUCCEEDS, the new levels must be armed,
+    not left at the zeros the flatten wrote.
+
+    Wiping both fields at the end of the function whenever a flatten had happened survived
+    the whole suite -- the only test asserting post-entry bracket state starts from a FLAT
+    account, so it never crosses the flatten at all. This is what pins the clear to its
+    position before the trade block rather than after it.
+    """
+    env, trader = _close_env(venue, 1)                 # long open, brackets at 90/110
+    trader.close_position.return_value = True
+    trader.trade.return_value = True
+
+    env._execute_trade_if_needed(("short", 0.03, -0.02), current_price=100.0)
+
+    # The pop is pinned from the CLOSE site by the close tests; from here it was pinned
+    # only by a source grep. `_resolve_bracket_quantity` caches the balance BEFORE the
+    # flatten, so the invalidation is genuinely last and this observes it.
+    assert "balance" not in env._last_confirmed_read, (
+        f"{venue}: the flatten realised P&L but the cached sizing balance survived it"
+    )
+
+    expected_sl, expected_tp = calculate_bracket_prices("short", 100.0, 0.03, -0.02)
+    assert (env.active_stop_loss, env.active_take_profit) == (expected_sl, expected_tp), (
+        f"{venue}: switched into a short but the bracket levels are "
+        f"{env.active_stop_loss}/{env.active_take_profit}, not the new position's "
+        f"{expected_sl}/{expected_tp}."
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("entry", ["refused", "raised"])
+def test_a_flatten_takes_the_old_positions_brackets_with_it(venue, entry):
+    """Switching directions closes, then opens. If the OPEN fails after the close
+    succeeded, the account is flat but `active_stop_loss`/`active_take_profit` still hold
+    the closed position's levels -- and the next sync is flat -> flat, so
+    `_sync_position_from_exchange` never clears them either. They read as live protection
+    on a position that no longer exists.
+
+    okx alone cleared them before #288 folded the executors; the fold dropped that and the
+    other three never had it. Found by @CharlieHelps, and missed by a 324-case
+    differential probe that initialised both fields to 0.0 -- the same value a correct
+    clear produces, so "cleared" and "never set" were indistinguishable in every case.
+    The non-zero setup below is the entire point of the test.
+    """
+    env, trader = _close_env(venue, 1)                 # long open, brackets at 90/110
+    trader.close_position.return_value = True          # the flatten SUCCEEDS
+    if entry == "refused":
+        trader.trade.return_value = False              # the replacement entry does not
+    else:
+        trader.trade.side_effect = RuntimeError("venue rejected the entry")
+
+    env._execute_trade_if_needed(("short", 0.03, -0.02), current_price=100.0)
+
+    assert trader.close_position.called and env.position.current_position == 0
+    # Without this the test passes on a mutant that returns between the close and the
+    # entry -- the flatten would be the whole story and "the entry failed" untrue.
+    assert trader.trade.called, (
+        f"{venue}: the entry was never attempted, so this test is not exercising the "
+        f"close-succeeded-entry-failed path it claims to"
+    )
+    assert env.active_stop_loss == 0.0 and env.active_take_profit == 0.0, (
+        f"{venue}: flat after the flatten, but the closed position's brackets survive as "
+        f"sl={env.active_stop_loss} tp={env.active_take_profit} -- nothing clears them now."
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 0.0, -1.0],
+                         ids=["nan", "inf", "zero", "negative"])
+def test_an_unusable_entry_price_refuses_instead_of_sizing_from_it(venue, bad):
+    """Behavioural, because the source scan cannot tell a real guard from a mentioned one:
+    `if math.isfinite(p) or True` satisfies the grep and refuses nothing.
+
+    `nan <= 0` is False, which is exactly the input #347 is about -- a bare `<= 0` check
+    reads as protection and passes nan straight through to size the order and price both
+    bracket legs. Both implementations of `_bracket_entry_price` are covered: bybit and
+    okx get the bad value as the threaded mark, binance and bitget as their candle close.
+    """
+    env, trader = _close_env(venue, 0)
+    if venue in _MARK_PRICED:
+        # The threaded mark is validated directly: no halt policy wraps it, because
+        # `_step` already took it under one.
+        expected = ValueError
+        drive = lambda: env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=bad)
+    else:
+        # The candle read runs INSIDE `_halting`, which converts the guard's ValueError
+        # into the halt type so a degraded feed truncates rather than crashing (#295).
+        # Asserting ValueError here would have been asserting the policy away.
+        expected = LiveObservationHalt
+        # side_effect wins over return_value, and `_real_futures_env` installs one --
+        # leaving it set meant the observer kept returning a healthy 100.0 and the test
+        # asserted nothing for two of the four bad values.
+        env.observer.get_observations.side_effect = None
+        env.observer.get_observations.return_value = {
+            "base_features": np.full((10, 4), bad, dtype=np.float64)}
+        drive = lambda: env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=100.0)
+
+    with pytest.raises(expected):
+        drive()
+    assert not trader.trade.called, (
+        f"{venue}: sized and priced a bracket from {bad!r}"
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_a_venue_that_reports_no_bracket_status_records_both_legs(venue):
+    """The `getattr(trader, "bracket_status", {both True})` default, which no test reached.
+
+    `_real_futures_env` builds the trader as a MagicMock, and a MagicMock auto-creates any
+    attribute — so `getattr` always found one and the default branch was dead in every
+    test. That default is not a fallback for bybit and okx: their executors never set the
+    attribute, so it IS their production path, and it decides whether they record their
+    brackets at all. Flipping it to False survived the whole suite.
+    """
+    env, trader = _close_env(venue, 0)
+    del trader.bracket_status
+    trader.trade.return_value = True
+
+    env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=100.0)
+
+    sl, tp = calculate_bracket_prices("long", 100.0, -0.02, 0.03)
+    assert (env.active_stop_loss, env.active_take_profit) == (sl, tp), (
+        f"{venue}: a venue that reports no per-leg status must be taken at its word that "
+        f"both legs placed -- otherwise bybit and okx record no brackets at all."
+    )
