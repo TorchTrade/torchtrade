@@ -282,7 +282,7 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
     """
     step = env_cls._step
     sync = _first_call_position(step, {"_sync_position_from_exchange"})
-    # NOT `_dispatch_sltp_trade`: this is parametrized over NON_SLTP_ENVS, which cannot
+    # NOT the SLTP executor: this is parametrized over NON_SLTP_ENVS, which cannot
     # contain an SLTP env, so adding it read as coverage that could never bind.
     trade = _first_call_position(step, {"_execute_trade_if_needed"})
 
@@ -328,13 +328,13 @@ def test_every_live_step_validates_its_action_before_it_trades(env_cls):
     step = env_cls._step
     resolve = _first_call_position(step, {
         "_resolve_action_level", "_resolve_action_index", "_resolve_action_tuple"})
-    # `_dispatch_sltp_trade` is the SLTP trade call as of #288: the shared `_step` hands
+    # `_execute_trade_if_needed` is the SLTP trade call: the shared `_step` hands
     # off through it so bybit/okx can thread the mark. Naming only the executor made this
     # guard find no trade call at all on the four SLTP venues, which is a TypeError rather
     # than a missed ordering -- loud, but only because the list that feeds it was fixed
     # first. Keyed on the wrong name it would simply have stopped constraining anything.
     trade = _first_call_position(
-        step, {"_execute_trade_if_needed", "_dispatch_sltp_trade"}
+        step, {"_execute_trade_if_needed"}
     )
 
     assert resolve is not None, (
@@ -2694,7 +2694,7 @@ def test_the_pre_trade_read_halts_like_the_post_bar_one(exchange, module):
     # this already existed two hundred lines up; I reached for `in source` anyway.
     acquire = _first_call_position(cls._step, {"_acquire_pre_trade_state"})
     trade = _first_call_position(
-        cls._step, {"_execute_trade_if_needed", "_dispatch_sltp_trade"}
+        cls._step, {"_execute_trade_if_needed"}
     )
     assert acquire is not None, (
         f"{exchange}/{module}'s resolved _step reads the venue before trading without "
@@ -4242,10 +4242,9 @@ def test_dependency_injection_still_skips_construction_entirely():
 # would hand a spot env the futures step.
 # Per OWNER, because the two own different method sets.
 #
-# `_dispatch_sltp_trade` is deliberately ABSENT. It is the venue-variation hook -- its own
-# docstring calls it "the ONE thing `_step` varies by venue" -- and bybit and okx really do
-# override it, to thread the price rather than re-read it (#295). Guarding it would demand
-# a fold of the one method that exists not to be folded.
+# `_dispatch_sltp_trade` is gone: once `_bracket_entry_price` took over the venue
+# split it was a forwarder with one caller and zero overrides, so `_step` calls
+# the executor directly now.
 _SHARED_METHOD_OWNERSHIP = [
     # `_record_and_score` is owned by TorchTradeLiveEnv and reached by all TEN stepping
     # envs, alpaca included -- the only tail in this file that alpaca shares (#288).
@@ -4268,7 +4267,7 @@ _SHARED_METHOD_OWNERSHIP = [
         # bybit+okx split that no longer exists -- so they guarded nothing on the two
         # venues the fold had just changed. A faithful copy of the executor pasted back
         # onto bybit passed all 3445 tests while those guards were still in place.
-        "_dispatch_sltp_trade", "_execute_trade_if_needed",
+        "_execute_trade_if_needed",
     )),
 ]
 # By NAME, not by count. Dropping `_reset` from the matrix above passed 936 tests: the
@@ -4286,7 +4285,6 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("SLTPMixin", "_record_sltp_position"),
     ("SLTPMixin", "_reset_sltp_state"),
     ("SLTPMixin", "_close_action"),
-    ("SLTPMixin", "_dispatch_sltp_trade"),
     ("SLTPMixin", "_execute_trade_if_needed"),
 }
 
@@ -4819,7 +4817,7 @@ def test_a_refused_sltp_bracket_does_not_write_a_phantom_position(trade_info,
     duplication costs, in the gate rather than in the code.
     """
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
-    env._dispatch_sltp_trade = lambda action_tuple, current_price: trade_info
+    env._execute_trade_if_needed = lambda action_tuple, current_price=None: trade_info
 
     td = env.reset()
     assert env.position.current_position == 0, "setup: expected to start flat"
@@ -5115,10 +5113,9 @@ def _fire_close(env):
     assert env.action_map[1] == ("close", None, None), (
         f"slot 1 is {env.action_map[1]}, not CLOSE"
     )
-    # Through `_dispatch_sltp_trade`, the seam `_step` uses: it has uniform arity on all
-    # four venues and already owns the `*, current_price` split. Sniffing the signature
-    # here re-derived that split in the test, which is the duplication #288 removes.
-    return env._dispatch_sltp_trade(env.action_map[1], 100.0)
+    # Through the executor with the mark threaded, exactly as `_step` calls it. Sniffing
+    # the signature here re-derived a venue split the test has no business knowing.
+    return env._execute_trade_if_needed(env.action_map[1], current_price=100.0)
 
 
 @pytest.mark.parametrize("venue", _SLTP_VENUES)
@@ -5250,7 +5247,7 @@ def test_a_failed_flatten_does_not_send_the_entry_that_follows_it(venue, outcome
     else:
         trader.close_position.side_effect = RuntimeError("venue refused the flatten")
 
-    info = env._dispatch_sltp_trade(("short", 0.03, -0.02), 100.0)
+    info = env._execute_trade_if_needed(("short", 0.03, -0.02), current_price=100.0)
 
     assert not trader.trade.called, (
         f"{venue}: the flatten failed but the entry was sent anyway -- the venue now holds "
@@ -5300,7 +5297,7 @@ def test_a_bracket_leg_the_venue_rejected_is_not_recorded_as_live(venue, sl_plac
     trader.bracket_status = {"sl_placed": sl_placed, "tp_placed": tp_placed}
     trader.trade.return_value = True
 
-    info = env._dispatch_sltp_trade(("long", -0.02, 0.03), 100.0)
+    info = env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=100.0)
     assert info["executed"], f"{venue}: setup failed, the entry never went out"
 
     assert (env.active_stop_loss != 0.0) is sl_placed, (
@@ -5324,7 +5321,7 @@ def test_a_policy_can_still_flatten_when_the_feed_is_degraded(venue):
     env, trader = _close_env(venue, 1)
     env.observer.get_observations.side_effect = ValueError("stale bar")
 
-    info = env._dispatch_sltp_trade(env.action_map[1], 100.0)
+    info = env._execute_trade_if_needed(env.action_map[1], current_price=100.0)
 
     assert trader.close_position.called, (
         f"{venue}: the feed went stale and the close was blocked with it -- the policy "
@@ -5358,7 +5355,7 @@ def test_an_unrecognised_side_reaches_no_venue_call_at_all(venue, sizeable):
         env._resolve_bracket_quantity = lambda price: None
 
     with pytest.raises(ValueError, match="Invalid side"):
-        env._dispatch_sltp_trade(("bogus", -0.02, 0.03), 100.0)
+        env._execute_trade_if_needed(("bogus", -0.02, 0.03), current_price=100.0)
 
     assert not trader.close_position.called, (
         f"{venue}: a bad side flattened the position before raising."
@@ -5381,7 +5378,7 @@ def test_a_completed_switch_arms_the_new_positions_brackets(venue):
     trader.close_position.return_value = True
     trader.trade.return_value = True
 
-    env._dispatch_sltp_trade(("short", 0.03, -0.02), 100.0)
+    env._execute_trade_if_needed(("short", 0.03, -0.02), current_price=100.0)
 
     expected_sl, expected_tp = calculate_bracket_prices("short", 100.0, 0.03, -0.02)
     assert (env.active_stop_loss, env.active_take_profit) == (expected_sl, expected_tp), (
@@ -5413,7 +5410,7 @@ def test_a_flatten_takes_the_old_positions_brackets_with_it(venue, entry):
     else:
         trader.trade.side_effect = RuntimeError("venue rejected the entry")
 
-    env._dispatch_sltp_trade(("short", 0.03, -0.02), 100.0)
+    env._execute_trade_if_needed(("short", 0.03, -0.02), current_price=100.0)
 
     assert trader.close_position.called and env.position.current_position == 0
     # Without this the test passes on a mutant that returns between the close and the
@@ -5445,7 +5442,7 @@ def test_an_unusable_entry_price_refuses_instead_of_sizing_from_it(venue, bad):
         # The threaded mark is validated directly: no halt policy wraps it, because
         # `_step` already took it under one.
         expected = ValueError
-        drive = lambda: env._dispatch_sltp_trade(("long", -0.02, 0.03), bad)
+        drive = lambda: env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=bad)
     else:
         # The candle read runs INSIDE `_halting`, which converts the guard's ValueError
         # into the halt type so a degraded feed truncates rather than crashing (#295).
@@ -5457,7 +5454,7 @@ def test_an_unusable_entry_price_refuses_instead_of_sizing_from_it(venue, bad):
         env.observer.get_observations.side_effect = None
         env.observer.get_observations.return_value = {
             "base_features": np.full((10, 4), bad, dtype=np.float64)}
-        drive = lambda: env._dispatch_sltp_trade(("long", -0.02, 0.03), 100.0)
+        drive = lambda: env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=100.0)
 
     with pytest.raises(expected):
         drive()

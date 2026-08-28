@@ -17,7 +17,6 @@ from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 
 
-
 @dataclass
 class OKXFuturesSLTPTradingEnvConfig(BaseFuturesSLTPConfig):
     """Configuration for OKX Futures SLTP Trading Environment.
@@ -83,9 +82,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
     def _resolve_bracket_quantity(self, current_price):
         """okx alone refuses a sub-minimum bracket instead of letting the venue reject it.
 
-        Kept as a sizing override rather than inlined in the executor, which is what let
-        okx keep a private ~115-line copy of it. Whether the other three should refuse too
-        is #414's question, not this fold's.
+        Whether the other three should refuse too is #414's question, not this fold's.
         """
         quantity = super()._resolve_bracket_quantity(current_price)
         if quantity is None or quantity < self.trader.get_lot_size()["min_qty"]:

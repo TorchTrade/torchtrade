@@ -53,16 +53,6 @@ class SLTPMixin:
         """The position the ACTION targets, never the order side (#276)."""
         self.position.current_position = self.SIDE_DIRECTION.get(side, 0)
 
-    def _dispatch_sltp_trade(self, action_tuple, current_price: float):
-        """Hand the action to the executor, with the mark `_step` already acquired.
-
-        Passed unconditionally: `_bracket_entry_price` decides whether to use it, so the
-        venues that price off their own candle simply ignore it. That is what let both
-        venue overrides of this method go -- forwarding a value the callee may ignore is
-        cheaper than two copies of a one-line forward.
-        """
-        return self._execute_trade_if_needed(action_tuple, current_price=current_price)
-
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Four byte-identical copies (#288)."""
         result = super()._reset(tensordict, **kwargs)
@@ -71,7 +61,7 @@ class SLTPMixin:
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """One step. Four copies, 100% identical within each venue pair and 88% across --
-        the 12% was solely the dispatch call, which `_dispatch_sltp_trade` now owns (#288).
+        the 12% was solely the price source, which `_bracket_entry_price` now owns (#288).
 
         This is the file where #295 kept finding a fix applied to some copies and not
         others: the unguarded balance read, the mark re-read, the close that left the
@@ -86,7 +76,9 @@ class SLTPMixin:
 
         action_tuple = self._resolve_action_tuple(tensordict)
 
-        trade_info = self._dispatch_sltp_trade(action_tuple, current_price)
+        trade_info = self._execute_trade_if_needed(
+            action_tuple, current_price=current_price
+        )
 
         # Eagerly update position from the trade result so the rest of this step sees the
         # new state without waiting for the next sync cycle.
@@ -206,11 +198,6 @@ class SLTPMixin:
     def _mark_flat(self) -> None:
         """Record that the position is gone: cache, direction, and both bracket legs.
 
-        Two callers -- the close action and the switch-directions flatten -- and they were
-        drifting already: okx cleared the brackets in one and not the other, which is the
-        regression #419 shipped. Three lines in two places is how the four executors this
-        issue is about got started.
-
         Cache first because a realised close moves equity, so the cached balance is now
         wrong by the trade's P&L. Callers must only reach this after `close_position()`
         returned truthy -- a failed close leaves the position (#295).
@@ -250,12 +237,6 @@ class SLTPMixin:
 
     def _validated_mark_price(self, current_price: Optional[float]) -> float:
         """The other implementation of `_bracket_entry_price`: use the threaded mark.
-
-        Lives here rather than in bybit's and okx's files because it was byte-identical in
-        both -- two copies is how this method got to two ~110-line copies in the first
-        place. The venues that want it say so with one line:
-
-            _bracket_entry_price = SLTPMixin._validated_mark_price
 
         Re-reading the price instead is what #295 removed: the second read bypassed the
         halt policy, so a halted bar still traded. Validated because a venue can report a
