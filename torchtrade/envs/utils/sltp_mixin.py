@@ -333,6 +333,12 @@ class SLTPMixin:
                 return trade_info
             self._last_confirmed_read.pop("balance", None)
             self.position.current_position = 0
+            # The closed position's brackets go with it. If the replacement entry below
+            # then fails, the next sync is flat -> flat, so `_sync_position_from_exchange`
+            # never clears them and they read as live on a position that no longer exists.
+            # okx alone did this before the fold; the other three inherited the gap.
+            self.active_stop_loss = 0.0
+            self.active_take_profit = 0.0
 
         trade_side = "buy" if side == "long" else "sell"
         stop_loss_price, take_profit_price = calculate_bracket_prices(

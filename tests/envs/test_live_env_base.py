@@ -5376,3 +5376,34 @@ def test_an_unrecognised_side_reaches_no_venue_call_at_all(venue, sizeable):
     )
     assert not trader.trade.called
     assert env.position.current_position == 1
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("entry", ["refused", "raised"])
+def test_a_flatten_takes_the_old_positions_brackets_with_it(venue, entry):
+    """Switching directions closes, then opens. If the OPEN fails after the close
+    succeeded, the account is flat but `active_stop_loss`/`active_take_profit` still hold
+    the closed position's levels -- and the next sync is flat -> flat, so
+    `_sync_position_from_exchange` never clears them either. They read as live protection
+    on a position that no longer exists.
+
+    okx alone cleared them before #288 folded the executors; the fold dropped that and the
+    other three never had it. Found by @CharlieHelps, and missed by a 324-case
+    differential probe that initialised both fields to 0.0 -- the same value a correct
+    clear produces, so "cleared" and "never set" were indistinguishable in every case.
+    The non-zero setup below is the entire point of the test.
+    """
+    env, trader = _close_env(venue, 1)                 # long open, brackets at 90/110
+    trader.close_position.return_value = True          # the flatten SUCCEEDS
+    if entry == "refused":
+        trader.trade.return_value = False              # the replacement entry does not
+    else:
+        trader.trade.side_effect = RuntimeError("venue rejected the entry")
+
+    env._dispatch_sltp_trade(("short", 0.03, -0.02), 100.0)
+
+    assert trader.close_position.called and env.position.current_position == 0
+    assert env.active_stop_loss == 0.0 and env.active_take_profit == 0.0, (
+        f"{venue}: flat after the flatten, but the closed position's brackets survive as "
+        f"sl={env.active_stop_loss} tp={env.active_take_profit} -- nothing clears them now."
+    )
