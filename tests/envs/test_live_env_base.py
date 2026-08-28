@@ -38,6 +38,7 @@ from torchtrade.envs.core.live import (
     TorchTradeLiveEnv,
 )
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
+from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.utils.liquidation import (
     cross_liquidation_price,
@@ -2195,25 +2196,14 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
         f"{exchange}'s trade path does not CALL the shared sizing; an inlined copy that "
         f"names it in a comment would satisfy a text search"
     )
-    # The guard lives on `_bracket_entry_price` as of the bybit/okx fold, and this scan
-    # follows it there rather than naming a method. That is the second time this test's
-    # subject moved out from under it: once when #288 folded the sizing onto the shared
-    # base, once here. Resolve-then-scan, never a file or a fixed method name.
-    price_src = inspect.getsource(cls._bracket_entry_price)
-    assert "math.isfinite" in price_src, (
+    # WHICH implementation each venue uses is pinned by identity in
+    # `test_each_venue_prices_its_bracket_from_the_source_it_intends`; the substring pair
+    # that used to live here said the same thing more weakly. What remains is the only
+    # assertion in this test with a unique kill: dropping `isfinite` from either
+    # implementation dies here and nowhere else in 4465 tests.
+    assert "math.isfinite" in inspect.getsource(cls._bracket_entry_price), (
         f"{exchange} resolves its entry price with no finiteness check"
     )
-    if exchange in ("binance", "bitget"):
-        # These two size from a candle close, so _current_mark_price() never guards them.
-        # bybit and okx re-validate the threaded mark instead (#295).
-        assert "get_observations" in price_src, (
-            f"{exchange} should price off its own candle close, not a threaded mark"
-        )
-    else:
-        assert "get_observations" not in price_src, (
-            f"{exchange} re-reads the observer inside the trade path, which is exactly "
-            f"what #295 removed -- it must use the mark `_step` already acquired"
-        )
 
 
 @pytest.mark.parametrize("exchange,side_key,side", [
@@ -5273,6 +5263,13 @@ def test_a_failed_flatten_does_not_send_the_entry_that_follows_it(venue, outcome
         f"{venue}: a refused flatten returns success={info['success']!r}, which is what "
         f"HOLD returns -- indistinguishable from doing nothing."
     )
+    # The exact inverse of the bug the sibling test pins: clearing here would report a
+    # position the venue still holds, with its brackets still resting, as unprotected.
+    # Hoisting the clear above the `if not close_success` check survived all 3445 tests.
+    assert env.active_stop_loss == 90.0 and env.active_take_profit == 110.0, (
+        f"{venue}: brackets cleared on a flatten the venue refused -- the position and "
+        f"its bracket legs are both still live at the exchange."
+    )
 
 
 @pytest.mark.parametrize("venue", _SLTP_VENUES)
@@ -5371,6 +5368,30 @@ def test_an_unrecognised_side_reaches_no_venue_call_at_all(venue, sizeable):
 
 
 @pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_a_completed_switch_arms_the_new_positions_brackets(venue):
+    """The other side of the clear: when the entry SUCCEEDS, the new levels must be armed,
+    not left at the zeros the flatten wrote.
+
+    Wiping both fields at the end of the function whenever a flatten had happened survived
+    all 3445 tests -- the only test asserting post-entry bracket state starts from a FLAT
+    account, so it never crosses the flatten at all. This is what pins the clear to its
+    position before the trade block rather than after it.
+    """
+    env, trader = _close_env(venue, 1)                 # long open, brackets at 90/110
+    trader.close_position.return_value = True
+    trader.trade.return_value = True
+
+    env._dispatch_sltp_trade(("short", 0.03, -0.02), 100.0)
+
+    expected_sl, expected_tp = calculate_bracket_prices("short", 100.0, 0.03, -0.02)
+    assert (env.active_stop_loss, env.active_take_profit) == (expected_sl, expected_tp), (
+        f"{venue}: switched into a short but the bracket levels are "
+        f"{env.active_stop_loss}/{env.active_take_profit}, not the new position's "
+        f"{expected_sl}/{expected_tp}."
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
 @pytest.mark.parametrize("entry", ["refused", "raised"])
 def test_a_flatten_takes_the_old_positions_brackets_with_it(venue, entry):
     """Switching directions closes, then opens. If the OPEN fails after the close
@@ -5395,7 +5416,51 @@ def test_a_flatten_takes_the_old_positions_brackets_with_it(venue, entry):
     env._dispatch_sltp_trade(("short", 0.03, -0.02), 100.0)
 
     assert trader.close_position.called and env.position.current_position == 0
+    # Without this the test passes on a mutant that returns between the close and the
+    # entry -- the flatten would be the whole story and "the entry failed" untrue.
+    assert trader.trade.called, (
+        f"{venue}: the entry was never attempted, so this test is not exercising the "
+        f"close-succeeded-entry-failed path it claims to"
+    )
     assert env.active_stop_loss == 0.0 and env.active_take_profit == 0.0, (
         f"{venue}: flat after the flatten, but the closed position's brackets survive as "
         f"sl={env.active_stop_loss} tp={env.active_take_profit} -- nothing clears them now."
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 0.0, -1.0],
+                         ids=["nan", "inf", "zero", "negative"])
+def test_an_unusable_entry_price_refuses_instead_of_sizing_from_it(venue, bad):
+    """Behavioural, because the source scan cannot tell a real guard from a mentioned one:
+    `if math.isfinite(p) or True` satisfies the grep and refuses nothing.
+
+    `nan <= 0` is False, which is exactly the input #347 is about -- a bare `<= 0` check
+    reads as protection and passes nan straight through to size the order and price both
+    bracket legs. Both implementations of `_bracket_entry_price` are covered: bybit and
+    okx get the bad value as the threaded mark, binance and bitget as their candle close.
+    """
+    env, trader = _close_env(venue, 0)
+    if venue in _MARK_PRICED:
+        # The threaded mark is validated directly: no halt policy wraps it, because
+        # `_step` already took it under one.
+        expected = ValueError
+        drive = lambda: env._dispatch_sltp_trade(("long", -0.02, 0.03), bad)
+    else:
+        # The candle read runs INSIDE `_halting`, which converts the guard's ValueError
+        # into the halt type so a degraded feed truncates rather than crashing (#295).
+        # Asserting ValueError here would have been asserting the policy away.
+        expected = LiveObservationHalt
+        # side_effect wins over return_value, and `_real_futures_env` installs one --
+        # leaving it set meant the observer kept returning a healthy 100.0 and the test
+        # asserted nothing for two of the four bad values.
+        env.observer.get_observations.side_effect = None
+        env.observer.get_observations.return_value = {
+            "base_features": np.full((10, 4), bad, dtype=np.float64)}
+        drive = lambda: env._dispatch_sltp_trade(("long", -0.02, 0.03), 100.0)
+
+    with pytest.raises(expected):
+        drive()
+    assert not trader.trade.called, (
+        f"{venue}: sized and priced a bracket from {bad!r}"
     )
