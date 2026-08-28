@@ -20,10 +20,10 @@ class SLTPMixin:
     -- alpaca included, which is why deleting its own `_reset` mattered: with both in the
     MRO, `_reset_sltp_state` ran twice per reset.
 
-    The one venue-specific piece is `_dispatch_sltp_trade`. bybit and okx forward the
-    mark `_step` already acquired under the halt policy; binance and bitget price their
-    brackets off a candle close and take the default. That split is deliberate and is a
-    #409 decision, not an accident to unify here.
+    The one venue-specific piece is `_bracket_entry_price`: bybit and okx use the mark
+    `_step` already acquired under the halt policy, binance and bitget price off their own
+    candle close. That split is deliberate (#409/#295) and is the ONLY thing that varies --
+    naming it is what let the last two ~110-line executor copies go.
 
     Required of the inheriting class -- the full list, because owning `_step` means this
     mixin now depends on the whole live-env surface, not just SLTP state:
@@ -54,13 +54,14 @@ class SLTPMixin:
         self.position.current_position = self.SIDE_DIRECTION.get(side, 0)
 
     def _dispatch_sltp_trade(self, action_tuple, current_price: float):
-        """Hand the action to the venue's executor. The ONE thing `_step` varies by venue.
+        """Hand the action to the executor, with the mark `_step` already acquired.
 
-        Default: the venue prices its own bracket off a candle close and does not want the
-        mark (binance, bitget). bybit and okx take the threaded price -- see #295, where
-        re-reading it inside the trade path bypassed the halt policy.
+        Passed unconditionally: `_bracket_entry_price` decides whether to use it, so the
+        venues that price off their own candle simply ignore it. That is what let both
+        venue overrides of this method go -- forwarding a value the callee may ignore is
+        cheaper than two copies of a one-line forward.
         """
-        return self._execute_trade_if_needed(action_tuple)
+        return self._execute_trade_if_needed(action_tuple, current_price=current_price)
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         """Four byte-identical copies (#288)."""
@@ -190,13 +191,8 @@ class SLTPMixin:
             trade_info["success"] = False
             return trade_info
         if success:
-            # A realised close moves equity; the cached balance is now wrong by the
-            # trade's P&L. SUCCESS only -- a failed close leaves the position (#295).
-            self._last_confirmed_read.pop("balance", None)
             close_side = "sell" if self.position.current_position > 0 else "buy"
-            self.position.current_position = 0
-            self.active_stop_loss = 0.0
-            self.active_take_profit = 0.0
+            self._mark_flat()
             trade_info.update({
                 "executed": True, "side": close_side,
                 "success": True, "closed_position": True,
@@ -206,6 +202,23 @@ class SLTPMixin:
             # the refusal is invisible to the caller.
             trade_info["success"] = False
         return trade_info
+
+    def _mark_flat(self) -> None:
+        """Record that the position is gone: cache, direction, and both bracket legs.
+
+        Two callers -- the close action and the switch-directions flatten -- and they were
+        drifting already: okx cleared the brackets in one and not the other, which is the
+        regression #419 shipped. Three lines in two places is how the four executors this
+        issue is about got started.
+
+        Cache first because a realised close moves equity, so the cached balance is now
+        wrong by the trade's P&L. Callers must only reach this after `close_position()`
+        returned truthy -- a failed close leaves the position (#295).
+        """
+        self._last_confirmed_read.pop("balance", None)
+        self.position.current_position = 0
+        self.active_stop_loss = 0.0
+        self.active_take_profit = 0.0
 
     def _bracket_entry_price(self, current_price: Optional[float]) -> float:
         """The price that sizes the order and prices both brackets.
@@ -331,14 +344,10 @@ class SLTPMixin:
                 # opposite position is still open at the venue.
                 trade_info["success"] = False
                 return trade_info
-            self._last_confirmed_read.pop("balance", None)
-            self.position.current_position = 0
-            # The closed position's brackets go with it. If the replacement entry below
-            # then fails, the next sync is flat -> flat, so `_sync_position_from_exchange`
-            # never clears them and they read as live on a position that no longer exists.
-            # okx alone did this before the fold; the other three inherited the gap.
-            self.active_stop_loss = 0.0
-            self.active_take_profit = 0.0
+            # Brackets go with the position. If the replacement entry below then fails,
+            # the next sync is flat -> flat, so `_sync_position_from_exchange` never
+            # clears them and they are left stale. okx alone did this before the fold.
+            self._mark_flat()
 
         trade_side = "buy" if side == "long" else "sell"
         stop_loss_price, take_profit_price = calculate_bracket_prices(

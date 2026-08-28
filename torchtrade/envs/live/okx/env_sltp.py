@@ -1,8 +1,7 @@
 """OKX Futures TorchRL trading environment with Stop Loss and Take Profit."""
 from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, Callable
-import logging
+from typing import Optional, Callable
 
 from torchrl.data import Categorical
 
@@ -16,9 +15,7 @@ from torchtrade.envs.live.okx.utils import normalize_okx_timeframe_config
 from torchtrade.envs.live.okx.base import OKXBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
-from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -95,8 +92,3 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
             return None
         return quantity
 
-    def _dispatch_sltp_trade(self, action_tuple, current_price: float):
-        # Threaded, not re-read: re-reading the mark inside the trade path bypassed the
-        # halt policy, so a grace bar that priced a bracket died instead of truncating
-        # (#295). binance and bitget price off a candle close and take the default.
-        return self._execute_trade_if_needed(action_tuple, current_price=current_price)

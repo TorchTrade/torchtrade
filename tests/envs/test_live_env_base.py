@@ -4021,6 +4021,13 @@ def test_every_successful_close_invalidates_the_cached_balance():
     # `_finish_futures_init` runs at CONSTRUCTION, before any read has been cached, so
     # its startup flatten has nothing to invalidate -- same ordering argument as `_reset`.
     EXEMPT = {"_halting", "_reset", "_finish_futures_init"}
+    # `_mark_flat` is where the pop now lives, so it is asserted directly rather than
+    # trusted: accepting a call to it above is only safe while it really does invalidate.
+    from torchtrade.envs.utils.sltp_mixin import SLTPMixin as _Mixin
+    assert '.pop("balance"' in inspect.getsource(_Mixin._mark_flat), (
+        "_mark_flat stopped invalidating the cached balance, and every caller that "
+        "delegates to it silently stopped invalidating too"
+    )
     root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
     offenders = []
     # The mixin is in the list because #288 MOVED the close there: globbing only
@@ -4039,11 +4046,17 @@ def test_every_successful_close_invalidates_the_cached_balance():
                       and n.func.attr == "close_position"]
             if not closes:
                 continue
+            # A direct `.pop("balance")` OR a call to `_mark_flat`, which is the one
+            # place that pop is allowed to live. Counting only the literal pop made this
+            # guard fail the moment the pop was folded into a helper -- the third time in
+            # this issue that a structural check stopped finding its subject because the
+            # subject moved. Delegation is the thing being asserted, so accept it.
             invalidations = [n for n in ast.walk(fn)
                              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                             and n.func.attr == "pop" and n.args
-                             and isinstance(n.args[0], ast.Constant)
-                             and n.args[0].value == "balance"]
+                             and ((n.func.attr == "pop" and n.args
+                                   and isinstance(n.args[0], ast.Constant)
+                                   and n.args[0].value == "balance")
+                                  or n.func.attr == "_mark_flat")]
             if len(invalidations) < len(closes):
                 offenders.append(f"{path.parent.name}/{path.name}::{fn.name} "
                                  f"({len(closes)} closes, {len(invalidations)} invalidations)")
@@ -4260,6 +4273,12 @@ _SHARED_METHOD_OWNERSHIP = [
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
         "_step", "_reset", "_resolve_action_tuple", "_record_sltp_position",
         "_reset_sltp_state", "_close_action",
+        # Both joined the uniform table when the fold removed the last venue overrides.
+        # They had their own inheritor/overrider guards, keyed on a binance+bitget vs
+        # bybit+okx split that no longer exists -- so they guarded nothing on the two
+        # venues the fold had just changed. A faithful copy of the executor pasted back
+        # onto bybit passed all 3445 tests while those guards were still in place.
+        "_dispatch_sltp_trade", "_execute_trade_if_needed",
     )),
 ]
 # By NAME, not by count. Dropping `_reset` from the matrix above passed 936 tests: the
@@ -4277,6 +4296,8 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("SLTPMixin", "_record_sltp_position"),
     ("SLTPMixin", "_reset_sltp_state"),
     ("SLTPMixin", "_close_action"),
+    ("SLTPMixin", "_dispatch_sltp_trade"),
+    ("SLTPMixin", "_execute_trade_if_needed"),
 }
 
 
@@ -4676,76 +4697,41 @@ def test_the_fold_did_not_move_a_single_sized_position(venue, leverage, exp_size
     )
 
 
-# binance and bitget take the mixin's `_dispatch_sltp_trade`; bybit and okx override it to
-# thread the price (#295). That split is intended, so the hook is out of the uniform table
-# above -- but "intended for two venues" is not "unguarded for the other two": a later
-# private override in binance or bitget would otherwise evade every guard in this file.
-_DISPATCH_INHERITORS = [c for c in SLTP_FUTURES_ENVS
-                        if c.__module__.split(".")[-2] in ("binance", "bitget")]
-_DISPATCH_OVERRIDERS = [c for c in SLTP_FUTURES_ENVS
-                        if c.__module__.split(".")[-2] in ("bybit", "okx")]
-assert len(_DISPATCH_INHERITORS) == len(_DISPATCH_OVERRIDERS) == 2
+# `_dispatch_sltp_trade` and `_execute_trade_if_needed` used to split binance/bitget from
+# bybit/okx, and had their own inheritor/overrider lists here. That split is gone: the mixin
+# forwards the mark unconditionally and `_bracket_entry_price` decides whether to use it, so
+# both methods now live in the uniform table above and a private copy on ANY venue fails.
+#
+# The variation did not disappear, it moved -- and a guard that does not move with it stops
+# guarding. Appending a faithful copy of the shared executor back onto bybit passed all 3445
+# tests while the old lists were still keyed on the pre-fold split.
+_MARK_PRICED = ("bybit", "okx")
 
 
-@pytest.mark.parametrize("cls", _DISPATCH_INHERITORS, ids=lambda c: c.__name__)
-def test_the_dispatch_hook_is_inherited_where_it_is_not_deliberately_overridden(cls):
-    """The venue-variation hook is still owned, for the venues that do not vary.
+@pytest.mark.parametrize("cls", SLTP_FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_each_venue_prices_its_bracket_from_the_source_it_intends(cls):
+    """`_bracket_entry_price` is the one thing the four SLTP venues vary (#288).
 
-    bybit and okx override `_dispatch_sltp_trade` to pass the threaded price rather than
-    let the executor re-read it (#295). binance and bitget price their brackets off a
-    candle close and take the mixin's default -- so for them a private copy is a re-fork
-    like any other, and nothing said so.
+    bybit and okx must resolve `_validated_mark_price` -- the mark `_step` already took
+    under the halt policy. Re-reading it inside the trade path is what #295 removed, and
+    an accidental fall-back to the mixin default is exactly that regression: it would read
+    the observer again, silently, and still pass every behavioural test because the mocked
+    close and the mocked mark agree.
+
+    binance and bitget must resolve the default. Assigning them the mark version would
+    price brackets off a value their `_step` never validated.
     """
-    assert cls._dispatch_sltp_trade is SLTPMixin._dispatch_sltp_trade, (
-        f"{cls.__name__} defines its own _dispatch_sltp_trade. Only bybit and okx have a "
-        f"reason to (the #295 threaded price); if this venue now needs one too, move it "
-        f"into _DISPATCH_OVERRIDERS deliberately rather than letting the hook drift"
-    )
-
-
-@pytest.mark.parametrize("cls", _DISPATCH_INHERITORS, ids=lambda c: c.__name__)
-def test_the_folded_executor_is_inherited_and_not_re_forked(cls):
-    """`_execute_trade_if_needed` joined the mixin in #288, and nothing guarded it.
-
-    It cannot go in `_SHARED_METHOD_OWNERSHIP` -- bybit and okx legitimately override it
-    for the `*, current_price` fork -- so it needs this split form, the same one
-    `_dispatch_sltp_trade` already has. Verified the gap was real: appending a full copy
-    of the mixin's body back onto binance passed all 1202 tests. The sizing test only
-    greps the resolved source for `_resolve_bracket_quantity`, which a faithful re-fork
-    still contains.
-
-    This is the method the close-action bug lived in. A private copy is where the next
-    shared fix silently fails to land.
-    """
-    assert cls._execute_trade_if_needed is SLTPMixin._execute_trade_if_needed, (
-        f"{cls.__name__} defines its own _execute_trade_if_needed. Only bybit and okx "
-        f"have a reason to (the keyword-only current_price); if this venue now needs one, "
-        f"move it into _DISPATCH_OVERRIDERS deliberately rather than re-forking the copy "
-        f"that #288 just folded"
-    )
-
-
-@pytest.mark.parametrize("cls", _DISPATCH_OVERRIDERS, ids=lambda c: c.__name__)
-def test_the_dispatch_overriders_thread_the_price_they_were_given(cls):
-    """And the two that DO override must consume the threaded price, not re-read it.
-
-    Excluding them from the ownership table costs the identity check; this replaces it
-    with what identity was standing in for.
-    """
-    call = next(
-        (n for n in ast.walk(ast.parse(
-            inspect.getsource(cls._dispatch_sltp_trade).lstrip()))
-         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-         and n.func.attr == "_execute_trade_if_needed"),
-        None,
-    )
-    assert call is not None, f"{cls.__name__}'s override never dispatches the trade"
-    assert any(kw.arg == "current_price" and isinstance(kw.value, ast.Name)
-               for kw in call.keywords), (
-        f"{cls.__name__} overrides _dispatch_sltp_trade but does not forward the threaded "
-        f"current_price -- the only reason the override exists (#295); re-reading it "
-        f"inside the trade path bypasses the halt policy"
-    )
+    venue = cls.__module__.split(".")[-2]
+    resolved = cls._bracket_entry_price
+    if venue in _MARK_PRICED:
+        assert resolved is SLTPMixin._validated_mark_price, (
+            f"{cls.__name__} no longer prices off the threaded mark -- it re-reads the "
+            f"observer inside the trade path, which is the #295 regression"
+        )
+    else:
+        assert resolved is SLTPMixin._bracket_entry_price, (
+            f"{cls.__name__} stopped using the shared candle-close read"
+        )
 
 
 @pytest.mark.parametrize("cls,owner,method", _SHARED_METHOD_OWNERSHIP,
@@ -5108,7 +5094,7 @@ def test_a_flat_bar_falls_back_to_the_pre_trade_price(sltp):
 
 # Derived, not listed: a fifth venue joins these tests by existing rather than by
 # tripping an assert that tells someone to go edit a list. The inheritor/overrider split
-# is already expressed once, at _DISPATCH_INHERITORS.
+# is already expressed once, at _MARK_PRICED.
 _SLTP_VENUES = sorted(c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS)
 
 
@@ -5302,10 +5288,16 @@ def test_a_bracket_leg_the_venue_rejected_is_not_recorded_as_live(venue, sl_plac
 
     okx used to be excluded here: it attaches brackets atomically (`attachAlgoOrds`) and
     its own executor never sets `bracket_status`, so it recorded both legs unconditionally.
-    Folding it onto the shared executor put it behind the same gate, which changes nothing
-    for a real okx trader (108/108 differential cases identical, the attribute is absent so
-    the all-True default applies) and FIXES the injected case: `ReplayOrderExecutor` does
-    report per-leg status, and okx was recording a stop it had been told was not placed.
+    The fold puts it behind the same gate.
+
+    This pins a CONTRACT; it does not fix an observed failure, and an earlier version of
+    this docstring claimed it did. No trader in the repo can currently report a rejected
+    leg on this path: bybit's and okx's executors never set `bracket_status` at all, and
+    `ReplayOrderExecutor` sets `sl_placed = stop_loss is not None` while
+    `calculate_bracket_prices` always returns two floats -- so replay reports all-True
+    too. The only producer is the injected stub below. The gate is worth having because
+    binance and bitget DO place the legs separately, and a venue that starts doing so
+    should not need this test written for it afterwards.
     """
     env, trader = _close_env(venue, 0)
     trader.bracket_status = {"sl_placed": sl_placed, "tp_placed": tp_placed}
