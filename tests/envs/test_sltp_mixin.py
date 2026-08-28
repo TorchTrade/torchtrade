@@ -19,6 +19,11 @@ class FakeSLTPEnv(SLTPMixin):
         self.position = PositionState()
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
+        # Real envs get this from TorchTradeLiveEnv.__init__. Without it the mixin needed
+        # a `getattr(self, "_last_confirmed_read", {})` fail-open, which silently skipped
+        # the cache invalidation for anything that forgot the attribute -- a guard in the
+        # rule to accommodate a stub, which is CLAUDE.md invariant 4 inverted.
+        self._last_confirmed_read = {}
 
 
 class TestSyncPositionFromExchange:

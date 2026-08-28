@@ -76,8 +76,8 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
 
-    # Priced off the mark `_step` threaded in, not a fresh read (#295).
-    _bracket_entry_price = SLTPMixin._validated_mark_price
+    # `_step` already took the mark under the halt policy; never read again (#295).
+    _PRICES_OFF_THREADED_MARK = True
 
     def _resolve_bracket_quantity(self, current_price):
         """okx alone refuses a sub-minimum bracket instead of letting the venue reject it.

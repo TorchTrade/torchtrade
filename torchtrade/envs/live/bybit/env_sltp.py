@@ -75,6 +75,6 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
 
-    # Priced off the mark `_step` threaded in, not a fresh read (#295).
-    _bracket_entry_price = SLTPMixin._validated_mark_price
+    # `_step` already took the mark under the halt policy; never read again (#295).
+    _PRICES_OFF_THREADED_MARK = True
 

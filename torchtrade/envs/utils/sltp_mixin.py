@@ -134,13 +134,11 @@ class SLTPMixin:
         position_closed = (prev_position != 0 and self.position.current_position == 0)
         if position_closed:
             logger.info("Position closed by SL/TP or external action")
-            self.active_stop_loss = 0.0
-            self.active_take_profit = 0.0
-            # The exchange closed it, so the realised P&L has already moved equity and the
-            # cached sizing balance is stale by exactly that amount. This closure path is
-            # the one the ENV never asked for -- a bracket firing, or a manual close -- so
-            # it has no `close_position()` call for the close-site guard to find (#295).
-            getattr(self, "_last_confirmed_read", {}).pop("balance", None)
+            # Third caller. This closure is the one the ENV never asked for -- a bracket
+            # firing, or a manual close -- so it has no `close_position()` call for the
+            # close-site guard to find (#295), but the realised P&L moved equity just the
+            # same. `current_position` is already 0 here via position_direction_from_status.
+            self._mark_flat()
 
         # Detect direction flip (e.g., long→short via external action).
         # Reset SL/TP since the old bracket levels are stale for the new direction.
@@ -207,15 +205,28 @@ class SLTPMixin:
         self.active_stop_loss = 0.0
         self.active_take_profit = 0.0
 
+    # bybit and okx set True: `_step` already took the mark under the halt policy and the
+    # trade path must not read a price again (#295). A class attribute rather than two
+    # implementations, because binding one as `_bracket_entry_price = SLTPMixin.<other>`
+    # meant a subclass calling `super()._bracket_entry_price()` silently got the CANDLE
+    # version -- the exact regression the split exists to prevent. It also keeps
+    # `_bracket_entry_price` a single shared method, so it sits in the uniform ownership
+    # table instead of needing a bespoke guard of its own.
+    _PRICES_OFF_THREADED_MARK = False
+
     def _bracket_entry_price(self, current_price: Optional[float]) -> float:
         """The price that sizes the order and prices both brackets.
 
-        THE one thing the four SLTP venues disagreed about, and the reason they carried
-        two ~110-line copies of the executor between them (#288). binance and bitget read
-        their own candle close under the halt policy; bybit and okx are handed the mark
-        `_step` already acquired and must not re-read it (#295, where re-reading inside
-        the trade path bypassed the policy). Everything downstream is identical.
+        The one thing the four SLTP venues disagree about; everything downstream is shared.
         """
+        if self._PRICES_OFF_THREADED_MARK:
+            current_price = float(current_price)
+            if not math.isfinite(current_price) or current_price <= 0:
+                raise ValueError(
+                    f"venue reported an unusable mark price ({current_price})"
+                )
+            return current_price
+
         def read_close():
             obs = self.observer.get_observations(return_base_ohlc=True)
             price = float(obs["base_features"][-1, 3])
@@ -230,24 +241,9 @@ class SLTPMixin:
             return price
 
         # cache_key is load-bearing, not decoration: without it `cached` is None, grace
-        # cannot apply, and this still raises -- it just raises a nicer type. The claimed
-        # behaviour is "serve the last CONFIRMED close and flag the bar", which needs a
-        # slot to serve from. Its own slot, because it is a candle close, not the mark.
+        # cannot apply, and this still raises -- it just raises a nicer type. Its own slot,
+        # because it is a candle close, not the mark.
         return self._halting(read_close, cache_key="candle_close")
-
-    def _validated_mark_price(self, current_price: Optional[float]) -> float:
-        """The other implementation of `_bracket_entry_price`: use the threaded mark.
-
-        Re-reading the price instead is what #295 removed: the second read bypassed the
-        halt policy, so a halted bar still traded. Validated because a venue can report a
-        nonsense mark, and this value both sizes the order and prices both brackets.
-        """
-        current_price = float(current_price)
-        if not math.isfinite(current_price) or current_price <= 0:
-            raise ValueError(
-                f"venue reported an unusable mark price ({current_price})"
-            )
-        return current_price
 
     def _execute_trade_if_needed(
         self,
@@ -299,9 +295,6 @@ class SLTPMixin:
         if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
-        # Read AND verdict under `_halting` (#295): `get_observations` raises on a short
-        # window or a stale bar, and outside the policy that escapes as a bare ValueError.
-        # bybit/okx take a threaded mark; these two price off the candle close on purpose.
         current_price = self._bracket_entry_price(current_price)
 
         quantity = self._resolve_bracket_quantity(current_price)

@@ -4011,13 +4011,6 @@ def test_every_successful_close_invalidates_the_cached_balance():
     # `_finish_futures_init` runs at CONSTRUCTION, before any read has been cached, so
     # its startup flatten has nothing to invalidate -- same ordering argument as `_reset`.
     EXEMPT = {"_halting", "_reset", "_finish_futures_init"}
-    # `_mark_flat` is where the pop now lives, so it is asserted directly rather than
-    # trusted: accepting a call to it above is only safe while it really does invalidate.
-    from torchtrade.envs.utils.sltp_mixin import SLTPMixin as _Mixin
-    assert '.pop("balance"' in inspect.getsource(_Mixin._mark_flat), (
-        "_mark_flat stopped invalidating the cached balance, and every caller that "
-        "delegates to it silently stopped invalidating too"
-    )
     root = pathlib.Path(inspect.getfile(TorchTradeLiveEnv)).parent.parent / "live"
     offenders = []
     # The mixin is in the list because #288 MOVED the close there: globbing only
@@ -4267,7 +4260,11 @@ _SHARED_METHOD_OWNERSHIP = [
         # bybit+okx split that no longer exists -- so they guarded nothing on the two
         # venues the fold had just changed. A faithful copy of the executor pasted back
         # onto bybit passed all 3445 tests while those guards were still in place.
-        "_execute_trade_if_needed",
+        # `_bracket_entry_price` could only join once the venue split moved from two bound
+        # implementations to one method reading `_PRICES_OFF_THREADED_MARK`. Being the one
+        # shared method that could NOT sit in this table is exactly the condition that
+        # left it needing a bespoke guard, which is how the round-1 gap happened.
+        "_execute_trade_if_needed", "_bracket_entry_price",
     )),
 ]
 # By NAME, not by count. Dropping `_reset` from the matrix above passed 936 tests: the
@@ -4286,6 +4283,7 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("SLTPMixin", "_reset_sltp_state"),
     ("SLTPMixin", "_close_action"),
     ("SLTPMixin", "_execute_trade_if_needed"),
+    ("SLTPMixin", "_bracket_entry_price"),
 }
 
 
@@ -4710,16 +4708,10 @@ def test_each_venue_prices_its_bracket_from_the_source_it_intends(cls):
     price brackets off a value their `_step` never validated.
     """
     venue = cls.__module__.split(".")[-2]
-    resolved = cls._bracket_entry_price
-    if venue in _MARK_PRICED:
-        assert resolved is SLTPMixin._validated_mark_price, (
-            f"{cls.__name__} no longer prices off the threaded mark -- it re-reads the "
-            f"observer inside the trade path, which is the #295 regression"
-        )
-    else:
-        assert resolved is SLTPMixin._bracket_entry_price, (
-            f"{cls.__name__} stopped using the shared candle-close read"
-        )
+    assert cls._PRICES_OFF_THREADED_MARK is (venue in _MARK_PRICED), (
+        f"{cls.__name__} has _PRICES_OFF_THREADED_MARK="
+        f"{cls._PRICES_OFF_THREADED_MARK}, which is backwards for this venue"
+    )
 
 
 @pytest.mark.parametrize("cls,owner,method", _SHARED_METHOD_OWNERSHIP,
@@ -4861,9 +4853,8 @@ def test_the_trade_takes_the_qty_and_price_the_pre_trade_read_acquired():
     It does not prove a venue's executor then uses those values rather than re-reading;
     that is the venues' own contract, covered behaviourally by the SLTP grace-bar tests.
 
-    `_execute_trade_if_needed` is shared by binance and bitget as of #288 and overridden
-    by bybit/okx, so this contract belongs where the shared `_step` is owned rather than
-    in one venue's file -- and more so now that two venues resolve it from the mixin.
+    `_execute_trade_if_needed` is shared by all four venues as of #288, so this contract
+    belongs where the shared `_step` is owned rather than in one venue's file.
 
     The venue reports something DIFFERENT after the first read. That is the whole design:
     with the fixture's constant mocks a re-read returns the identical value, so the first
