@@ -102,6 +102,5 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         self.action_spec = Categorical(len(self.action_map))
 
         # Track active SL/TP levels for current position
-        self.active_stop_loss = 0.0
-        self.active_take_profit = 0.0
+        self._reset_sltp_state()
 

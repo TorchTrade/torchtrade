@@ -73,8 +73,7 @@ class OKXFuturesSLTPTorchTradingEnv(SLTPMixin, OKXBaseTorchTradingEnv):
 
         self.action_spec = Categorical(len(self.action_map))
 
-        self.active_stop_loss = 0.0
-        self.active_take_profit = 0.0
+        self._reset_sltp_state()
 
     # `_step` already took the mark under the halt policy; never read again (#295).
     _PRICES_OFF_THREADED_MARK = True

@@ -3377,7 +3377,7 @@ SLTP_CONFIGS = [
 
 # Reproduced from main before the extraction. One literal now sets each of these for four
 # live venues, so a typo moves all four at once: mutating bankrupt_threshold 0.1 -> 0.5
-# (a 5x move in every venue's force-close point) passed 1432 tests before this pin.
+# (a 5x move in every venue's force-close point) passed the whole suite before this pin.
 SHARED_DEFAULTS = {
     "time_frames": [TimeFrame(1, TimeFrameUnit.Hour)],
     "execute_on": TimeFrame(1, TimeFrameUnit.Hour),
@@ -4018,6 +4018,10 @@ def test_every_successful_close_invalidates_the_cached_balance():
         root / "shared" / "futures_live_base.py",
         root.parent / "utils" / "sltp_mixin.py",
     ]:
+        # alpaca/base.py is omitted ON PURPOSE and would fail if added: its two
+        # `close_position()` calls are construction-time and in `_reset`, both exempt by
+        # the ordering argument above -- but EXEMPT is keyed by function NAME and one of
+        # them lives in `__init__`. Stated so the next reader does not "fix" the list.
         for fn in ast.walk(ast.parse(path.read_text())):
             if not isinstance(fn, ast.FunctionDef) or fn.name in EXEMPT:
                 continue
@@ -4261,7 +4265,7 @@ _SHARED_METHOD_OWNERSHIP = [
         # They had their own inheritor/overrider guards, keyed on a binance+bitget vs
         # bybit+okx split that no longer exists -- so they guarded nothing on the two
         # venues the fold had just changed. A faithful copy of the executor pasted back
-        # onto bybit passed all 3445 tests while those guards were still in place.
+        # onto bybit passed the whole suite while those guards were still in place.
         # `_bracket_entry_price` could only join once the venue split moved from two bound
         # implementations to one method reading `_PRICES_OFF_THREADED_MARK`. Being the one
         # shared method that could NOT sit in this table is exactly the condition that
@@ -4269,7 +4273,7 @@ _SHARED_METHOD_OWNERSHIP = [
         "_execute_trade_if_needed", "_bracket_entry_price",
     )),
 ]
-# By NAME, not by count. Dropping `_reset` from the matrix above passed 936 tests: the
+# By NAME, not by count. Dropping `_reset` from the matrix above passed everything: the
 # registry-length pins guard the ENV axis, and nothing guarded the METHOD axis. This also
 # says out loud what is meant to be shared, so adding a genuinely shared method is a
 # deliberate edit here rather than an arithmetic fix.
@@ -4532,7 +4536,7 @@ def test_the_non_fractional_trade_modes_size_from_config(mode, per_trade, price,
 
     Every other test here and in the four venue suites builds its config with
     `trade_mode="fractional"`, so mutating `quantity_per_trade / price` to `*`, or
-    doubling the raw quantity, passed all 1000 tests in this file. Pre-existing -- neither
+    doubling the raw quantity, passed this whole file. Pre-existing -- neither
     branch changed in the fold -- but the fold changed the blast radius: one wrong formula
     now mis-sizes every SLTP bracket on all four venues at once.
     """
@@ -4689,11 +4693,12 @@ def test_the_fold_did_not_move_a_single_sized_position(venue, leverage, exp_size
 # `_dispatch_sltp_trade` and `_execute_trade_if_needed` used to split binance/bitget from
 # bybit/okx, and had their own inheritor/overrider lists here. That split is gone: the mixin
 # forwards the mark unconditionally and `_bracket_entry_price` decides whether to use it, so
-# both methods now live in the uniform table above and a private copy on ANY venue fails.
+# `_execute_trade_if_needed` lives in the uniform table above, so a private copy on ANY
+# venue fails; `_dispatch_sltp_trade` is gone entirely.
 #
 # The variation did not disappear, it moved -- and a guard that does not move with it stops
-# guarding. Appending a faithful copy of the shared executor back onto bybit passed all 3445
-# tests while the old lists were still keyed on the pre-fold split.
+# guarding. Appending a faithful copy of the shared executor back onto bybit passed the
+# whole suite while the old lists were still keyed on the pre-fold split.
 _MARK_PRICED = ("bybit", "okx")
 
 
@@ -4714,6 +4719,17 @@ def test_each_venue_prices_its_bracket_from_the_source_it_intends(cls):
     assert cls._PRICES_OFF_THREADED_MARK is (venue in _MARK_PRICED), (
         f"{cls.__name__} has _PRICES_OFF_THREADED_MARK="
         f"{cls._PRICES_OFF_THREADED_MARK}, which is backwards for this venue"
+    )
+    # The list above is hand-maintained, so a FIFTH mark-priced venue that forgets the
+    # flag would pass the check by being absent from it. That is the #295 shape, so it is
+    # asserted from the other direction too: a venue whose `_step` threads a mark it never
+    # uses is either mis-flagged or has a dead argument, and both want a human.
+    threads_mark = "current_price" in inspect.signature(
+        cls._execute_trade_if_needed
+    ).parameters
+    assert threads_mark, (
+        f"{cls.__name__} no longer takes the threaded mark at all; _MARK_PRICED and the "
+        f"flag can no longer mean anything for it"
     )
 
 
@@ -4769,7 +4785,7 @@ def test_no_sltp_env_writes_the_dead_position_closed_field():
 def test_the_history_row_records_the_side_actually_traded(side_idx, expected):
     """`action_value` is what the reward function reads out of `history.actions`.
 
-    Flipping the long/short sign here fails ZERO of 4196 tests -- found while mutating the
+    Flipping the long/short sign here fails ZERO tests -- found while mutating the
     freshly-folded `_step`, and pre-existing rather than introduced by the fold. It is the
     worst shape of bug this repo records: plausible numbers at the wrong sign, so the
     reward inverts silently and nothing crashes.
@@ -5256,7 +5272,7 @@ def test_a_failed_flatten_does_not_send_the_entry_that_follows_it(venue, outcome
     )
     # The exact inverse of the bug the sibling test pins: clearing here would report a
     # position the venue still holds, with its brackets still resting, as unprotected.
-    # Hoisting the clear above the `if not close_success` check survived all 3445 tests.
+    # Hoisting the clear above the `if not close_success` check survived the whole suite.
     assert env.active_stop_loss == 90.0 and env.active_take_profit == 110.0, (
         f"{venue}: brackets cleared on a flatten the venue refused -- the position and "
         f"its bracket legs are both still live at the exchange."
@@ -5364,7 +5380,7 @@ def test_a_completed_switch_arms_the_new_positions_brackets(venue):
     not left at the zeros the flatten wrote.
 
     Wiping both fields at the end of the function whenever a flatten had happened survived
-    all 3445 tests -- the only test asserting post-entry bracket state starts from a FLAT
+    the whole suite -- the only test asserting post-entry bracket state starts from a FLAT
     account, so it never crosses the flatten at all. This is what pins the clear to its
     position before the trade block rather than after it.
     """
