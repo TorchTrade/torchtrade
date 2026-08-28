@@ -259,7 +259,9 @@ class SLTPMixin:
 
         `current_price` is the mark `_step` acquired, passed by the venues that price off
         it and ignored by the ones that read their own candle -- see
-        `_bracket_entry_price`, the only thing that ever varied here.
+        `_bracket_entry_price`, the price source. okx additionally varies
+        `_resolve_bracket_quantity` (sub-minimum refusal), so there are two seams,
+        not one -- this PR's own structural test exempts the second by name.
 
         Args:
             action_tuple: (side, stop_loss_pct, take_profit_pct); (None, None, None) is HOLD.
