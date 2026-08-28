@@ -2196,14 +2196,11 @@ def test_sltp_sizing_rejects_a_non_finite_price_or_balance(exchange):
         f"{exchange}'s trade path does not CALL the shared sizing; an inlined copy that "
         f"names it in a comment would satisfy a text search"
     )
-    # WHICH implementation each venue uses is pinned by identity in
-    # `test_each_venue_prices_its_bracket_from_the_source_it_intends`; the substring pair
-    # that used to live here said the same thing more weakly. What remains is the only
-    # assertion in this test with a unique kill: dropping `isfinite` from either
-    # implementation dies here and nowhere else in 4465 tests.
-    assert "math.isfinite" in inspect.getsource(cls._bracket_entry_price), (
-        f"{exchange} resolves its entry price with no finiteness check"
-    )
+    # The finiteness grep that used to live here is gone. It was dominated by
+    # `test_an_unusable_entry_price_refuses_instead_of_sizing_from_it`, added the same
+    # round: a guard that NAMES math.isfinite and refuses nothing passes the grep and
+    # fails the behavioural test, and a correct guard written without the literal fails
+    # the grep on working code. It generated false positives in both directions.
 
 
 @pytest.mark.parametrize("exchange,side_key,side", [
@@ -4255,6 +4252,11 @@ _SHARED_METHOD_OWNERSHIP = [
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
         "_step", "_reset", "_resolve_action_tuple", "_record_sltp_position",
         "_reset_sltp_state", "_close_action",
+        # `_mark_flat` is here because it was introduced UNGUARDED three commits into this
+        # PR and a verbatim copy pasted onto bybit passed the whole suite -- the round-1
+        # finding, reproduced on the method written to fix the round-1 finding. It has
+        # three callers now, so a private copy would silently drift on one of them.
+        "_mark_flat",
         # Both joined the uniform table when the fold removed the last venue overrides.
         # They had their own inheritor/overrider guards, keyed on a binance+bitget vs
         # bybit+okx split that no longer exists -- so they guarded nothing on the two
@@ -4282,6 +4284,7 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("SLTPMixin", "_record_sltp_position"),
     ("SLTPMixin", "_reset_sltp_state"),
     ("SLTPMixin", "_close_action"),
+    ("SLTPMixin", "_mark_flat"),
     ("SLTPMixin", "_execute_trade_if_needed"),
     ("SLTPMixin", "_bracket_entry_price"),
 }
@@ -5371,6 +5374,13 @@ def test_a_completed_switch_arms_the_new_positions_brackets(venue):
 
     env._execute_trade_if_needed(("short", 0.03, -0.02), current_price=100.0)
 
+    # The pop is pinned from the CLOSE site by the close tests; from here it was pinned
+    # only by a source grep. `_resolve_bracket_quantity` caches the balance BEFORE the
+    # flatten, so the invalidation is genuinely last and this observes it.
+    assert "balance" not in env._last_confirmed_read, (
+        f"{venue}: the flatten realised P&L but the cached sizing balance survived it"
+    )
+
     expected_sl, expected_tp = calculate_bracket_prices("short", 100.0, 0.03, -0.02)
     assert (env.active_stop_loss, env.active_take_profit) == (expected_sl, expected_tp), (
         f"{venue}: switched into a short but the bracket levels are "
@@ -5451,4 +5461,27 @@ def test_an_unusable_entry_price_refuses_instead_of_sizing_from_it(venue, bad):
         drive()
     assert not trader.trade.called, (
         f"{venue}: sized and priced a bracket from {bad!r}"
+    )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_a_venue_that_reports_no_bracket_status_records_both_legs(venue):
+    """The `getattr(trader, "bracket_status", {both True})` default, which no test reached.
+
+    `_real_futures_env` builds the trader as a MagicMock, and a MagicMock auto-creates any
+    attribute — so `getattr` always found one and the default branch was dead in every
+    test. That default is not a fallback for bybit and okx: their executors never set the
+    attribute, so it IS their production path, and it decides whether they record their
+    brackets at all. Flipping it to False survived the whole suite.
+    """
+    env, trader = _close_env(venue, 0)
+    del trader.bracket_status
+    trader.trade.return_value = True
+
+    env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=100.0)
+
+    sl, tp = calculate_bracket_prices("long", 100.0, -0.02, 0.03)
+    assert (env.active_stop_loss, env.active_take_profit) == (sl, tp), (
+        f"{venue}: a venue that reports no per-leg status must be taken at its word that "
+        f"both legs placed -- otherwise bybit and okx record no brackets at all."
     )

@@ -20,10 +20,10 @@ class SLTPMixin:
     -- alpaca included, which is why deleting its own `_reset` mattered: with both in the
     MRO, `_reset_sltp_state` ran twice per reset.
 
-    The one venue-specific piece is `_bracket_entry_price`: bybit and okx use the mark
-    `_step` already acquired under the halt policy, binance and bitget price off their own
-    candle close. That split is deliberate (#409/#295) and is the ONLY thing that varies --
-    naming it is what let the last two ~110-line executor copies go.
+    Two venue-specific pieces remain, both deliberate: `_bracket_entry_price` (bybit and
+    okx use the mark `_step` already acquired under the halt policy; binance and bitget
+    price off their own candle close -- #409/#295), and okx's `_resolve_bracket_quantity`
+    override, which refuses a sub-minimum bracket instead of letting the venue reject it.
 
     Required of the inheriting class -- the full list, because owning `_step` means this
     mixin now depends on the whole live-env surface, not just SLTP state:
@@ -196,9 +196,9 @@ class SLTPMixin:
     def _mark_flat(self) -> None:
         """Record that the position is gone: cache, direction, and both bracket legs.
 
-        Cache first because a realised close moves equity, so the cached balance is now
-        wrong by the trade's P&L. Callers must only reach this after `close_position()`
-        returned truthy -- a failed close leaves the position (#295).
+        The balance goes because a realised close moves equity and the cached sizing
+        balance is now wrong by the trade's P&L. Callers must only reach this after
+        `close_position()` returned truthy -- a failed close leaves the position (#295).
         """
         self._last_confirmed_read.pop("balance", None)
         self.position.current_position = 0
@@ -217,7 +217,11 @@ class SLTPMixin:
     def _bracket_entry_price(self, current_price: Optional[float]) -> float:
         """The price that sizes the order and prices both brackets.
 
-        The one thing the four SLTP venues disagree about; everything downstream is shared.
+        The price source is the venue split; everything downstream of it is shared.
+
+        The mark branch's raise is unreachable from `_step`: `_current_mark_price` already
+        carries the identical guard inside `_halting`, and the grace path serves a
+        previously validated value. Only a direct caller reaches it.
         """
         if self._PRICES_OFF_THREADED_MARK:
             current_price = float(current_price)
