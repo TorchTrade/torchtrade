@@ -5821,6 +5821,29 @@ def test_a_trader_without_a_notional_floor_fails_loudly_rather_than_silently(ven
 # override genuinely changes the outcome. The venue axis buys nothing on tests of
 # the ONE shared method: across nine mutants, none ever killed a strict subset of
 # venue rows.
+@pytest.mark.parametrize("qty,price,step,floor", [
+    (100.0 / 60000.0, 60000.0, 0.001, 100.0),   # 0.001666... -> 0.001 = 60.00
+    (1.0005, 99.99, 0.001, 100.0),              # @CharlieHelps: 100.039995 -> 1.000 = 99.99
+])
+def test_a_boundary_quantity_is_judged_after_the_venue_floors_it(qty, price, step, floor):
+    """The raw quantity clears the floor and the floored one does not.
+
+    Row 2 is @CharlieHelps' case from the #420 review: 1.0005 at 99.99 is 100.039995
+    raw, submitted as 1.000, which is 99.99 -- rejected. Row 1 is the same shape at a
+    different scale.
+    """
+    env, trader = _close_env("binance", 0)
+    env.config.trade_mode = "quantity"
+    env.config.quantity_per_trade = qty
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.0, "qty_step": step, "min_notional": floor
+    }
+    assert env._resolve_bracket_quantity(price) is None, (
+        f"{qty} at {price} is {qty * price:.6f} raw -- above the {floor} floor -- but the "
+        f"venue receives the floored value and rejects it"
+    )
+
+
 @pytest.mark.parametrize("venue", ["binance", "okx"])
 def test_the_notional_is_checked_against_the_quantity_the_venue_will_receive(venue):
     """The guard must validate the FLOORED quantity, not the raw one.
