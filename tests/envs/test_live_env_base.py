@@ -5678,6 +5678,13 @@ def test_a_refused_switch_does_not_claim_the_account_is_already_at_target(
             "a refused switch latched the action level to the direction it failed to "
             "open; the duplicate-action guard will now suppress every retry"
         )
+    else:
+        # The other half of the contract: the honest at-target refusal SHOULD latch.
+        # Without this the `refused-open` row ran the record call and asserted nothing.
+        assert env.position.current_action_level == 1.0, (
+            "a genuine at-target refusal stopped recording the level, so the env will "
+            "re-send an order the venue already refused, every bar"
+        )
 
 
 @pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx", "replay"])
@@ -5805,3 +5812,65 @@ def test_a_trader_without_a_notional_floor_fails_loudly_rather_than_silently(ven
 
     with pytest.raises(KeyError, match="min_notional"):
         env._resolve_bracket_quantity(100.0)
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_the_notional_is_checked_against_the_quantity_the_venue_will_receive(venue):
+    """The guard must validate the FLOORED quantity, not the raw one.
+
+    Every venue formatter truncates to the lot step, so validating before that is the
+    same "validated one number, sent another" bug this PR fixes on the plain path --
+    committed once inside the fix itself, and reverting it passed all 3514 tests.
+
+    The numbers are the ones from that commit message: step 0.001, floor 100, price
+    60000. A quantity of 0.001666... is exactly 100.00 raw and 60.00 once floored, so
+    anything landing in [100, 160) USD passed the guard and was refused by the exchange.
+    """
+    env, trader = _close_env(venue, 0)
+    env.config.trade_mode = "quantity"
+    env.config.quantity_per_trade = 100.0 / 60000.0        # 0.001666..., exactly at 100
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.0, "qty_step": 0.001, "min_notional": 100.0
+    }
+
+    assert env._resolve_bracket_quantity(60000.0) is None, (
+        f"{venue}: validated {100.0 / 60000.0 * 60000.0:.2f} notional but the venue "
+        f"receives 0.001 = 60.00, below the 100.0 floor it would reject"
+    )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit"])
+def test_a_quantity_below_one_lot_step_is_refused_rather_than_sent_as_zero(venue):
+    """Flooring a sub-step quantity gives 0.0, and submitting nothing is not a trade.
+
+    okx is excluded because its `_resolve_bracket_quantity` override already refuses on
+    `min_qty` -- so the shared refusal is invisible there, which is exactly why the one
+    test reaching this arm could not distinguish it.
+    """
+    env, trader = _close_env(venue, 0)
+    env.config.trade_mode = "quantity"
+    env.config.quantity_per_trade = 0.0001                 # a tenth of one lot step
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.0, "qty_step": 0.001, "min_notional": 0.0
+    }
+
+    assert env._resolve_bracket_quantity(100.0) is None, (
+        f"{venue}: 0.0001 floors to 0.0 at a 0.001 step; submitting it asks the venue "
+        f"for nothing"
+    )
+
+
+def test_a_non_finite_target_never_reaches_the_venue():
+    """binance's plain path has no `isfinite` balance guard, unlike the SLTP sizing which
+    got one for #347. A NaN balance gives a NaN target, a NaN delta, and falls through
+    `> 0`, `< 0` and `== 0` alike into the terminal else -- which returns quietly.
+
+    Quiet is the problem: the account is untouched, but nothing says the sizing produced
+    a number that is not a number.
+    """
+    env, sent = _switch_stub(price=100.0, min_notional=0.0, lot_step=0.001,
+                             current_qty=0.0, target_qty=float("nan"))
+    info = env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
+
+    assert not sent, f"a NaN target reached the venue as {sent.get('quantity')!r}"
+    assert not info["executed"]

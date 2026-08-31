@@ -77,6 +77,15 @@ class TestBinanceFuturesOrderClass:
                     # whether the executor read it or hardcoded 0.0 (#414).
                     {"filterType": "MIN_NOTIONAL", "notional": "5"},
                 ],
+            }, {
+                # A SECOND symbol, with a different floor. With one symbol nothing could
+                # tell whether MIN_NOTIONAL is scoped to this symbol or whichever one the
+                # payload happens to list last (#414).
+                "symbol": "ETHUSDT",
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.01", "minQty": "0.01"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "20"},
+                ],
             }]
         })
 
