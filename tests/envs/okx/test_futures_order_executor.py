@@ -279,6 +279,12 @@ class TestOKXFuturesOrderClass:
         init_call_count = mock_okx_public_client.get_instruments.call_count
         lot_size = order_executor.get_lot_size()
         assert lot_size["min_qty"] == 0.001
+        # 0.0 is a DESIGN DECISION, not an absent value: okx derivatives bind on
+        # minSz/lotSz and have no separate notional floor, so the shared guard's notional
+        # half is deliberately a no-op here. Pinned because only the key's PRESENCE was
+        # enforced -- writing 999999.0 there passed the whole suite and would have refused
+        # every okx bracket, silently, forever (#414).
+        assert lot_size["min_notional"] == 0.0
         lot_size2 = order_executor.get_lot_size()
         assert lot_size2 is lot_size
         assert mock_okx_public_client.get_instruments.call_count == init_call_count

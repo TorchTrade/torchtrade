@@ -2538,7 +2538,10 @@ def test_a_real_step_lands_both_size_values_on_the_position(exchange, min_qty):
     trader = MagicMock()
     trader.get_status = MagicMock(return_value={"position_status": None})
     trader.get_mark_price = MagicMock(return_value=50000.0)
-    trader.get_lot_size = MagicMock(return_value={"min_qty": min_qty, "qty_step": min_qty})
+    # min_notional too: the shared guard indexes it strictly, so a stub without it
+    # KeyErrors the moment this fixture reaches the sizing path.
+    trader.get_lot_size = MagicMock(
+        return_value={"min_qty": min_qty, "qty_step": min_qty, "min_notional": 0.0})
     trader.get_account_balance = MagicMock(return_value={
         "total_wallet_balance": 10000.0, "available_balance": 10000.0,
         "total_unrealized_profit": 0.0, "total_margin_balance": 10000.0,
