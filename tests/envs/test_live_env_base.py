@@ -5501,3 +5501,76 @@ def test_a_venue_that_reports_no_bracket_status_records_both_legs(venue):
         f"{venue}: a venue that reports no per-leg status must be taken at its word that "
         f"both legs placed -- otherwise bybit and okx record no brackets at all."
     )
+
+
+def _switch_stub(*, price, min_notional, lot_step, current_qty, target_qty):
+    """binance's fractional path, wired so the SUBMITTED quantity is observable.
+
+    Everything upstream of the notional check is stubbed to a known value, because the
+    bug is not in how the target is computed -- it is that the quantity validated and the
+    quantity sent are different numbers on one branch.
+    """
+    cls = _sole(importlib.import_module("torchtrade.envs.live.binance.env"),
+                "TorchTradingEnv")
+    env = cls.__new__(cls)
+    env.config = SimpleNamespace(leverage=10, symbol="BTCUSDT")
+    env.trader = MagicMock()
+    env.trader.round_quantity.side_effect = lambda q: (float(q) // lot_step) * lot_step
+    env._get_min_notional = lambda: min_notional
+    env._calculate_fractional_position = lambda av, cp: (
+        target_qty, abs(target_qty) * cp, "buy" if target_qty > 0 else "sell")
+    env._handle_close_action = lambda q: {
+        "executed": True, "success": True, "side": "buy" if q < 0 else "sell",
+        "quantity": abs(q), "closed_position": True}
+    sent = {}
+    env._execute_market_order = lambda side, quantity: sent.update(
+        side=side, quantity=quantity) or {
+        "executed": True, "success": True, "side": side, "quantity": quantity}
+    env._create_trade_info = lambda **kw: {"executed": False, "success": None, **kw}
+    return env, sent
+
+
+def test_a_direction_switch_validates_the_quantity_it_actually_sends():
+    """The notional check ran on the DELTA and the switch branch submitted the TARGET.
+
+    On a switch the two are different numbers -- `|delta| = |target| + |current|` because
+    the signs oppose -- so the larger delta clears the exchange minimum while the smaller
+    target does not. The venue rejects the open, the close has already happened, and the
+    env reports executed/success for a position it does not hold. That is invariant 2
+    inverted, with leverage on it.
+
+    Worked from @CharlieHelps' example: price 99.99, minimum 100. A short of 1.0 switching
+    to a long of 1.0 validates 2.0 (notional 199.98, passes) and sends 1.0 (notional
+    99.99, rejected).
+    """
+    env, sent = _switch_stub(price=99.99, min_notional=100.0, lot_step=1.0,
+                             current_qty=-1.0, target_qty=1.0)
+    info = env._execute_fractional_action(1.0, current_qty=-1.0, current_price=99.99)
+
+    assert not sent, (
+        f"submitted {sent.get('quantity')} at 99.99 = "
+        f"{(sent.get('quantity') or 0) * 99.99:.2f} notional, below the 100.0 minimum the "
+        f"env checked against a different quantity"
+    )
+    assert not info["executed"]
+
+
+def test_the_delta_sent_to_the_venue_is_lot_rounded():
+    """`delta = self.trader.round_quantity(abs(delta)) * sign` had no test at all:
+    replacing the whole line with `delta = delta` passed the entire suite.
+
+    #352 fixed the TARGET rounding for #271 and left the DELTA rounding unpinned, so an
+    un-lot-rounded quantity could reach the venue -- the same rejection class as the
+    notional gaps, and invisible because every other test rounds to a step the raw value
+    already sits on.
+    """
+    env, sent = _switch_stub(price=100.0, min_notional=0.0, lot_step=0.5,
+                             current_qty=0.0, target_qty=1.7)
+    env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
+
+    assert sent, "nothing was submitted; the stub is not exercising the trade path"
+    q = sent["quantity"]
+    assert q == pytest.approx(1.5), (
+        f"submitted {q}, which is not a multiple of the 0.5 lot step -- the delta reached "
+        f"the venue unrounded"
+    )

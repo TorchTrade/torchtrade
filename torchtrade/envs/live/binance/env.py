@@ -257,31 +257,14 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         if delta == 0:
             return self._create_trade_info(executed=False)  # Already close enough
 
-        # 8. Check delta notional meets exchange minimum
-        delta_notional = abs(delta) * current_price
-        min_notional = self._get_min_notional()
-        if delta_notional < min_notional:
-            return self._create_trade_info(executed=False, at_target=True)  # Delta too small for exchange
-
-        # 9. Determine trade direction and execute
-        if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):
-            # Direction switch: close current, then open opposite
-            #
-            # Edge case handling:
-            #   1. If close fails → Return early, don't open opposite position
-            #      This prevents doubling position size if close is rejected
-            #   2. If close succeeds but open fails → Agent ends up flat instead of target
-            #      Trade info will show close executed=True but may not reflect open failure
-            #   3. Between close and open, account balance changes (from PnL)
-            #      Target calculation uses current balance which may differ
-            #
-            # TODO: Consider tracking partial execution state for observation
-            close_info = self._handle_close_action(current_qty)
-            if not close_info["executed"] or close_info.get("success") is False:
-                logger.warning("Direction switch failed: unable to close current position")
-                return close_info
-
-            # Open new position in opposite direction
+        # 8. Decide what will be SENT before validating anything, because a direction
+        #    switch does not send the delta -- it closes, then opens `abs(target_qty)`.
+        #    Validating the delta and submitting the target is how an order the venue
+        #    rejects gets reported as executed: on a switch the signs oppose, so
+        #    `|delta| = |target| + |current|` and the larger number clears a minimum the
+        #    smaller one does not.
+        switching = (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0)
+        if switching:
             side, amount = ("buy" if target_qty > 0 else "sell"), abs(target_qty)
         elif delta > 0:
             side, amount = "buy", abs(delta)          # increase, or open long from flat
@@ -289,6 +272,21 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             side, amount = "sell", abs(delta)         # decrease, or open short from flat
         else:
             return self._create_trade_info(executed=False)
+
+        # 9. Validate the submitted quantity, and do it BEFORE the switch's close. After
+        #    the close it is too late to refuse: the position is already gone and
+        #    returning "not executed" would describe an account that just changed.
+        min_notional = self._get_min_notional()
+        if amount * current_price < min_notional:
+            return self._create_trade_info(executed=False, at_target=True)
+
+        # 10. A switch closes first. If the close fails, do not open the opposite side --
+        #     that would double the position rather than reverse it.
+        if switching:
+            close_info = self._handle_close_action(current_qty)
+            if not close_info["executed"] or close_info.get("success") is False:
+                logger.warning("Direction switch failed: unable to close current position")
+                return close_info
 
         # One exit, so a new branch cannot skip the target and disable the check.
         info = self._execute_market_order(side, amount)
