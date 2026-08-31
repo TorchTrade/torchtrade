@@ -138,6 +138,14 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         if amount < min_qty:
             return self._create_trade_info(executed=False, at_target=True)
 
+        # The venue's notional floor, on the quantity that is actually sent. This PR
+        # taught the executors to READ it; without this the plain path still submitted
+        # orders the exchange rejects while the env recorded a position it did not hold
+        # -- the same bug on the same venue, one execution path over (#414).
+        min_notional = float(lot_size["min_notional"])
+        if min_notional > 0 and amount * current_price < min_notional * (1 - 1e-9):
+            return self._create_trade_info(executed=False, at_target=True)
+
         info = self._execute_market_order(side, amount)
         info["target_qty"] = target_qty
         info["target_tol"] = lot_size["min_qty"]

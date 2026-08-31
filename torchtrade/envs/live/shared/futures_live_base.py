@@ -306,7 +306,30 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # means any future trader that forgets it silently disables the check, which is
         # the fail-open this guard exists to remove. All five executors report the key.
         lot = self.trader.get_lot_size()
-        notional = quantity * current_price
+
+        # Floor to the lot step FIRST, and validate -- and return -- the floored value.
+        # Validating the pre-rounded quantity was the same "validated one number, sent
+        # another" bug this PR fixes on the plain path: every venue formatter floors, so
+        # at step 0.001 / floor 100 / price 60000 a quantity of 0.001666... validated at
+        # exactly 100.00 and arrived at the venue as 0.001 -- 60.00, rejected. Anything
+        # landing in [100, 160) USD passed the guard and was refused by the exchange.
+        # bybit sends the raw float and is exact; binance, okx and bitget all truncate.
+        step = float(lot["qty_step"])
+        sendable = quantity
+        if step > 0 and math.isfinite(step):
+            sendable = math.floor(quantity / step) * step
+            if not sendable > 0:
+                logger.warning(
+                    f"{self.config.symbol}: quantity {quantity} floors to {sendable} at "
+                    f"lot step {step}; refusing rather than submitting nothing"
+                )
+                return None
+
+        # `sendable`, not `quantity`: the venue formatter floors, so this is the number
+        # the exchange will actually see. The caller still receives the unfloored value
+        # and the formatter re-derives the same result -- what matters is that the
+        # validation and the submission agree.
+        notional = sendable * current_price
         min_notional = float(lot["min_notional"])
         # A relative epsilon, because `notional` mode computes `qty = usd / price` and this
         # re-multiplies by the same price. That round-trip is not exact: for ~1.7% of

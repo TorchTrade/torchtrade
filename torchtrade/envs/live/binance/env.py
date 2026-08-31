@@ -153,34 +153,21 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         self.action_spec = Categorical(len(self.action_levels))
 
 
-    def _get_symbol_info(self) -> Dict:
-        """Get exchange symbol information for precision and lot size.
-
-        Binance-specific implementation that queries futures_exchange_info() API.
-        """
-        try:
-            exchange_info = self.trader.client.futures_exchange_info()
-            for symbol in exchange_info['symbols']:
-                if symbol['symbol'] == self.config.symbol:
-                    return symbol
-            raise ValueError(f"Symbol {self.config.symbol} not found in exchange info")
-        except Exception as e:
-            logger.error(f"Error getting symbol info: {e}")
-            # Return defaults if exchange query fails
-            return {
-                'filters': [
-                    {'filterType': 'LOT_SIZE', 'stepSize': '0.001'},
-                    {'filterType': 'MIN_NOTIONAL', 'notional': '100'}
-                ]
-            }
-
     def _get_min_notional(self) -> float:
-        """Get the minimum notional value for orders."""
-        symbol_info = self._get_symbol_info()
-        for filter_item in symbol_info.get('filters', []):
-            if filter_item['filterType'] == 'MIN_NOTIONAL':
-                return float(filter_item.get('notional', 100))
-        return 100.0  # Default fallback
+        """The venue's notional floor, from the executor's cached filters.
+
+        One owner, not two. This method used to walk `futures_exchange_info()` itself --
+        an unhalted REST round-trip on every sized step, twice per step, fetching every
+        symbol on the venue -- and fell back to a fabricated 100.0 while the executor's
+        cache fell back to 0.0. Same symbol, same instant, opposite answers: the plain
+        path refused at 100 and the SLTP path refused nothing (#414).
+
+        100.0 was never a venue constant either; it is BTCUSDT's floor. ETHUSDT is 20 and
+        most alt perps are 5, so it was wrong in the other direction for every other
+        symbol. `get_lot_size` re-fetches on an empty cache, so a transient failure at
+        construction repairs itself rather than pinning a guess.
+        """
+        return float(self.trader.get_lot_size()["min_notional"])
 
     def _calculate_fractional_position(
         self, action_value: float, current_price: float

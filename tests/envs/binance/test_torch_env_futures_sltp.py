@@ -51,6 +51,10 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
     def mock_trader(self):
         """Create a mock trader."""
         trader = MagicMock()
+        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
+        # lot and floors every real quantity to zero in the shared sizing guard.
+        trader.get_lot_size = MagicMock(
+            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
 
         # Mock methods
         trader.cancel_open_orders = MagicMock(return_value=True)
@@ -503,6 +507,10 @@ class TestMultipleSteps:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
+        # lot and floors every real quantity to zero in the shared sizing guard.
+        mock_trader.get_lot_size = MagicMock(
+            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
@@ -584,6 +592,10 @@ class TestCriticalEdgeCases:
 
         mock_observer = MagicMock(spec=BinanceObservationClass)
         mock_trader = MagicMock(spec=BinanceFuturesOrderClass)
+        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
+        # lot and floors every real quantity to zero in the shared sizing guard.
+        mock_trader.get_lot_size = MagicMock(
+            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
 
         def mock_get_observations(return_base_ohlc=False):
             obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
@@ -794,6 +806,10 @@ class TestDuplicateActionPrevention:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
+        # lot and floors every real quantity to zero in the shared sizing guard.
+        mock_trader.get_lot_size = MagicMock(
+            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
@@ -967,6 +983,10 @@ class TestBinanceSLTPNotionalTradeMode:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
+        # lot and floors every real quantity to zero in the shared sizing guard.
+        mock_trader.get_lot_size = MagicMock(
+            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
         mock_trader.get_account_balance = MagicMock(return_value={
@@ -1058,6 +1078,10 @@ class TestBinanceSLTPNotionalTradeMode:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
+        # lot and floors every real quantity to zero in the shared sizing guard.
+        mock_trader.get_lot_size = MagicMock(
+            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
         mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
@@ -1121,6 +1145,10 @@ class TestBinanceSLTPNotionalTradeMode:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
+        # lot and floors every real quantity to zero in the shared sizing guard.
+        mock_trader.get_lot_size = MagicMock(
+            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
         mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)
@@ -1187,6 +1215,10 @@ class TestBinanceSLTPLockPosition:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
+        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
+        # lot and floors every real quantity to zero in the shared sizing guard.
+        mock_trader.get_lot_size = MagicMock(
+            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
         mock_trader.get_mark_price = MagicMock(return_value=50000.0)
         mock_trader.cancel_open_orders = MagicMock(return_value=True)
         mock_trader.close_position = MagicMock(return_value=True)

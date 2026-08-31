@@ -5680,41 +5680,56 @@ def test_a_refused_switch_does_not_claim_the_account_is_already_at_target(
         )
 
 
-@pytest.mark.parametrize("venue", ["bitget", "bybit", "okx"])
-def test_every_lot_size_cache_write_carries_all_three_keys(venue):
-    """The accessor is not the thing to check -- the WRITES are.
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx", "replay"])
+def test_get_lot_size_reports_three_keys_when_the_venue_is_down(venue):
+    """Every executor, both the happy path and the DEGRADED one, by execution.
 
-    Each of these executors caches its lot size from more than one place: a
-    construction-time write inside the tick-size fetch, a lazy write in `get_lot_size`,
-    and one or more fallbacks. Updating some and not others is how okx came to return a
-    two-key dict at runtime while its `get_lot_size` source mentioned the third key, so a
-    source grep saw a contract that did not hold and the whole suite passed.
+    The DEGRADED path specifically, which is where the gap was. An AST test lived here
+    and checked each dict-literal `_lot_size_cache` write; its only unique kill was okx's
+    lazy write, and it was blind to the `_DEFAULT_LOT_SIZE.copy()` fallbacks -- 3 of 5
+    writes on bybit and okx, taken precisely when the venue is flaky, and whose mutants
+    survived the whole suite. Under strict `lot["min_notional"]` a missing key there is a
+    KeyError on every bracket open, on the worst possible day.
 
-    Once the shared guard indexes `lot["min_notional"]` strictly, a missing key is a
-    KeyError on every bracket open, so this is a crash test, not a style test. Every
-    dict-literal write is checked rather than the one the tests happen to reach.
+    The healthy paths are covered per-venue in each executor's own tests, which can
+    supply that venue's real payload shape; this cannot, and binance correctly raises
+    rather than guessing when handed one it does not recognise.
     """
-    tree = ast.parse(
-        pathlib.Path(f"torchtrade/envs/live/{venue}/order_executor.py").read_text()
+    mod = importlib.import_module(
+        "torchtrade.envs.replay.order_executor" if venue == "replay"
+        else f"torchtrade.envs.live.{venue}.order_executor"
     )
-    writes = [
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.Assign) and len(n.targets) == 1
-        and isinstance(n.targets[0], ast.Attribute)
-        and n.targets[0].attr == "_lot_size_cache"
-        and isinstance(n.value, ast.Dict)
-    ]
-    assert writes, f"{venue} has no dict-literal _lot_size_cache write to check"
-    for w in writes:
-        keys = {k.value for k in w.value.keys if isinstance(k, ast.Constant)}
-        assert keys == {"min_qty", "qty_step", "min_notional"}, (
-            f"{venue}/order_executor.py:{w.lineno} writes {sorted(keys)}; a cache missing "
-            f"min_notional KeyErrors in the shared sizing guard"
-        )
+    cls = _sole(mod, "OrderExecutor" if venue == "replay" else "OrderClass")
+    ex = cls.__new__(cls)
+    ex.symbol = "BTCUSDT"
+    for attr, val in (("_lot_size_cache", None), ("_qty_steps", {}), ("_min_qtys", {}),
+                      ("_min_notional", 0.0), ("_tick_size", None), ("_tick_decimals", None),
+                      ("_lot_size_decimals", None)):
+        if hasattr(cls, attr) or True:
+            setattr(ex, attr, val)
+    client = MagicMock()
+    for m in ("futures_exchange_info", "get_instruments_info", "get_instruments", "market"):
+        setattr(client, m, MagicMock(side_effect=Exception("venue down")))
+    ex.client = ex.public_client = client
+
+    lot = ex.get_lot_size()
+    assert set(lot) >= {"min_qty", "qty_step", "min_notional"}, (
+        f"{venue} returns {sorted(lot)} when the venue is down; a missing key is a "
+        f"KeyError in the shared sizing guard, on every bracket open"
+    )
 
 
-@pytest.mark.parametrize("price", [0.61, 1.22, 2.23, 2.29, 2.44])
-def test_notional_sizing_exactly_at_the_floor_is_not_refused_by_float_error(price):
+@pytest.mark.parametrize("price,usd,expect_refused", [
+    # All five tripping prices computed the identical 4.999999999999999, so four were
+    # duplicates of the same arithmetic. One is kept for the round-trip, and the two
+    # rows below it pin what the epsilon must NOT do.
+    (0.61, 5.0, False),      # exactly at the floor, one ulp under after the round-trip
+    (0.61, 4.5, True),       # genuinely 10% under -- must still refuse
+    (0.61, 2.5, True),       # 50% under: `1 - 0.5` as an epsilon would let this through
+], ids=["at-floor", "10pc-under", "50pc-under"])
+def test_notional_sizing_exactly_at_the_floor_is_not_refused_by_float_error(
+    price, usd, expect_refused
+):
     """`notional` mode computes `qty = usd / price`; the guard re-multiplies by the same
     price. That round-trip is not exact -- for ~1.7% of prices in 0.001-100,
     `(5.0 / p) * p < 5.0` -- and bitget's minTradeUSDT is exactly 5.
@@ -5725,12 +5740,68 @@ def test_notional_sizing_exactly_at_the_floor_is_not_refused_by_float_error(pric
     """
     env, trader = _close_env("bitget", 0)
     env.config.trade_mode = "notional"
-    env.config.quantity_per_trade = 5.0
+    env.config.quantity_per_trade = usd
     trader.get_lot_size.return_value = {
-        "min_qty": 0.0, "qty_step": 1e-9, "min_notional": 5.0
+        "min_qty": 0.0, "qty_step": 1e-12, "min_notional": 5.0
     }
 
-    assert env._resolve_bracket_quantity(price) is not None, (
-        f"sizing exactly 5.0 USD against a 5.0 floor at price {price} was refused: "
-        f"(5.0/{price})*{price} = {(5.0 / price) * price!r}"
+    refused = env._resolve_bracket_quantity(price) is None
+    assert refused is expect_refused, (
+        f"sizing {usd} USD against a 5.0 floor at price {price}: "
+        f"{'refused' if refused else 'accepted'}, expected "
+        f"{'refused' if expect_refused else 'accepted'} -- "
+        f"({usd}/{price})*{price} = {(usd / price) * price!r}"
     )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_the_plain_path_also_refuses_below_the_venue_notional_floor(venue):
+    """The other execution path. #414 fixed binance's plain path and gave every venue's
+    SLTP path a floor -- and left bitget, bybit and okx's PLAIN path with none, on the
+    two venues whose executors this same change taught to fetch the number.
+
+    Measured before the fix, at a 5.00 floor: all three submitted 0.50 notional.
+
+    That is CLAUDE.md's "apply to ALL environments" rule, and it is the bug the issue
+    describes still shipping on three of four venues one path over.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue)
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.001, "qty_step": 0.001, "min_notional": 5.0
+    }
+    if venue == "binance":
+        env._get_min_notional = lambda: 5.0
+    sent = {}
+    env._execute_market_order = lambda side, quantity: sent.update(
+        side=side, quantity=quantity) or {
+        "executed": True, "success": True, "side": side, "quantity": quantity}
+    env._calculate_fractional_position = lambda av, cp: (0.5, 0.5 * cp, "buy")
+
+    info = env._execute_fractional_action(1.0, current_qty=0.0, current_price=1.0)
+
+    assert not sent, (
+        f"{venue} plain path submitted {sent.get('quantity')} at price 1.0 = "
+        f"{(sent.get('quantity') or 0):.2f} notional against a 5.00 floor; the venue "
+        f"rejects it and the env records a position it does not hold"
+    )
+    assert not info["executed"]
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_a_trader_without_a_notional_floor_fails_loudly_rather_than_silently(venue):
+    """The guard indexes `lot["min_notional"]` rather than `.get(..., 0.0)`.
+
+    Defaulting a missing key to "no floor" means any future trader that forgets it
+    silently disables the check -- and that was not hypothetical: `ReplayOrderExecutor`
+    was exactly that trader, a fifth implementation the four-venue contract test could
+    not see. Reverting to `.get` passed the entire suite, so the strictness itself had
+    nothing defending it.
+
+    A KeyError on the money path is the correct outcome. It is loud, it happens on the
+    first bracket rather than the hundredth, and it names the key.
+    """
+    env, trader = _close_env(venue, 0)
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+
+    with pytest.raises(KeyError, match="min_notional"):
+        env._resolve_bracket_quantity(100.0)

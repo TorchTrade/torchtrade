@@ -247,6 +247,26 @@ class TestBinanceFuturesOrderClass:
         assert order_executor._tick_size == 0.1
         assert order_executor._tick_decimals == 1
 
+    def test_get_lot_size_recovers_after_a_transient_exchange_info_failure(self, mock_client):
+        """binance was the only venue whose `get_lot_size` never re-fetched.
+
+        `_fetch_symbol_filters` returns early on a transient failure -- BEFORE its own
+        fail-closed "no LOT_SIZE" raise -- so one blip at construction left every cache
+        empty and nothing repaired them. Both floors were then silently 0.0 for the life
+        of the process, which is the fail-open this whole change exists to remove (#414).
+        """
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+        good = mock_client.futures_exchange_info
+        mock_client.futures_exchange_info = MagicMock(side_effect=Exception("503 blip"))
+        executor = BinanceFuturesOrderClass(symbol="BTCUSDT", client=mock_client)
+        assert executor.get_lot_size()["min_notional"] == 0.0   # nothing was ever read
+
+        mock_client.futures_exchange_info = good                # the venue comes back
+        assert executor.get_lot_size()["min_notional"] == 5.0, (
+            "the floor never repaired itself; one transient failure at startup disables "
+            "the notional guard permanently"
+        )
+
     def test_get_lot_size_reports_the_venue_minimums_from_the_cached_filters(self, mock_client):
         """binance was the only executor without `get_lot_size`, so the shared sizing
         could not ask it for a notional floor and the SLTP path submitted whatever it

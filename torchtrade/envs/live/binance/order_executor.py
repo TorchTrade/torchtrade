@@ -226,6 +226,15 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         # here made this file disagree with itself after a transient exchange-info
         # failure -- `_fetch_symbol_filters` returns early on that path, BEFORE the
         # missing-LOT_SIZE raise, so the caches stay empty and nothing says so.
+        # Lazily re-fetch on an empty cache, like bitget/bybit/okx already do.
+        # `_fetch_symbol_filters` RETURNS EARLY on a transient exchange-info failure --
+        # before its own fail-closed "no LOT_SIZE" raise -- so a single blip at
+        # construction left every cache empty and nothing ever repaired them. binance was
+        # the only venue that never retried, so one bad moment at startup silently
+        # disabled both floors for the life of the process (#414).
+        if self.symbol not in self._qty_steps:
+            self._fetch_symbol_filters()
+
         step = self._qty_steps.get(self.symbol, _FALLBACK_QTY_STEP_PAIR)
         return {
             "min_qty": float(self._min_qtys.get(self.symbol, 0.0)),
