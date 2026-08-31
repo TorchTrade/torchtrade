@@ -5506,7 +5506,7 @@ def test_a_venue_that_reports_no_bracket_status_records_both_legs(venue):
     )
 
 
-def _switch_stub(*, price, min_notional, lot_step, current_qty, target_qty):
+def _switch_stub(*, min_notional, lot_step, target_qty):
     """binance's fractional path, wired so the SUBMITTED quantity is observable.
 
     Everything upstream of the notional check is stubbed to a known value, because the
@@ -5546,8 +5546,7 @@ def test_a_direction_switch_validates_the_quantity_it_actually_sends():
     to a long of 1.0 validates 2.0 (notional 199.98, passes) and sends 1.0 (notional
     99.99, rejected).
     """
-    env, sent = _switch_stub(price=99.99, min_notional=100.0, lot_step=1.0,
-                             current_qty=-1.0, target_qty=1.0)
+    env, sent = _switch_stub(min_notional=100.0, lot_step=1.0, target_qty=1.0)
     closed = []
     env._handle_close_action = lambda q: closed.append(q) or {
         "executed": True, "success": True, "side": "buy", "quantity": abs(q),
@@ -5579,8 +5578,7 @@ def test_the_delta_sent_to_the_venue_is_lot_rounded():
     notional gaps, and invisible because every other test rounds to a step the raw value
     already sits on.
     """
-    env, sent = _switch_stub(price=100.0, min_notional=0.0, lot_step=0.5,
-                             current_qty=0.0, target_qty=1.7)
+    env, sent = _switch_stub(min_notional=0.0, lot_step=0.5, target_qty=1.7)
     env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
 
     assert sent, "nothing was submitted; the stub is not exercising the trade path"
@@ -5627,14 +5625,9 @@ def test_the_sltp_path_refuses_a_bracket_below_the_venue_notional_floor(
     )
 
 
-# `test_every_futures_executor_reports_its_venue_minimums_the_same_way` lived here and is
-# gone. It asserted that each `get_lot_size`'s SOURCE mentions three key strings -- which
-# passes for one that names `min_notional` in a comment and returns nothing, and which
-# hardcoded four venues while a FIFTH implementation (ReplayOrderExecutor) sat two keys
-# short the whole time. Its only unique kill was "okx omits the key", and with the guard
-# reading `.get(..., 0.0)` absent and 0.0 were the same program, so that kill changed no
-# behaviour. The guard now indexes strictly, which turns key-absence into a loud KeyError
-# and makes the property behavioural instead of textual.
+# The source-grep contract test that lived here was replaced by the behavioural
+# degraded-path test below: strict `lot["min_notional"]` makes key-absence a
+# loud KeyError, so the property is behavioural rather than textual.
 
 
 @pytest.mark.parametrize("current_qty,switching,expected_at_target", [
@@ -5691,16 +5684,10 @@ def test_a_refused_switch_does_not_claim_the_account_is_already_at_target(
 def test_get_lot_size_reports_three_keys_when_the_venue_is_down(venue):
     """Every executor, both the happy path and the DEGRADED one, by execution.
 
-    The DEGRADED path specifically, which is where the gap was. An AST test lived here
-    and checked each dict-literal `_lot_size_cache` write; its only unique kill was okx's
-    lazy write, and it was blind to the `_DEFAULT_LOT_SIZE.copy()` fallbacks -- 3 of 5
-    writes on bybit and okx, taken precisely when the venue is flaky, and whose mutants
-    survived the whole suite. Under strict `lot["min_notional"]` a missing key there is a
-    KeyError on every bracket open, on the worst possible day.
-
-    The healthy paths are covered per-venue in each executor's own tests, which can
-    supply that venue's real payload shape; this cannot, and binance correctly raises
-    rather than guessing when handed one it does not recognise.
+    The DEGRADED path specifically: the `_DEFAULT_LOT_SIZE.copy()` fallbacks are 3 of 5
+    cache writes on bybit and okx, are taken precisely when the venue is flaky, and a
+    missing key there is a KeyError on every bracket open. Healthy paths are covered
+    per-venue, where each venue's real payload shape is available.
     """
     mod = importlib.import_module(
         "torchtrade.envs.replay.order_executor" if venue == "replay"
@@ -5712,8 +5699,7 @@ def test_get_lot_size_reports_three_keys_when_the_venue_is_down(venue):
     for attr, val in (("_lot_size_cache", None), ("_qty_steps", {}), ("_min_qtys", {}),
                       ("_min_notional", 0.0), ("_tick_size", None), ("_tick_decimals", None),
                       ("_lot_size_decimals", None)):
-        if hasattr(cls, attr) or True:
-            setattr(ex, attr, val)
+        setattr(ex, attr, val)
     client = MagicMock()
     for m in ("futures_exchange_info", "get_instruments_info", "get_instruments", "market"):
         setattr(client, m, MagicMock(side_effect=Exception("venue down")))
@@ -5761,7 +5747,7 @@ def test_notional_sizing_exactly_at_the_floor_is_not_refused_by_float_error(
     )
 
 
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit"])
 def test_the_plain_path_also_refuses_below_the_venue_notional_floor(venue):
     """The other execution path. #414 fixed binance's plain path and gave every venue's
     SLTP path a floor -- and left bitget, bybit and okx's PLAIN path with none, on the
@@ -5771,6 +5757,11 @@ def test_the_plain_path_also_refuses_below_the_venue_notional_floor(venue):
 
     That is CLAUDE.md's "apply to ALL environments" rule, and it is the bug the issue
     describes still shipping on three of four venues one path over.
+
+    okx is absent because it CANNOT hit this: its executor writes `min_notional` 0.0 at
+    every one of its three cache sites, since okx derivatives bind on minSz/lotSz. A row
+    for it would stub a 5.0 floor okx cannot produce and assert a fiction -- which is
+    what it did until this was noticed, guarding eight lines that could never fire.
     """
     env, trader = _real_futures_env(budget=0, venue=venue)
     trader.get_lot_size.return_value = {
@@ -5868,9 +5859,39 @@ def test_a_non_finite_target_never_reaches_the_venue():
     Quiet is the problem: the account is untouched, but nothing says the sizing produced
     a number that is not a number.
     """
-    env, sent = _switch_stub(price=100.0, min_notional=0.0, lot_step=0.001,
-                             current_qty=0.0, target_qty=float("nan"))
+    env, sent = _switch_stub(min_notional=0.0, lot_step=0.001, target_qty=float("nan"))
     info = env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
 
     assert not sent, f"a NaN target reached the venue as {sent.get('quantity')!r}"
     assert not info["executed"]
+
+
+@pytest.mark.parametrize("qty,step,price,floor", [
+    (0.29, 0.01, 350.0, 100.0),        # 0.29/0.01 = 28.999999999999996
+    (0.0003, 0.0001, 400_000.0, 100.0),
+    (1.17, 0.01, 100.0, 100.0),
+])
+def test_the_guard_floors_the_way_the_venue_floors(qty, step, price, floor):
+    """A BARE `math.floor(q/step)*step` is a whole lot step below what the venue sends.
+
+    `quantity / step` lands just under an integer for many exact multiples -- 0.29/0.01
+    is 28.999999999999996 -- which is why `round_quantity` carries a relative epsilon and
+    says so in its docstring. Flooring without it made the guard validate one step less
+    than would be submitted and refuse legal orders: the round-2 bug with the sign
+    flipped, admitting nothing illegal but rejecting real money.
+
+    Every stub in this PR reimplemented the guard's own bare floor, so nothing could see
+    it. These are the venue's real numbers instead.
+    """
+    env, trader = _close_env("binance", 0)
+    env.config.trade_mode = "quantity"
+    env.config.quantity_per_trade = qty
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.0, "qty_step": step, "min_notional": floor
+    }
+
+    assert env._resolve_bracket_quantity(price) is not None, (
+        f"{qty} at {price} is {qty * price:.2f} notional against a {floor} floor and was "
+        f"refused: the guard floored to {__import__('math').floor(qty / step) * step!r}, "
+        f"a full step below what the venue would send"
+    )

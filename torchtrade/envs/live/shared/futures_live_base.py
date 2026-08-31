@@ -288,36 +288,25 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     ) -> float | None:
         """Refuse a quantity the venue will reject, rather than submitting it (#414).
 
-        The SLTP path had NO notional check on any venue, and bitget and bybit never read
-        their exchanges' notional fields at all -- both were fetched with the rest of the
-        market info and dropped. An order under the floor is submitted, rejected, and the
-        env goes on believing it holds a position: invariant 2 inverted.
-
-        Refuse, never round UP to the minimum. Rounding up allocates more than the action
-        asked for, which is how okx's formatter turns a sub-minimum size into a real
-        position; the plain path has refused rather than rounded since #271.
-
-        NOTIONAL only. The min-QUANTITY floor is okx's `_resolve_bracket_quantity`
-        override and stays there: promoting it to all four is a behaviour change for the
-        other three that #414 does not ask for, and okx reports `min_notional` 0.0 anyway
-        because its derivatives bind on minSz/lotSz.
+        Refuse, never round UP: rounding up allocates more than the action asked for.
+        NOTIONAL only -- the min-quantity floor is okx's `_resolve_bracket_quantity`.
         """
-        # Strict indexing, not `.get(..., 0.0)`: defaulting a missing key to "no floor"
-        # means any future trader that forgets it silently disables the check, which is
-        # the fail-open this guard exists to remove. All five executors report the key.
         lot = self.trader.get_lot_size()
 
-        # Floor to the lot step FIRST, and validate -- and return -- the floored value.
-        # Validating the pre-rounded quantity was the same "validated one number, sent
-        # another" bug this PR fixes on the plain path: every venue formatter floors, so
-        # at step 0.001 / floor 100 / price 60000 a quantity of 0.001666... validated at
-        # exactly 100.00 and arrived at the venue as 0.001 -- 60.00, rejected. Anything
-        # landing in [100, 160) USD passed the guard and was refused by the exchange.
-        # bybit sends the raw float and is exact; binance, okx and bitget all truncate.
+        # Validate what the venue will receive. binance/bitget/okx truncate to the step;
+        # bybit sends the raw float, so flooring for it is conservative, never wrong.
+        # Return `quantity`, not `sendable` -- re-flooring an already-floored float
+        # shaves a step (2.001 -> 2.0 in 1463 of the first 200k multiples of 0.001).
         step = float(lot["qty_step"])
         sendable = quantity
         if step > 0 and math.isfinite(step):
-            sendable = math.floor(quantity / step) * step
+            # The SAME epsilon `round_quantity` uses, and for the reason its docstring
+            # gives: `quantity / step` lands just under an integer for many exact
+            # multiples (0.29/0.01 is 28.999999999999996). A bare floor is a whole step
+            # below what the venue actually sends, so it refuses legal orders -- the
+            # round-2 bug with the sign flipped.
+            ratio = quantity / step
+            sendable = math.floor(ratio + max(1e-9, ratio * 1e-12)) * step
             if not sendable > 0:
                 logger.warning(
                     f"{self.config.symbol}: quantity {quantity} floors to {sendable} at "
@@ -325,17 +314,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
                 )
                 return None
 
-        # `sendable`, not `quantity`: the venue formatter floors, so this is the number
-        # the exchange will actually see. The caller still receives the unfloored value
-        # and the formatter re-derives the same result -- what matters is that the
-        # validation and the submission agree.
         notional = sendable * current_price
         min_notional = float(lot["min_notional"])
-        # A relative epsilon, because `notional` mode computes `qty = usd / price` and this
-        # re-multiplies by the same price. That round-trip is not exact: for ~1.7% of
-        # prices in 0.001-100, `(5.0 / p) * p < 5.0`. bitget's minTradeUSDT is exactly 5,
-        # so a user sizing at the floor would be refused or not depending on the last bit
-        # of the price. The epsilon is far below any real venue increment.
+        # Relative epsilon: `notional` mode computes `usd / price` and this
+        # re-multiplies, and bitget's floor is exactly 5, so the round-trip matters.
         if min_notional > 0 and notional < min_notional * (1 - 1e-9):
             logger.warning(
                 f"{self.config.symbol}: notional {notional:.2f} is below the venue "

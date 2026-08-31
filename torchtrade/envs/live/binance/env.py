@@ -154,18 +154,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
 
 
     def _get_min_notional(self) -> float:
-        """The venue's notional floor, from the executor's cached filters.
-
-        One owner, not two. This method used to walk `futures_exchange_info()` itself --
-        an unhalted REST round-trip on every sized step, twice per step, fetching every
-        symbol on the venue -- and fell back to a fabricated 100.0 while the executor's
-        cache fell back to 0.0. Same symbol, same instant, opposite answers: the plain
-        path refused at 100 and the SLTP path refused nothing (#414).
-
-        100.0 was never a venue constant either; it is BTCUSDT's floor. ETHUSDT is 20 and
-        most alt perps are 5, so it was wrong in the other direction for every other
-        symbol. `get_lot_size` re-fetches on an empty cache, so a transient failure at
-        construction repairs itself rather than pinning a guess.
+        """The venue's floor, from the executor's cached filters. One owner, not two.
         """
         return float(self.trader.get_lot_size()["min_notional"])
 
@@ -219,37 +208,34 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         Returns:
             trade_info: Dict with execution details
         """
-        # 1. Query actual position from exchange (source of truth)
+        # Query actual position from exchange (source of truth)
         # Threaded from `_step`'s halted read; required, never defaulted (#295).
         if action_value == 0.0:
             if abs(current_qty) > 0:
                 return self._handle_close_action(current_qty)
             return self._create_trade_info(executed=False)
 
-        # 3. Calculate target position
+        # Calculate target position
         target_qty, target_notional, target_side = self._calculate_fractional_position(
             action_value, current_price
         )
 
-        # 4. Check if target is achievable
+        # Check if target is achievable
         if target_qty == 0.0:
             return self._create_trade_info(executed=False)
 
-        # 5. Calculate delta
+        # Calculate delta
         delta = target_qty - current_qty
 
-        # 6. Check if delta is significant enough to trade
+        # Check if delta is significant enough to trade
         sign = 1 if delta > 0 else -1
         delta = self.trader.round_quantity(abs(delta)) * sign
         if delta == 0:
             return self._create_trade_info(executed=False)  # Already close enough
 
-        # 8. Decide what will be SENT before validating anything, because a direction
-        #    switch does not send the delta -- it closes, then opens `abs(target_qty)`.
-        #    Validating the delta and submitting the target is how an order the venue
-        #    rejects gets reported as executed: on a switch the signs oppose, so
-        #    `|delta| = |target| + |current|` and the larger number clears a minimum the
-        #    smaller one does not.
+        # Decide what will be SENT before validating: a switch closes, then opens
+        # `abs(target_qty)`, not the delta. On a switch `|delta| = |target| + |current|`,
+        # so validating the delta clears a floor the submitted quantity does not (#414).
         switching = (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0)
         if switching:
             side, amount = ("buy" if target_qty > 0 else "sell"), abs(target_qty)
@@ -260,23 +246,17 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         else:
             return self._create_trade_info(executed=False)
 
-        # 9. Validate the submitted quantity, and do it BEFORE the switch's close. After
-        #    the close it is too late to refuse: the position is already gone and
-        #    returning "not executed" would describe an account that just changed.
+        # Before the switch's close: after it, refusing would describe an account that
+        # has already changed.
         min_notional = self._get_min_notional()
         if amount * current_price < min_notional:
-            # `at_target` ONLY when not switching. It means "already there", and
-            # `_record_position_after_trade` takes it as permission to write
-            # `current_action_level = desired_action`. On a switch we are on the OPPOSITE
-            # side at full size, so claiming it latches the level to a direction the
-            # account does not hold -- the next sync sees cached and observed agree, never
-            # repairs it, and the duplicate-action guard then suppresses every retry of
-            # that direction for the rest of the episode, including once price makes the
-            # order legal. Refusing an order is cheap; refusing it forever is not.
+            # `at_target` means "already there"; on a switch we hold the opposite side
+            # at full size, so claiming it latches the level to a direction we do not
+            # hold and the duplicate-action guard suppresses every retry (#414).
             return self._create_trade_info(executed=False, at_target=not switching)
 
-        # 10. A switch closes first. If the close fails, do not open the opposite side --
-        #     that would double the position rather than reverse it.
+        # If the close fails, do not open the opposite side -- that doubles rather than
+        # reverses.
         if switching:
             close_info = self._handle_close_action(current_qty)
             if not close_info["executed"] or close_info.get("success") is False:
@@ -286,7 +266,13 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # One exit, so a new branch cannot skip the target and disable the check.
         info = self._execute_market_order(side, amount)
         info["target_qty"] = target_qty
-        info["target_tol"] = min_notional / current_price
+        # The venue's minimum tradeable size, as the other three venues pass. It was
+        # `min_notional / price`, which the removed 100.0 fallback kept non-zero; with
+        # the executor's real 0.0 it becomes 0.0, and `_sync_position_from_exchange`
+        # then compares against POSITION_DUST_EPS (1e-9). binance's delta is
+        # lot-rounded, so every complete fill would read as a divergence, NaN the
+        # action level, and re-size every bar (#414).
+        info["target_tol"] = float(self.trader.get_lot_size()["min_qty"])
         return info
 
     def _execute_trade_if_needed(

@@ -215,23 +215,9 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             )
 
     def get_lot_size(self) -> Dict[str, float]:
-        """The same `{min_qty, qty_step, min_notional}` the other three venues return.
-
-        binance was the only venue without this accessor, so the shared sizing could not
-        ask it for a notional floor and the SLTP path submitted whatever fraction it had
-        computed (#414). The values come from filters already cached by
-        `_fetch_symbol_filters`; this adds no API call.
-        """
-        # The SAME fallback `round_quantity` and `_format_quantity` use. Answering 0.0
-        # here made this file disagree with itself after a transient exchange-info
-        # failure -- `_fetch_symbol_filters` returns early on that path, BEFORE the
-        # missing-LOT_SIZE raise, so the caches stay empty and nothing says so.
-        # Lazily re-fetch on an empty cache, like bitget/bybit/okx already do.
-        # `_fetch_symbol_filters` RETURNS EARLY on a transient exchange-info failure --
-        # before its own fail-closed "no LOT_SIZE" raise -- so a single blip at
-        # construction left every cache empty and nothing ever repaired them. binance was
-        # the only venue that never retried, so one bad moment at startup silently
-        # disabled both floors for the life of the process (#414).
+        """`{min_qty, qty_step, min_notional}`, from filters already cached (#414)."""
+        # Lazily re-fetch on an empty cache: `_fetch_symbol_filters` returns early on a
+        # transient failure, before its own raise, and binance alone never retried.
         if self.symbol not in self._qty_steps:
             self._fetch_symbol_filters()
 

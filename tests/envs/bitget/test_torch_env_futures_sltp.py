@@ -849,8 +849,7 @@ class TestBitgetSLTPNotionalTradeMode:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
-        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
-        # lot and floors every real quantity to zero in the shared sizing guard.
+        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
         mock_trader.get_lot_size = MagicMock(
             return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
         mock_trader.get_mark_price = MagicMock(return_value=50000.0)
@@ -919,8 +918,7 @@ class TestBitgetSLTPLockPosition:
         mock_observer.window_sizes = [10]
 
         mock_trader = MagicMock()
-        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
-        # lot and floors every real quantity to zero in the shared sizing guard.
+        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
         mock_trader.get_lot_size = MagicMock(
             return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
         mock_trader.get_mark_price = MagicMock(return_value=50000.0)
