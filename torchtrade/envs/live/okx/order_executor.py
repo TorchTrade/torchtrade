@@ -173,7 +173,13 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 min_qty = float(instrument.get("minSz", 0.001))
                 lot_decimals = decimals_for_step(lot_sz_str)
                 self._lot_size_decimals = lot_decimals
-                self._lot_size_cache = {"min_qty": min_qty, "qty_step": qty_step}
+                # Three keys, like every other write of this cache. Updating the
+                # fallback branch and not THIS one -- the construction-time write --
+                # is how okx would have returned a two-key dict at runtime and
+                # KeyError'd on every bracket open once the guard indexed strictly.
+                self._lot_size_cache = {
+                    "min_qty": min_qty, "qty_step": qty_step, "min_notional": 0.0,
+                }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
 
@@ -539,7 +545,7 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         Get and cache lot size constraints for the symbol.
 
         Returns:
-            Dictionary with 'min_qty' and 'qty_step' for the symbol.
+            Dictionary with 'min_qty', 'qty_step' and 'min_notional' for the symbol.
         """
         if self._lot_size_cache is not None:
             return self._lot_size_cache

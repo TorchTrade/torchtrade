@@ -302,10 +302,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         other three that #414 does not ask for, and okx reports `min_notional` 0.0 anyway
         because its derivatives bind on minSz/lotSz.
         """
+        # Strict indexing, not `.get(..., 0.0)`: defaulting a missing key to "no floor"
+        # means any future trader that forgets it silently disables the check, which is
+        # the fail-open this guard exists to remove. All five executors report the key.
         lot = self.trader.get_lot_size()
         notional = quantity * current_price
-        min_notional = float(lot.get("min_notional", 0.0))
-        if min_notional > 0 and notional < min_notional:
+        min_notional = float(lot["min_notional"])
+        # A relative epsilon, because `notional` mode computes `qty = usd / price` and this
+        # re-multiplies by the same price. That round-trip is not exact: for ~1.7% of
+        # prices in 0.001-100, `(5.0 / p) * p < 5.0`. bitget's minTradeUSDT is exactly 5,
+        # so a user sizing at the floor would be refused or not depending on the last bit
+        # of the price. The epsilon is far below any real venue increment.
+        if min_notional > 0 and notional < min_notional * (1 - 1e-9):
             logger.warning(
                 f"{self.config.symbol}: notional {notional:.2f} is below the venue "
                 f"minimum {min_notional:.2f}; refusing rather than submitting an order "

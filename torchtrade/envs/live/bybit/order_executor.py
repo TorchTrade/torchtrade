@@ -511,7 +511,7 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         Get and cache lot size constraints for the symbol.
 
         Returns:
-            Dictionary with 'min_qty' and 'qty_step' for the symbol.
+            Dictionary with 'min_qty', 'qty_step' and 'min_notional' for the symbol.
         """
         if self._lot_size_cache is not None:
             return self._lot_size_cache

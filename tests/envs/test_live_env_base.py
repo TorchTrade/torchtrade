@@ -5545,6 +5545,11 @@ def test_a_direction_switch_validates_the_quantity_it_actually_sends():
     """
     env, sent = _switch_stub(price=99.99, min_notional=100.0, lot_step=1.0,
                              current_qty=-1.0, target_qty=1.0)
+    closed = []
+    env._handle_close_action = lambda q: closed.append(q) or {
+        "executed": True, "success": True, "side": "buy", "quantity": abs(q),
+        "closed_position": True}
+
     info = env._execute_fractional_action(1.0, current_qty=-1.0, current_price=99.99)
 
     assert not sent, (
@@ -5552,7 +5557,14 @@ def test_a_direction_switch_validates_the_quantity_it_actually_sends():
         f"{(sent.get('quantity') or 0) * 99.99:.2f} notional, below the 100.0 minimum the "
         f"env checked against a different quantity"
     )
-    assert not info["executed"]
+    # The ORDERING, which the source comment claims and nothing asserted: moving the
+    # check below the close block passed every test, because refusing after the close
+    # still reports executed=False -- while the account has just gone flat. That is the
+    # bug this PR exists to fix, arrived at from the other direction.
+    assert not closed, (
+        "the position was closed and THEN the open was refused: the account is flat and "
+        "trade_info says nothing happened"
+    )
 
 
 def test_the_delta_sent_to_the_venue_is_lot_rounded():
@@ -5577,7 +5589,12 @@ def test_the_delta_sent_to_the_venue_is_lot_rounded():
 
 
 @pytest.mark.parametrize("venue", _SLTP_VENUES)
-def test_the_sltp_path_refuses_a_bracket_below_the_venue_notional_floor(venue):
+@pytest.mark.parametrize("trade_mode,qty_per_trade", [
+    ("fractional", 0), ("notional", 10.0), ("quantity", 0.1),
+])
+def test_the_sltp_path_refuses_a_bracket_below_the_venue_notional_floor(
+    venue, trade_mode, qty_per_trade
+):
     """The SLTP path had no notional check on ANY venue, and bitget and bybit read no
     notional field at all -- both fetched it with the rest of the market info and dropped
     it (#414).
@@ -5589,7 +5606,12 @@ def test_the_sltp_path_refuses_a_bracket_below_the_venue_notional_floor(venue):
     action asked for, which is how okx's formatter turns a sub-minimum size into a real
     position.
     """
+    # ALL THREE modes, because `fractional` is the default and dominant one and deleting
+    # its guard call passed 1963 tests -- the SLTP test only ever reached `quantity`.
+    # "Fixed on all, tested on one" is the shape this whole issue is about.
     env, trader = _close_env(venue, 0)
+    env.config.trade_mode = trade_mode
+    env.config.quantity_per_trade = qty_per_trade
     trader.get_lot_size.return_value = {
         "min_qty": 0.0, "qty_step": 0.001, "min_notional": 1_000_000.0
     }
@@ -5602,22 +5624,110 @@ def test_the_sltp_path_refuses_a_bracket_below_the_venue_notional_floor(venue):
     )
 
 
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
-def test_every_futures_executor_reports_its_venue_minimums_the_same_way(venue):
-    """One accessor shape across four venues, so the shared sizing can ask one question.
+# `test_every_futures_executor_reports_its_venue_minimums_the_same_way` lived here and is
+# gone. It asserted that each `get_lot_size`'s SOURCE mentions three key strings -- which
+# passes for one that names `min_notional` in a comment and returns nothing, and which
+# hardcoded four venues while a FIFTH implementation (ReplayOrderExecutor) sat two keys
+# short the whole time. Its only unique kill was "okx omits the key", and with the guard
+# reading `.get(..., 0.0)` absent and 0.0 were the same program, so that kill changed no
+# behaviour. The guard now indexes strictly, which turns key-absence into a loud KeyError
+# and makes the property behavioural instead of textual.
 
-    binance was the only executor without `get_lot_size`, which is why the shared path
-    could not ask it for a notional floor. Its values come from filters
-    `_fetch_symbol_filters` already caches, so the accessor adds no API call.
+
+@pytest.mark.parametrize("current_qty,switching,expected_at_target", [
+    (-1.0, True, False),   # holding a SHORT, asked for a LONG -> a switch, NOT at target
+    (0.0, False, True),    # flat, opening -> the sub-minimum refusal `at_target` was for
+], ids=["refused-switch", "refused-open"])
+def test_a_refused_switch_does_not_claim_the_account_is_already_at_target(
+    current_qty, switching, expected_at_target
+):
+    """`at_target` means "already there", and `_record_position_after_trade` takes it as
+    permission to write `current_action_level = desired_action`.
+
+    That was honest for the ONLY refusal the flag originally had -- a sub-minimum delta,
+    which does mean at target. The notional reorder gave it a second reachable path: a
+    refused direction SWITCH, where the account is on the opposite side at full size.
+    Claiming at_target there latches the level to a direction the account does not hold,
+    and because `_sync_position_from_exchange` then sees cached and observed agree
+    (both short) it never repairs it -- so the duplicate-action guard suppresses every
+    later retry of that direction, including once price makes the order legal.
+
+    Refusing an order is cheap. Refusing it for the rest of the episode is not.
     """
-    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.order_executor")
-    cls = next(c for k, c in vars(mod).items()
-               if k.endswith("OrderClass") and getattr(c, "__module__", "") == mod.__name__)
-    assert hasattr(cls, "get_lot_size"), (
-        f"{venue}'s executor has no get_lot_size, so the shared sizing cannot ask it for "
-        f"a venue minimum and will submit whatever it computed"
+    env, trader = _real_futures_env(budget=0, venue="binance")
+    env._get_min_notional = lambda: 100.0
+    env.trader.round_quantity.side_effect = lambda q: float(int(q))
+    env._calculate_fractional_position = lambda av, cp: (1.0, 1.0 * cp, "buy")
+    env._handle_close_action = lambda q: {"executed": True, "success": True}
+    env.position.current_position = -1 if current_qty < 0 else 0
+    env.position.current_action_level = -1.0 if current_qty < 0 else 0.0
+
+    info = env._execute_fractional_action(
+        1.0, current_qty=current_qty, current_price=99.99
     )
-    keys = {"min_qty", "qty_step", "min_notional"}
-    src = inspect.getsource(cls.get_lot_size)
-    missing = {k for k in keys if f'"{k}"' not in src}
-    assert not missing, f"{venue}'s get_lot_size never mentions {sorted(missing)}"
+    assert not info["executed"]
+    assert info.get("at_target") is expected_at_target
+
+    level_before = env.position.current_action_level
+    env._record_position_after_trade(1.0, info)
+    if switching:
+        assert env.position.current_action_level == level_before, (
+            "a refused switch latched the action level to the direction it failed to "
+            "open; the duplicate-action guard will now suppress every retry"
+        )
+
+
+@pytest.mark.parametrize("venue", ["bitget", "bybit", "okx"])
+def test_every_lot_size_cache_write_carries_all_three_keys(venue):
+    """The accessor is not the thing to check -- the WRITES are.
+
+    Each of these executors caches its lot size from more than one place: a
+    construction-time write inside the tick-size fetch, a lazy write in `get_lot_size`,
+    and one or more fallbacks. Updating some and not others is how okx came to return a
+    two-key dict at runtime while its `get_lot_size` source mentioned the third key, so a
+    source grep saw a contract that did not hold and the whole suite passed.
+
+    Once the shared guard indexes `lot["min_notional"]` strictly, a missing key is a
+    KeyError on every bracket open, so this is a crash test, not a style test. Every
+    dict-literal write is checked rather than the one the tests happen to reach.
+    """
+    tree = ast.parse(
+        pathlib.Path(f"torchtrade/envs/live/{venue}/order_executor.py").read_text()
+    )
+    writes = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Assign) and len(n.targets) == 1
+        and isinstance(n.targets[0], ast.Attribute)
+        and n.targets[0].attr == "_lot_size_cache"
+        and isinstance(n.value, ast.Dict)
+    ]
+    assert writes, f"{venue} has no dict-literal _lot_size_cache write to check"
+    for w in writes:
+        keys = {k.value for k in w.value.keys if isinstance(k, ast.Constant)}
+        assert keys == {"min_qty", "qty_step", "min_notional"}, (
+            f"{venue}/order_executor.py:{w.lineno} writes {sorted(keys)}; a cache missing "
+            f"min_notional KeyErrors in the shared sizing guard"
+        )
+
+
+@pytest.mark.parametrize("price", [0.61, 1.22, 2.23, 2.29, 2.44])
+def test_notional_sizing_exactly_at_the_floor_is_not_refused_by_float_error(price):
+    """`notional` mode computes `qty = usd / price`; the guard re-multiplies by the same
+    price. That round-trip is not exact -- for ~1.7% of prices in 0.001-100,
+    `(5.0 / p) * p < 5.0` -- and bitget's minTradeUSDT is exactly 5.
+
+    Without an epsilon a user sizing at the venue floor gets intermittent silent refusals
+    that depend on the last bit of the price. These five are the first such prices, and
+    they are ordinary altcoin-perp values.
+    """
+    env, trader = _close_env("bitget", 0)
+    env.config.trade_mode = "notional"
+    env.config.quantity_per_trade = 5.0
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.0, "qty_step": 1e-9, "min_notional": 5.0
+    }
+
+    assert env._resolve_bracket_quantity(price) is not None, (
+        f"sizing exactly 5.0 USD against a 5.0 floor at price {price} was refused: "
+        f"(5.0/{price})*{price} = {(5.0 / price) * price!r}"
+    )

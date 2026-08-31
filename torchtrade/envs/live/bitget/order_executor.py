@@ -176,7 +176,7 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             logger.warning(f"Could not load markets for {self.symbol}: {e}")
 
     def get_lot_size(self) -> Dict[str, float]:
-        """Return the symbol's ``{'min_qty', 'qty_step'}`` from CCXT market info (cached).
+        """Return the symbol's ``{'min_qty', 'qty_step', 'min_notional'}`` from CCXT (cached).
 
         Bitget's CCXT precision mode is TICK_SIZE, so ``precision.amount`` is the
         quantity step directly (e.g. 0.0001 for BTC/USDT:USDT). Falls back to

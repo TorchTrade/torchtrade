@@ -222,10 +222,14 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         computed (#414). The values come from filters already cached by
         `_fetch_symbol_filters`; this adds no API call.
         """
-        step = self._qty_steps.get(self.symbol)
+        # The SAME fallback `round_quantity` and `_format_quantity` use. Answering 0.0
+        # here made this file disagree with itself after a transient exchange-info
+        # failure -- `_fetch_symbol_filters` returns early on that path, BEFORE the
+        # missing-LOT_SIZE raise, so the caches stay empty and nothing says so.
+        step = self._qty_steps.get(self.symbol, _FALLBACK_QTY_STEP_PAIR)
         return {
             "min_qty": float(self._min_qtys.get(self.symbol, 0.0)),
-            "qty_step": float(step[0]) if step else 0.0,
+            "qty_step": float(step[0]),
             "min_notional": float(self._min_notional),
         }
 

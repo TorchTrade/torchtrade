@@ -278,7 +278,15 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         #    returning "not executed" would describe an account that just changed.
         min_notional = self._get_min_notional()
         if amount * current_price < min_notional:
-            return self._create_trade_info(executed=False, at_target=True)
+            # `at_target` ONLY when not switching. It means "already there", and
+            # `_record_position_after_trade` takes it as permission to write
+            # `current_action_level = desired_action`. On a switch we are on the OPPOSITE
+            # side at full size, so claiming it latches the level to a direction the
+            # account does not hold -- the next sync sees cached and observed agree, never
+            # repairs it, and the duplicate-action guard then suppresses every retry of
+            # that direction for the rest of the episode, including once price makes the
+            # order legal. Refusing an order is cheap; refusing it forever is not.
+            return self._create_trade_info(executed=False, at_target=not switching)
 
         # 10. A switch closes first. If the close fails, do not open the opposite side --
         #     that would double the position rather than reverse it.
