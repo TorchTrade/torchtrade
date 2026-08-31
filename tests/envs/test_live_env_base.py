@@ -5589,7 +5589,11 @@ def test_the_delta_sent_to_the_venue_is_lot_rounded():
     )
 
 
-@pytest.mark.parametrize("venue", _SLTP_VENUES)
+# One shared-guard representative plus okx, whose `_resolve_bracket_quantity`
+# override genuinely changes the outcome. The venue axis buys nothing on tests of
+# the ONE shared method: across nine mutants, none ever killed a strict subset of
+# venue rows.
+@pytest.mark.parametrize("venue", ["binance", "okx"])
 @pytest.mark.parametrize("trade_mode,qty_per_trade", [
     ("fractional", 0), ("notional", 10.0), ("quantity", 0.1),
 ])
@@ -5789,7 +5793,11 @@ def test_the_plain_path_also_refuses_below_the_venue_notional_floor(venue):
     )
 
 
-@pytest.mark.parametrize("venue", _SLTP_VENUES)
+# One shared-guard representative plus okx, whose `_resolve_bracket_quantity`
+# override genuinely changes the outcome. The venue axis buys nothing on tests of
+# the ONE shared method: across nine mutants, none ever killed a strict subset of
+# venue rows.
+@pytest.mark.parametrize("venue", ["binance", "okx"])
 def test_a_trader_without_a_notional_floor_fails_loudly_rather_than_silently(venue):
     """The guard indexes `lot["min_notional"]` rather than `.get(..., 0.0)`.
 
@@ -5809,7 +5817,11 @@ def test_a_trader_without_a_notional_floor_fails_loudly_rather_than_silently(ven
         env._resolve_bracket_quantity(100.0)
 
 
-@pytest.mark.parametrize("venue", _SLTP_VENUES)
+# One shared-guard representative plus okx, whose `_resolve_bracket_quantity`
+# override genuinely changes the outcome. The venue axis buys nothing on tests of
+# the ONE shared method: across nine mutants, none ever killed a strict subset of
+# venue rows.
+@pytest.mark.parametrize("venue", ["binance", "okx"])
 def test_the_notional_is_checked_against_the_quantity_the_venue_will_receive(venue):
     """The guard must validate the FLOORED quantity, not the raw one.
 
@@ -5834,7 +5846,7 @@ def test_the_notional_is_checked_against_the_quantity_the_venue_will_receive(ven
     )
 
 
-@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit"])
+@pytest.mark.parametrize("venue", ["binance"])
 def test_a_quantity_below_one_lot_step_is_refused_rather_than_sent_as_zero(venue):
     """Flooring a sub-step quantity gives 0.0, and submitting nothing is not a trade.
 
