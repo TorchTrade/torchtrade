@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Venue taker rate, read by env.py and env_sltp.py alike (#278).
 TAKER_FEE = 0.00055
 
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
 
 
 class PositionMode(Enum):
@@ -151,6 +151,8 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 self._lot_size_cache = {
                     "min_qty": float(lot_filter.get("minOrderQty", 0.001)),
                     "qty_step": float(lot_filter.get("qtyStep", 0.001)),
+                    # Same filter, read at the same time, previously discarded (#414).
+                    "min_notional": float(lot_filter.get("minNotionalValue", 0.0)),
                 }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
@@ -530,6 +532,8 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 self._lot_size_cache = {
                     "min_qty": float(lot_filter.get("minOrderQty", 0.001)),
                     "qty_step": float(lot_filter.get("qtyStep", 0.001)),
+                    # Same filter, read at the same time, previously discarded (#414).
+                    "min_notional": float(lot_filter.get("minNotionalValue", 0.0)),
                 }
             else:
                 logger.warning(f"No instrument info for {self.symbol}, using defaults")

@@ -215,10 +215,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         the same input becomes a halt instead -- a divergence this fold preserves rather
         than endorses (#416).
         """
+        # Every mode goes through the venue-minimum refusal below. The two fixed-size
+        # modes returned early and skipped it, which is the same "validated one thing,
+        # sent another" shape as the direction-switch bug -- here it was "validated
+        # nothing at all" for two of the three modes.
         if self.config.trade_mode == "notional":
-            return float(self.config.quantity_per_trade) / current_price
+            return self._refuse_below_venue_minimums(
+                float(self.config.quantity_per_trade) / current_price, current_price
+            )
         if self.config.trade_mode == "quantity":
-            return float(self.config.quantity_per_trade)
+            return self._refuse_below_venue_minimums(
+                float(self.config.quantity_per_trade), current_price
+            )
         if self.config.trade_mode != "fractional":
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
@@ -271,6 +279,37 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             logger.error(
                 f"{self.config.symbol}: sizing produced {quantity!r}, refusing rather than "
                 f"handing it to the venue formatter"
+            )
+            return None
+        return self._refuse_below_venue_minimums(quantity, current_price)
+
+    def _refuse_below_venue_minimums(
+        self, quantity: float, current_price: float
+    ) -> float | None:
+        """Refuse a quantity the venue will reject, rather than submitting it (#414).
+
+        The SLTP path had NO notional check on any venue, and bitget and bybit never read
+        their exchanges' notional fields at all -- both were fetched with the rest of the
+        market info and dropped. An order under the floor is submitted, rejected, and the
+        env goes on believing it holds a position: invariant 2 inverted.
+
+        Refuse, never round UP to the minimum. Rounding up allocates more than the action
+        asked for, which is how okx's formatter turns a sub-minimum size into a real
+        position; the plain path has refused rather than rounded since #271.
+
+        NOTIONAL only. The min-QUANTITY floor is okx's `_resolve_bracket_quantity`
+        override and stays there: promoting it to all four is a behaviour change for the
+        other three that #414 does not ask for, and okx reports `min_notional` 0.0 anyway
+        because its derivatives bind on minSz/lotSz.
+        """
+        lot = self.trader.get_lot_size()
+        notional = quantity * current_price
+        min_notional = float(lot.get("min_notional", 0.0))
+        if min_notional > 0 and notional < min_notional:
+            logger.warning(
+                f"{self.config.symbol}: notional {notional:.2f} is below the venue "
+                f"minimum {min_notional:.2f}; refusing rather than submitting an order "
+                f"the exchange will reject"
             )
             return None
         return quantity

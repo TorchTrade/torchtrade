@@ -3919,7 +3919,7 @@ def test_a_recovered_venue_does_not_truncate_the_next_episode():
         "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
     trader.get_status.return_value = {"position_status": None}
     trader.get_mark_price.return_value = 100.0
-    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
 
     with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
         env = Env(config=Config(
@@ -4417,7 +4417,7 @@ def _bracket_stub(cls, *, balance=10_000.0, leverage=5, fee=...):
     # A real lot size, because okx's sizing compares against it. Left to the bare
     # MagicMock, `qty < trader.get_lot_size()["min_qty"]` raises TypeError -- the same
     # family as the `float(MagicMock())` accident this docstring already warns about.
-    env.trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+    env.trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
     if fee is ...:
         del env.trader.transaction_fee
     else:
@@ -4491,7 +4491,7 @@ def test_okx_refuses_a_sub_minimum_bracket_rather_than_letting_it_be_clamped_up(
     env, trader = _real_futures_env(budget=0, venue="okx", sltp=True)
     env.config.trade_mode = "quantity"
     env.config.quantity_per_trade = 0.0001          # below the 0.001 min_qty
-    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001}
+    trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
 
     td = env.reset()
     env.active_stop_loss, env.active_take_profit = 111.0, 222.0
@@ -5574,3 +5574,50 @@ def test_the_delta_sent_to_the_venue_is_lot_rounded():
         f"submitted {q}, which is not a multiple of the 0.5 lot step -- the delta reached "
         f"the venue unrounded"
     )
+
+
+@pytest.mark.parametrize("venue", _SLTP_VENUES)
+def test_the_sltp_path_refuses_a_bracket_below_the_venue_notional_floor(venue):
+    """The SLTP path had no notional check on ANY venue, and bitget and bybit read no
+    notional field at all -- both fetched it with the rest of the market info and dropped
+    it (#414).
+
+    An order under the floor is submitted, rejected, and the env goes on believing it
+    holds a position. Same shape as the direction-switch bug, on the other execution path.
+
+    Refuses rather than rounding UP to the minimum: rounding up allocates more than the
+    action asked for, which is how okx's formatter turns a sub-minimum size into a real
+    position.
+    """
+    env, trader = _close_env(venue, 0)
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.0, "qty_step": 0.001, "min_notional": 1_000_000.0
+    }
+
+    quantity = env._resolve_bracket_quantity(100.0)
+
+    assert quantity is None, (
+        f"{venue}: sized {quantity} at 100.0 = {(quantity or 0) * 100.0:.2f} notional "
+        f"against a 1,000,000 floor -- the venue would reject this order"
+    )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_every_futures_executor_reports_its_venue_minimums_the_same_way(venue):
+    """One accessor shape across four venues, so the shared sizing can ask one question.
+
+    binance was the only executor without `get_lot_size`, which is why the shared path
+    could not ask it for a notional floor. Its values come from filters
+    `_fetch_symbol_filters` already caches, so the accessor adds no API call.
+    """
+    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.order_executor")
+    cls = next(c for k, c in vars(mod).items()
+               if k.endswith("OrderClass") and getattr(c, "__module__", "") == mod.__name__)
+    assert hasattr(cls, "get_lot_size"), (
+        f"{venue}'s executor has no get_lot_size, so the shared sizing cannot ask it for "
+        f"a venue minimum and will submit whatever it computed"
+    )
+    keys = {"min_qty", "qty_step", "min_notional"}
+    src = inspect.getsource(cls.get_lot_size)
+    missing = {k for k in keys if f'"{k}"' not in src}
+    assert not missing, f"{venue}'s get_lot_size never mentions {sorted(missing)}"

@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 # Venue taker rate, read by env.py and env_sltp.py alike (#278).
 TAKER_FEE = 0.0005
 
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
+# okx derivatives bind on minSz/lotSz; there is no separate notional floor, so
+# this is 0.0 rather than absent -- the shared guard reads one key on every venue.
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
 
 
 class PositionMode(Enum):
@@ -558,6 +560,7 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 self._lot_size_cache = {
                     "min_qty": float(instrument.get("minSz", 0.001)),
                     "qty_step": float(instrument.get("lotSz", 0.001)),
+                    "min_notional": 0.0,
                 }
             else:
                 logger.warning(f"No instrument info for {self.symbol}, using defaults")

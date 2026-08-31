@@ -73,6 +73,9 @@ class TestBinanceFuturesOrderClass:
                 "filters": [
                     {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
                     {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                    # Real payloads carry this; the mock omitted it, so nothing could tell
+                    # whether the executor read it or hardcoded 0.0 (#414).
+                    {"filterType": "MIN_NOTIONAL", "notional": "5"},
                 ],
             }]
         })
@@ -243,6 +246,31 @@ class TestBinanceFuturesOrderClass:
         """Tick size should be cached from exchange info at init."""
         assert order_executor._tick_size == 0.1
         assert order_executor._tick_decimals == 1
+
+    def test_get_lot_size_reports_the_venue_minimums_from_the_cached_filters(self, mock_client):
+        """binance was the only executor without `get_lot_size`, so the shared sizing
+        could not ask it for a notional floor and the SLTP path submitted whatever it
+        had computed (#414).
+
+        The values come from filters `_fetch_symbol_filters` already walks, so this adds
+        no API call -- `futures_exchange_info` is still called exactly once, at
+        construction.
+        """
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+        executor = BinanceFuturesOrderClass(symbol="BTCUSDT", client=mock_client)
+        calls = mock_client.futures_exchange_info.call_count
+
+        lot = executor.get_lot_size()
+
+        assert lot["min_notional"] == 5.0, (
+            "MIN_NOTIONAL was not captured; the shared guard would read a 0.0 floor and "
+            "refuse nothing"
+        )
+        assert lot["min_qty"] == 0.001
+        assert lot["qty_step"] == 0.001
+        assert mock_client.futures_exchange_info.call_count == calls, (
+            "get_lot_size re-fetched exchange info instead of using the cached filters"
+        )
 
     def test_round_price_without_precision(self, mock_client):
         """When tick size fetch fails, prices pass through unmodified."""

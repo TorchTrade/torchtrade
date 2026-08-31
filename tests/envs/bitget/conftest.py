@@ -122,11 +122,11 @@ def mock_ccxt_client():
     _prec = ccxt.bitget()
     _prec.markets = {"BTC/USDT:USDT": {"symbol": "BTC/USDT:USDT",
                      "precision": {"amount": 0.0001, "price": 0.1},
-                     "limits": {"amount": {"min": 0.0001}}}}
+                     "limits": {"amount": {"min": 0.0001}, "cost": {"min": 5.0}}}}
     client.amount_to_precision = MagicMock(side_effect=_prec.amount_to_precision)
     # CCXT unified market info: TICK_SIZE precision -> precision.amount is the qty step
     client.market = MagicMock(return_value={
-        "limits": {"amount": {"min": 0.0001}},
+        "limits": {"amount": {"min": 0.0001}, "cost": {"min": 5.0}},
         "precision": {"amount": 0.0001},
     })
 

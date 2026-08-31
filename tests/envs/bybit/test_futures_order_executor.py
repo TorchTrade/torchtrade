@@ -545,6 +545,10 @@ class TestBybitFuturesOrderClass:
 
         lot_size = order_executor.get_lot_size()
         assert lot_size["min_qty"] == 0.001
+
+        # bybit reports minNotionalValue in the SAME lotSizeFilter it already reads.
+        # It was discarded, so the SLTP path submitted sub-minimum orders (#414).
+        assert lot_size["min_notional"] == 5.0
         assert lot_size["qty_step"] == 0.001
 
         # Should use cache from init, no additional API call

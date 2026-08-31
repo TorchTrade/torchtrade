@@ -25,7 +25,7 @@ TAKER_FEE = 0.0006
 BITGET_NO_POSITION_ERRORS = ["22002", "40773", "No position to close"]
 
 # Fallback used if the exchange lot-size cannot be read from CCXT market info
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
 
 
 class PositionMode(Enum):
@@ -189,9 +189,14 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             market = self.client.market(self.symbol)
             min_qty = market.get("limits", {}).get("amount", {}).get("min")
             qty_step = market.get("precision", {}).get("amount")
+            # `limits.cost.min` is CCXT's normalisation of bitget's minTradeUSDT. It was
+            # fetched with the rest of the market info and dropped, so an order under the
+            # venue's notional floor was submitted and rejected (#414).
+            min_notional = market.get("limits", {}).get("cost", {}).get("min")
             self._lot_size_cache = {
                 "min_qty": float(min_qty) if min_qty is not None else _DEFAULT_LOT_SIZE["min_qty"],
                 "qty_step": float(qty_step) if qty_step is not None else _DEFAULT_LOT_SIZE["qty_step"],
+                "min_notional": float(min_notional) if min_notional is not None else 0.0,
             }
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")

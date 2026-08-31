@@ -108,6 +108,9 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         # _fetch_symbol_filters -- close_all_positions closes whatever the account holds.
         self._qty_steps: Dict[str, tuple] = {}
         self._min_qtys: Dict[str, float] = {}
+        # Always present, so `get_lot_size` needs no getattr fallback: a fail-open
+        # default is how a missing floor becomes an unchecked order (#414).
+        self._min_notional: float = 0.0
         self._tick_decimals: int = 0
 
         # Initialize client
@@ -179,6 +182,11 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                     if f['filterType'] == 'LOT_SIZE':
                         self._qty_steps[symbol] = _step_and_decimals(f['stepSize'])
                         self._min_qtys[symbol] = float(f.get('minQty') or 0.0)
+                    elif f['filterType'] == 'MIN_NOTIONAL' and symbol == self.symbol:
+                        # Read here rather than re-fetched: the env's own
+                        # `_get_min_notional` walks these same filters on the plain path,
+                        # and the SLTP path had no notional check at all (#414).
+                        self._min_notional = float(f.get('notional') or 0.0)
                     elif f['filterType'] == 'PRICE_FILTER' and symbol == self.symbol:
                         tick_str = f['tickSize']
                         tick_size = float(tick_str)
@@ -205,6 +213,21 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 f"binance returned no LOT_SIZE for {self.symbol}: not a futures symbol on "
                 f"this venue, or the payload changed shape."
             )
+
+    def get_lot_size(self) -> Dict[str, float]:
+        """The same `{min_qty, qty_step, min_notional}` the other three venues return.
+
+        binance was the only venue without this accessor, so the shared sizing could not
+        ask it for a notional floor and the SLTP path submitted whatever fraction it had
+        computed (#414). The values come from filters already cached by
+        `_fetch_symbol_filters`; this adds no API call.
+        """
+        step = self._qty_steps.get(self.symbol)
+        return {
+            "min_qty": float(self._min_qtys.get(self.symbol, 0.0)),
+            "qty_step": float(step[0]) if step else 0.0,
+            "min_notional": float(self._min_notional),
+        }
 
     def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
         """Floor a quantity toward zero to the symbol's LOT_SIZE step.
