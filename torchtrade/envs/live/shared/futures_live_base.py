@@ -316,9 +316,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
 
         notional = sendable * current_price
         min_notional = float(lot["min_notional"])
-        # Relative epsilon: `notional` mode computes `usd / price` and this
-        # re-multiplies, and bitget's floor is exactly 5, so the round-trip matters.
-        if min_notional > 0 and notional < min_notional * (1 - 1e-9):
+        if min_notional > 0 and notional < min_notional:
             logger.warning(
                 f"{self.config.symbol}: notional {notional:.2f} is below the venue "
                 f"minimum {min_notional:.2f}; refusing rather than submitting an order "

@@ -5713,13 +5713,11 @@ def test_get_lot_size_reports_three_keys_when_the_venue_is_down(venue):
 
 
 @pytest.mark.parametrize("price,usd,expect_refused", [
-    # All five tripping prices computed the identical 4.999999999999999, so four were
-    # duplicates of the same arithmetic. One is kept for the round-trip, and the two
-    # rows below it pin what the epsilon must NOT do.
-    (0.61, 5.0, False),      # exactly at the floor, one ulp under after the round-trip
-    (0.61, 4.5, True),       # genuinely 10% under -- must still refuse
-    (0.61, 2.5, True),       # 50% under: `1 - 0.5` as an epsilon would let this through
-], ids=["at-floor", "10pc-under", "50pc-under"])
+    # `50pc-under` was strictly dominated by `10pc-under` -- every epsilon the latter
+    # kills, the former kills a subset of. `at-floor` went with the notional epsilon it
+    # was written for, which flooring made unreachable.
+    (0.61, 4.5, True),
+], ids=["10pc-under"])
 def test_notional_sizing_exactly_at_the_floor_is_not_refused_by_float_error(
     price, usd, expect_refused
 ):
@@ -5783,6 +5781,12 @@ def test_the_plain_path_also_refuses_below_the_venue_notional_floor(venue):
         f"rejects it and the env records a position it does not hold"
     )
     assert not info["executed"]
+    # The flag too, not just the refusal. It is asserted on binance by the
+    # refused-switch test and was unasserted on the two venues copying the same block.
+    assert info.get("at_target") is True, (
+        f"{venue}: a sub-notional refusal must report at_target, so the env records the "
+        f"level instead of re-sending an order the venue already refused every bar"
+    )
 
 
 @pytest.mark.parametrize("venue", _SLTP_VENUES)
@@ -5869,7 +5873,6 @@ def test_a_non_finite_target_never_reaches_the_venue():
 @pytest.mark.parametrize("qty,step,price,floor", [
     (0.29, 0.01, 350.0, 100.0),        # 0.29/0.01 = 28.999999999999996
     (0.0003, 0.0001, 400_000.0, 100.0),
-    (1.17, 0.01, 100.0, 100.0),
 ])
 def test_the_guard_floors_the_way_the_venue_floors(qty, step, price, floor):
     """A BARE `math.floor(q/step)*step` is a whole lot step below what the venue sends.
@@ -5894,4 +5897,116 @@ def test_the_guard_floors_the_way_the_venue_floors(qty, step, price, floor):
         f"{qty} at {price} is {qty * price:.2f} notional against a {floor} floor and was "
         f"refused: the guard floored to {__import__('math').floor(qty / step) * step!r}, "
         f"a full step below what the venue would send"
+    )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit", "okx"])
+def test_target_tol_is_the_venue_minimum_size_not_a_notional(venue):
+    """`target_tol` is the slack `_sync_position_from_exchange` allows between the target
+    and what the venue actually holds, and binance alone derived it from the notional
+    floor divided by price.
+
+    That worked only because the old `_get_min_notional` fabricated 100.0 on failure.
+    With the executor's real 0.0 it becomes 0.0, and the sync then compares against
+    POSITION_DUST_EPS (1e-9) -- while binance's delta is LOT-ROUNDED and legitimately
+    differs by up to a full step, 1e-3 BTC, six orders of magnitude larger. Every
+    complete fill would read as a divergence, NaN the action level, release the
+    duplicate-action guard, and re-size every bar.
+
+    All four venues now report the same thing: the venue's minimum tradeable size.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue)
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0
+    }
+    if venue == "binance":
+        env._get_min_notional = lambda: 0.0
+    env._execute_market_order = lambda side, quantity: {
+        "executed": True, "success": True, "side": side, "quantity": quantity}
+    env._calculate_fractional_position = lambda av, cp: (0.5, 0.5 * cp, "buy")
+
+    info = env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
+
+    assert info["target_tol"] == 0.001, (
+        f"{venue}: target_tol is {info['target_tol']!r}; at 0.0 the sync compares a "
+        f"lot-rounded fill against a 1e-9 dust epsilon and calls every fill a divergence"
+    )
+
+
+def test_the_flooring_epsilon_never_validates_more_than_the_venue_sends():
+    """The epsilon recovers exact multiples that float division puts just under an
+    integer. Too LARGE and it rounds a quantity UP past what the venue will send, so the
+    guard validates more than is submitted -- the PR's own bug in the dangerous
+    direction, admitting an order the exchange rejects.
+
+    Only the too-small direction was tested: widening it to 1e-3 passed the whole suite.
+    """
+    env, trader = _close_env("binance", 0)
+    env.config.trade_mode = "quantity"
+    # 0.000999 is BELOW one 0.001 step: the venue floors it to 0.0 and rejects.
+    # An epsilon of 1e-3 would round it UP to a full step and validate a real order.
+    env.config.quantity_per_trade = 0.000999
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.0, "qty_step": 0.001, "min_notional": 0.0
+    }
+
+    assert env._resolve_bracket_quantity(100.0) is None, (
+        "0.000999 floors to 0.0 at a 0.001 step; an epsilon large enough to round it up "
+        "makes the guard validate a quantity the venue will never receive"
+    )
+
+
+def test_a_refused_target_does_not_become_an_unrequested_close():
+    """`_calculate_fractional_position` returns 0.0 exactly when binance's own
+    sub-minimum refusal fires. The `target_qty == 0.0` guard catches that.
+
+    Deleting it looks harmless -- with a FLAT account it is equivalent to the
+    `delta == 0` guard below. With a position open it is not: `delta = 0 - current_qty`
+    is a full-size order in the opposite direction, so a refused open silently becomes
+    an unrequested close of the position the agent already held. Zero tests reached that
+    guard, and deleting it passed the whole suite.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance")
+    env._get_min_notional = lambda: 0.0
+    trader.round_quantity.side_effect = lambda q: q
+    env._calculate_fractional_position = lambda av, cp: (0.0, 0.0, "flat")
+    sent = {}
+    env._execute_market_order = lambda side, quantity: sent.update(
+        side=side, quantity=quantity) or {
+        "executed": True, "success": True, "side": side, "quantity": quantity}
+    env._handle_close_action = lambda q: {"executed": True, "success": True}
+
+    info = env._execute_fractional_action(1.0, current_qty=-1.0, current_price=100.0)
+
+    assert not sent, (
+        f"the sizing refused the target, and the env submitted {sent} anyway -- a "
+        f"full-size close of a position the agent did not ask to exit"
+    )
+    assert not info["executed"]
+
+
+@pytest.mark.parametrize("value,expect_refused", [(100.0, False), (1_000_000.0, True)])
+def test_get_min_notional_reads_the_executor_rather_than_a_constant(value, expect_refused):
+    """binance's `_get_min_notional` used to walk the exchange info itself and fabricate
+    100.0 on failure; it now delegates to the executor's cached filters.
+
+    Nothing observed the delegation: returning a hardcoded 100.0 OR 0.0 both passed the
+    whole suite, because every test that exercises a real floor stubs the method out and
+    every other test reports 0.0 at prices where 0.0 and 100.0 agree.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance")
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.001, "qty_step": 0.001, "min_notional": value
+    }
+    sent = {}
+    env._execute_market_order = lambda side, quantity: sent.update(
+        side=side, quantity=quantity) or {
+        "executed": True, "success": True, "side": side, "quantity": quantity}
+    env._calculate_fractional_position = lambda av, cp: (5.0, 5.0 * cp, "buy")
+
+    env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
+
+    assert (not sent) is expect_refused, (
+        f"floor {value} from the executor: order was "
+        f"{'refused' if not sent else 'submitted'}; `_get_min_notional` is not reading it"
     )

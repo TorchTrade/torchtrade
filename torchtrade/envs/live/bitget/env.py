@@ -190,7 +190,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
 
         # The venue's notional floor, on the floored quantity actually sent (#414).
         min_notional = float(lot_size["min_notional"])
-        if min_notional > 0 and amount * current_price < min_notional * (1 - 1e-9):
+        if min_notional > 0 and amount * current_price < min_notional:
             return self._create_trade_info(executed=False, at_target=True)
 
         # Execute market order

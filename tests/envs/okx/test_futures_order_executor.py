@@ -350,3 +350,20 @@ class TestOKXFuturesOrderClass:
         )
         executor.trade(side=side, quantity=0.001, reduce_only=reduce_only)
         assert mock_okx_trade_client.place_order.call_args[1]["posSide"] == expected_pos_side
+
+    def test_the_lazy_lot_size_fetch_also_reports_the_notional_floor(
+        self, order_executor, mock_okx_public_client
+    ):
+        """okx caches the lot size twice, like bybit: once at construction inside the
+        tick-size fetch, once lazily when that first call threw.
+
+        The lazy write was never executed by any test, so a wrong `min_notional` there
+        survived the whole suite -- and 999999.0 would refuse every okx bracket forever,
+        on the path taken precisely when the venue was flaky at startup.
+        """
+        order_executor._lot_size_cache = None          # force the lazy path
+        lot = order_executor.get_lot_size()
+        assert lot["min_notional"] == 0.0, (
+            "the lazy fetch reports a floor okx does not have; its derivatives bind on "
+            "minSz/lotSz"
+        )
