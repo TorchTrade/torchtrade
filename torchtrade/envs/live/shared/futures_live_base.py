@@ -210,10 +210,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     def _resolve_bracket_quantity(self, current_price: float) -> float | None:
         """The quantity an SLTP bracket opens with, for all four futures venues (#288).
 
-        None means the account cannot be sized against, and the caller reports a FAILED
-        TRADE rather than halting. The plain path raises inside the `_halting` closure so
-        the same input becomes a halt instead -- a divergence this fold preserves rather
-        than endorses (#416).
+        None means the venue would reject the ORDER -- sizing produced nothing, or the
+        quantity is below a venue minimum -- and the caller reports a failed trade.
+
+        An unusable ACCOUNT is not that case: it raises inside the `_halting` closure, as
+        the plain path does, so the halt policy decides (#416).
         """
         # Every mode goes through the venue-minimum refusal below. The two fixed-size
         # modes returned early and skipped it, which is the same "validated one thing,
@@ -230,19 +231,30 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         if self.config.trade_mode != "fractional":
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
-        # total_margin_balance, not total_wallet_balance: binance's wallet figure excludes
-        # unrealized PnL and would under-size. Under `_halting` -- the read that SIZES a
-        # bracket (#295).
+        # The VERDICT goes INSIDE the closure, as the plain path's does. Validating after
+        # `_halting` returns is the "guard hoisted one frame up" that its own comment
+        # warns about, and here it cost two things (#416): the closure returned
+        # successfully, so the unusable value reached the store and became the last
+        # CONFIRMED read a grace period would go on serving; and nothing raised, so the
+        # bar was never flagged unknown, the outage counter never advanced, and a
+        # permanently broken balance feed refused every open forever without ever
+        # truncating. The plain path, for the same input, did neither.
+        def read_balance():
+            # total_margin_balance, not total_wallet_balance: binance's wallet figure
+            # excludes unrealized PnL and would under-size (#295).
+            info = self.trader.get_account_balance()
+            total_balance = float(info["total_margin_balance"])
+            # isfinite, not just `<= 0`: `nan <= 0` is False, so a NaN balance would size
+            # a NaN bracket (#347). Callers validate current_price before calling.
+            if not math.isfinite(total_balance) or total_balance <= 0:
+                raise ValueError(
+                    f"cannot size a bracket against a portfolio value of {total_balance}"
+                )
+            return info
+
         balance = float(
-            self._halting(self.trader.get_account_balance, cache_key="balance")[
-                "total_margin_balance"
-            ]
+            self._halting(read_balance, cache_key="balance")["total_margin_balance"]
         )
-        # isfinite, not just `<= 0`: `nan <= 0` is False, so a NaN balance would size a
-        # NaN bracket (#347). Callers validate current_price before calling.
-        if not math.isfinite(balance) or balance <= 0:
-            logger.error(f"Cannot size against balance={balance} for {self.config.symbol}")
-            return None
 
         # Reserve what the trader will CHARGE: ReplayOrderExecutor carries its own rate,
         # so reserving the venue constant refused every open for a higher-fee caller (#278).

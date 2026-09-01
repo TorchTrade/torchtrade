@@ -4446,11 +4446,12 @@ def test_a_bracket_that_cannot_be_sized_is_a_failed_trade_on_every_venue(venue):
     indistinguishable.
     """
     env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
-    env.config.trade_mode = "fractional"
-    trader.get_account_balance.return_value = {
-        "available_balance": 0.0, "total_margin_balance": 0.0,
-        "total_wallet_balance": 0.0, "total_maintenance_margin": 0.0,
-    }
+    # An ORDER-level refusal: the account is fine, the quantity is below what the venue
+    # will accept. It used to be a 0.0 balance, but that is an ACCOUNT-level failure and
+    # now halts under policy like the plain path's (#416) -- a different contract, tested
+    # directly below. Sizing has to fail for a reason the caller can report.
+    env.config.trade_mode = "quantity"
+    env.config.quantity_per_trade = 1e-9
 
     td = env.reset()
     env.active_stop_loss, env.active_take_profit = 111.0, 222.0
@@ -4463,6 +4464,69 @@ def test_a_bracket_that_cannot_be_sized_is_a_failed_trade_on_every_venue(venue):
         f"{venue} recorded position {env.position.current_position} for a bracket that "
         f"was never placed; the next bar's duplicate-action guard trusts that"
     )
+
+
+@pytest.mark.parametrize("venue",
+                         [c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS])
+@pytest.mark.parametrize("balance", [0.0, -1.0, float("nan"), float("inf")],
+                         ids=["zero", "negative", "nan", "inf"])
+def test_an_unusable_balance_halts_the_sltp_sizing_too(venue, balance):
+    """An unusable ACCOUNT halts, on the SLTP path as on the plain one (#416).
+
+    The verdict has to be raised INSIDE the `_halting` closure. Hoisted one frame up --
+    which is what this path did -- the closure returns successfully and two things go
+    wrong at once, both of them silent. This asserts the halt; the two tests below assert
+    the consequences, because the halt alone does not prove either.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
+    env.config.trade_mode = "fractional"
+    trader.get_account_balance.return_value = {
+        "available_balance": balance, "total_margin_balance": balance,
+        "total_wallet_balance": balance, "total_maintenance_margin": 0.0,
+    }
+
+    with pytest.raises(LiveObservationHalt):
+        env._resolve_bracket_quantity(100.0)
+
+
+def test_an_unusable_balance_is_not_stored_as_the_last_confirmed_read():
+    """#416(1): the value the guard just rejected must not be what a grace period serves.
+
+    `_halting` stores on the way OUT of a successful read, so a verdict reached after it
+    returns has already been overtaken -- and `_reset` reads `available_balance` from
+    that same slot. `equity == 0.0` is what a venue reports while liquidating you.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
+    env.config.trade_mode = "fractional"
+    trader.get_account_balance.return_value = {
+        "available_balance": 0.0, "total_margin_balance": 0.0,
+        "total_wallet_balance": 0.0, "total_maintenance_margin": 0.0,
+    }
+
+    with pytest.raises(LiveObservationHalt):
+        env._resolve_bracket_quantity(100.0)
+
+    assert "balance" not in env._last_confirmed_read
+
+
+def test_an_unusable_balance_counts_as_an_outage():
+    """#416(2): a read that produces nothing usable is an outage, and must be counted.
+
+    Because the old closure returned successfully, `_status_unknown_this_step` was never
+    set: a permanently broken balance feed failed every SLTP open forever, with no
+    `status_unknown` in the observation and no truncation. The plain path truncates.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
+    env.config.trade_mode = "fractional"
+    trader.get_account_balance.return_value = {
+        "available_balance": 0.0, "total_margin_balance": 0.0,
+        "total_wallet_balance": 0.0, "total_maintenance_margin": 0.0,
+    }
+
+    with pytest.raises(LiveObservationHalt):
+        env._resolve_bracket_quantity(100.0)
+
+    assert env._status_unknown_this_step is True
 
 
 def test_an_unrecognised_trade_mode_refuses_rather_than_sizing_as_fractional():
@@ -4570,21 +4634,6 @@ def test_the_sltp_fold_did_not_move_a_bracket_quantity(venue, expected):
     assert got == pytest.approx(expected, rel=1e-9), (
         f"{venue}'s bracket now sizes {got!r} where it sized {expected!r} before the fold"
     )
-
-
-@pytest.mark.parametrize("balance", [0.0, -5.0, float("nan"), float("inf")],
-                         ids=["zero", "negative", "nan", "inf"])
-def test_an_unusable_balance_refuses_to_size_a_bracket(balance):
-    """None, not a raise, and not a number.
-
-    The plain path raises inside the `_halting` closure so an unusable balance becomes a
-    halt; this path returns None and the caller reports a failed trade. That asymmetry is
-    pre-existing and deliberate, so it is asserted rather than left to be discovered --
-    "fixing" it on one venue would diverge halt handling by venue with nothing noticing.
-    """
-    cls = _sole(importlib.import_module("torchtrade.envs.live.binance.env_sltp"),
-                "TorchTradingEnv")
-    assert _bracket_stub(cls, balance=balance)._resolve_bracket_quantity(100.0) is None
 
 
 @pytest.mark.parametrize("fee", [0.0007, 0.0],
