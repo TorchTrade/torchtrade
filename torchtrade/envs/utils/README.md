@@ -46,13 +46,18 @@ binance_tf = timeframe_to_binance(tf)  # "1d"
 Discrete action space mappings for different trading strategies.
 
 **Functions:**
-- `create_alpaca_sltp_action_map(stoploss_levels, takeprofit_levels)`: long-only bracket
-  map of `(sl_pct, tp_pct)`
 - `create_sltp_action_map(stoploss_levels, takeprofit_levels)`: bracket map of
   `(side, sl_pct, tp_pct)`; pass `include_short_positions=True` for the short half,
   which is off by default
 
-Neither is a BUY/SELL/HOLD map. Index 0 is the flat/no-bracket action; the long grid adds
+One builder, for spot and futures alike. There was an alpaca-specific wrapper that
+returned `(sl_pct, tp_pct)` 2-tuples by discarding the `side` field, and the CLOSE
+marker rode in that field — so `include_close_action=True` handed the policy a slot
+byte-identical to HOLD
+([#418](https://github.com/TorchTrade/torchtrade/issues/418)). Long-only is
+`include_short_positions=False`, which says what it means.
+
+This is not a BUY/SELL/HOLD map. Index 0 is the flat/no-bracket action; the long grid adds
 `len(sl) * len(tp)` entries, and `create_sltp_action_map(..., include_short_positions=True)`
 adds that many again for the short side.
 
@@ -69,16 +74,16 @@ tuples land at permuted indices and the index is what the policy emits.
 
 **Example:**
 ```python
-from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map
+from torchtrade.envs.utils.action_maps import create_sltp_action_map
 
 # The map PRESERVES the sign it is given -- it does not normalise -- and these values
 # are fed straight to calculate_bracket_prices. A positive stop here puts a long's stop
 # ABOVE its entry, so stoploss levels are negative, matching what the configs validate.
-action_map = create_alpaca_sltp_action_map([-0.02], [0.05])
-# {0: (None, None), 1: (-0.02, 0.05)}
+action_map = create_sltp_action_map([-0.02], [0.05])
+# {0: (None, None, None), 1: ('long', -0.02, 0.05)}
 #   index 0 -> stay flat; index 1 -> enter with a 2% stop and a 5% target
 
-sl_pct, tp_pct = action_map[1]
+side, sl_pct, tp_pct = action_map[1]
 ```
 
 ### `sltp_helpers.py`
@@ -171,9 +176,9 @@ Performance metrics.
 
 ```python
 from torchtrade.envs.offline import SequentialTradingEnvSLTP, SequentialTradingEnvSLTPConfig
-from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map
+from torchtrade.envs.utils.action_maps import create_sltp_action_map
 
-action_map = create_alpaca_sltp_action_map([-0.02, -0.05], [0.05, 0.10])
+action_map = create_sltp_action_map([-0.02, -0.05], [0.05, 0.10])
 print(f"{len(action_map)} bracket actions, e.g. {action_map[1]}")
 
 config = SequentialTradingEnvSLTPConfig(

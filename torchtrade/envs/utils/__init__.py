@@ -15,7 +15,6 @@ from torchtrade.envs.utils.timeframe import (
 )
 from torchtrade.envs.utils.action_maps import (
     create_sltp_action_map,
-    create_alpaca_sltp_action_map,
 )
 from torchtrade.envs.utils.sltp_helpers import (
     calculate_bracket_prices,
@@ -43,7 +42,6 @@ __all__ = [
     "binance_to_timeframe",
     # Action maps
     "create_sltp_action_map",
-    "create_alpaca_sltp_action_map",
     # SL/TP helpers
     "calculate_bracket_prices",
     "SLTPMixin",

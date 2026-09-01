@@ -17,7 +17,7 @@ from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass, TradeMo
 from tensordict import TensorDictBase
 from torchrl.data import Categorical
 from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
-from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map
+from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 
 
@@ -120,11 +120,17 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Create action map from SL/TP combinations
         self.stoploss_levels = list(config.stoploss_levels)
         self.takeprofit_levels = list(config.takeprofit_levels)
-        self.action_map = create_alpaca_sltp_action_map(
+        # The shared builder, not an alpaca-only wrapper around it. That wrapper
+        # dropped the `side` field to hand back 2-tuples, and the CLOSE marker rode in
+        # that field -- so `include_close_action=True` produced a slot byte-identical to
+        # HOLD (#418). Long-only is expressed by `include_short_positions=False`, which
+        # is what it means, rather than by discarding the side of every action.
+        self.action_map = create_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
+            include_short_positions=False,
             include_hold_action=config.include_hold_action,
-            include_close_action=config.include_close_action
+            include_close_action=config.include_close_action,
         )
 
         # Categorical action spec: 0=HOLD (if included), 1..N = SL/TP combinations
@@ -163,9 +169,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Eagerly update position from trade result so the rest of this step
         # sees the new state without waiting for the next sync cycle.
         if trade_info["executed"] and trade_info.get("success") is not False:
-            # Alpaca's action map drops the side (long-only spot), so a bracket tuple
-            # targets a long and the close action's (None, None) targets flat.
-            self._record_sltp_position("long" if action_tuple[0] is not None else None)
+            self._record_sltp_position(action_tuple[0])
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -208,33 +212,45 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             )
             new_price = current_price
 
-        # Convert action_tuple to numeric action for history
-        action_value = 1.0 if action_tuple != (None, None) else 0.0
+        # Long-only, so CLOSE and HOLD both record flat -- and they are now distinct
+        # actions rather than the same tuple.
+        action_value = 1.0 if action_tuple[0] == "long" else 0.0
 
         return self._record_and_score(
             next_tensordict, price=new_price, action=action_value,
             portfolio_value=new_portfolio_value, position=new_qty,
         )
 
-    def _execute_trade_if_needed(self, action_tuple: Tuple[Optional[float], Optional[float]]) -> Dict:
+    def _execute_trade_if_needed(self, action_tuple: Tuple[Optional[str], Optional[float], Optional[float]]) -> Dict:
         """Execute trade if position change is needed.
 
         Args:
-            action_tuple: (stop_loss_pct, take_profit_pct) or (None, None) for HOLD
+            action_tuple: (side, stop_loss_pct, take_profit_pct); (None, None, None) is HOLD
 
         Returns:
             Dict with trade execution info
         """
         trade_info = {"executed": False, "amount": 0, "side": None, "success": None}
 
-        stop_loss_pct, take_profit_pct = action_tuple
+        side, stop_loss_pct, take_profit_pct = action_tuple
 
-        # HOLD action or already in position (Alpaca is long-only, so position=1 means locked)
-        if action_tuple == (None, None) or self.position.current_position == 1:
+        # HOLD action
+        if side is None:
             return trade_info
 
-        # Position locking: ignore all actions while in position
+        # Position locking: ignore all actions while in position. Above CLOSE, as on the
+        # four futures venues -- a locked position exits via SL/TP only.
         if self.config.lock_position_until_sltp and self.position.current_position != 0:
+            return trade_info
+
+        # Inherited from SLTPMixin, unchanged: alpaca's executor has close_position() and
+        # the same refused-close contract applies. Must sit above the in-position guard
+        # below, which is the reason CLOSE did nothing even once it had a side to carry.
+        if side == "close":
+            return self._close_action(trade_info)
+
+        # Already in position (Alpaca is long-only, so position=1 means locked)
+        if self.position.current_position == 1:
             return trade_info
 
         # BUY with SL/TP bracket order
