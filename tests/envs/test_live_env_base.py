@@ -4564,7 +4564,9 @@ def test_reset_cannot_seed_the_balance_cache_with_a_value_sizing_would_refuse(ba
 
 
 @pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
-def test_a_grace_budget_does_not_ride_out_an_account_the_venue_says_is_empty(sltp):
+@pytest.mark.parametrize("bad", [0.0, -5.0, float("nan"), float("inf"), "n/a", None],
+                         ids=["zero", "negative", "nan", "inf", "unparseable", "none"])
+def test_a_grace_budget_does_not_ride_out_an_account_the_venue_says_is_empty(sltp, bad):
     """Grace is for a venue that cannot be READ, not for an answer we dislike.
 
     An unusable balance raises inside the `_halting` closure so it is never cached -- but
@@ -4574,6 +4576,13 @@ def test_a_grace_budget_does_not_ride_out_an_account_the_venue_says_is_empty(slt
     produced a 97.96-unit long on the plain path.
 
     Both paths, because the fold made it one line and the plain path had the bug first.
+
+    Every UNUSABLE shape, because the first fix guarded only the invalid-number branch:
+    `float("n/a")` raises before the eviction line is reached, so the stale balance stayed
+    cached and grace sized an order from it anyway. Same bug, one line up, for a value
+    that cannot be parsed rather than one that parses to something impossible. Charlie
+    reproduced it on all four venues and both paths; `None` is here because it fails
+    through TypeError rather than ValueError.
     """
     env, trader = _real_futures_env(budget=2, venue="binance", sltp=sltp)
     env.config.trade_mode = "fractional"
@@ -4583,9 +4592,9 @@ def test_a_grace_budget_does_not_ride_out_an_account_the_venue_says_is_empty(slt
     env.reset()
     assert "balance" in env._last_confirmed_read, "setup: a healthy read must be cached"
 
-    # The venue ANSWERS, and the answer is that the account is gone.
+    # The venue ANSWERS, and the answer is unusable.
     trader.get_account_balance.return_value = dict(
-        healthy, total_margin_balance=0.0, available_balance=0.0
+        healthy, total_margin_balance=bad, available_balance=bad
     )
 
     # Through the method that actually reaches `trader.trade`, not the sizing helper --

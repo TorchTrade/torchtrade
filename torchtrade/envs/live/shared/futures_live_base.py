@@ -181,21 +181,28 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """
         def read_balance():
             info = self.trader.get_account_balance()
-            # Coerce before checking, not for the callers: `math.isfinite("1000.0")` is a
-            # TypeError, so an adapter reporting strings crashed on a good balance. The
-            # dict is returned untouched, so callers still convert.
-            total_balance = float(info["total_margin_balance"])
+            # KeyError deliberately not caught here or in `_halting`: a venue that omits
+            # the field is a config error, not an account state.
+            raw = info["total_margin_balance"]
+            # ONE verdict for every way the balance can be unusable. Coercion failure
+            # belongs inside it: `float()` raising ahead of the eviction left the stale
+            # balance cached, `_halting` caught the ValueError, and grace sized a live
+            # order from it -- this same bug, one line up, for an unparseable value
+            # rather than an invalid number.
+            #
             # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
             # balance sizes an inf target (#277, #347).
-            if not math.isfinite(total_balance) or total_balance <= 0:
+            try:
+                usable = math.isfinite(float(raw)) and float(raw) > 0
+            except (TypeError, ValueError):
+                usable = False
+            if not usable:
                 # Drop the cached balance too -- the same invalidation
-                # `_handle_close_action` and `_mark_flat` already do. A venue answering
-                # 0, negative or NaN is not one whose EARLIER equity we may still size
-                # against, on this bar or on a later grace bar (#416).
+                # `_handle_close_action` and `_mark_flat` already do. A venue answering 0,
+                # negative, NaN or gibberish is not one whose EARLIER equity we may still
+                # size against, on this bar or on a later grace bar (#416).
                 self._last_confirmed_read.pop("balance", None)
-                raise ValueError(
-                    f"cannot size against a portfolio value of {total_balance}"
-                )
+                raise ValueError(f"cannot size against a portfolio value of {raw}")
             return info
 
         return self._halting(read_balance, cache_key="balance")
