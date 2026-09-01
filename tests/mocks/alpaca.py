@@ -161,6 +161,20 @@ class MockTradingClient:
         self.orders[order.id] = order
         self.order_history.append(order)
 
+        # A bracket/OTO entry leaves WORKING child legs at the venue, holding the
+        # inventory until one fills or is cancelled. Modelled because the executor now
+        # clears them before closing (#418): without them that branch is unreachable and
+        # a test of it would assert a default rather than a behaviour (#421).
+        for leg in ("take_profit", "stop_loss"):
+            if getattr(request, leg, None) is not None:
+                child = MockOrder(
+                    symbol=symbol,
+                    side=MockOrderSide.SELL if is_buy else MockOrderSide.BUY,
+                    status=MockOrderStatus.NEW,
+                    qty=qty,
+                )
+                self.orders[child.id] = child
+
         # Update position and cash
         if order.side == MockOrderSide.BUY:
             self._add_position(symbol, order.filled_qty, order.filled_avg_price)
@@ -225,14 +239,32 @@ class MockTradingClient:
         return list(self.positions.values())
 
     def get_orders(self, request: Any) -> List[MockOrder]:
-        """Get orders based on request filters."""
-        return [o for o in self.orders.values() if o.status == MockOrderStatus.NEW]
+        """Get orders based on request filters.
+
+        The symbol filter is honoured. While it was ignored, swapping the executor's
+        per-id cancel for the account-wide `cancel_orders()` -- the exact thing its
+        comment says would kill another symbol's orders -- passed the whole suite.
+        """
+        symbols = getattr(request, "symbols", None)
+        return [o for o in self.orders.values()
+                if o.status == MockOrderStatus.NEW
+                and (not symbols or o.symbol in symbols)]
 
     def cancel_orders(self):
-        """Cancel all open orders."""
+        """Cancel all open orders. Account-wide, as the real client is."""
         for order_id, order in list(self.orders.items()):
             if order.status == MockOrderStatus.NEW:
                 order.status = MockOrderStatus.CANCELED
+
+    def cancel_order_by_id(self, order_id):
+        """Cancel ONE order. Modelled because the real client has it and the executor
+        uses it to clear a bracket's working legs symbol-scoped, rather than reaching for
+        the account-wide cancel-all (#289)."""
+        if self.simulate_failures:
+            raise Exception("Simulated cancel failure")
+        order = self.orders.get(order_id)
+        if order is not None and order.status == MockOrderStatus.NEW:
+            order.status = MockOrderStatus.CANCELED
 
     def close_position(self, symbol_or_asset_id: str, close_options: Any = None):
         """Close a position."""

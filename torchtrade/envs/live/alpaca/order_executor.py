@@ -7,7 +7,6 @@ from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus, TimeInForce, OrderClass
 from alpaca.trading.requests import (
-    ClosePositionRequest,
     GetOrdersRequest,
     LimitOrderRequest,
     MarketOrderRequest,
@@ -351,13 +350,24 @@ class AlpacaOrderClass:
             List of open orders
         """
         try:
-            request = GetOrdersRequest(
-                status=QueryOrderStatus.OPEN, symbols=[self.symbol]
-            )
-            return self.client.get_orders(request)
+            return self._working_orders()
         except Exception as e:
             logger.error(f"Error getting open orders: {str(e)}", exc_info=True)
             return []
+
+    def _working_orders(self) -> List:
+        """Open orders for this symbol, RAISING if the lookup itself failed.
+
+        `get_open_orders()` swallowing the error and returning [] is the right shape for a
+        caller that just wants a list. It is exactly wrong for a caller that must not
+        confuse "there are no legs" with "I could not tell" -- which is what the close
+        below has to distinguish, since one of those is safe to close underneath and the
+        other is not.
+        """
+        request = GetOrdersRequest(
+            status=QueryOrderStatus.OPEN, symbols=[self.symbol]
+        )
+        return self.client.get_orders(request)
         
     def cancel_open_orders(self) -> bool:
         """
@@ -379,26 +389,64 @@ class AlpacaOrderClass:
             logger.error(f"Error cancelling open orders: {str(e)}", exc_info=True)
             return False
 
-    def close_position(self, qty: Optional[float] = None) -> bool:
-        """
-        Close the current position, either partially or fully.
+    def close_position(self) -> bool:
+        """Flatten the position, clearing the bracket's working legs first.
 
-        Args:
-            qty: Optional quantity to close. If None, closes entire position.
+        Full closes only. The partial form took a `qty` no caller ever passed, and the
+        leg cancel below made it unsafe: it clears EVERY leg and would then have left the
+        residual position with no stop.
 
         Returns:
             bool: True if position was closed successfully, False otherwise
         """
+        # A bracket entry leaves WORKING SL/TP child legs, and on alpaca those legs
+        # reserve the inventory: a close submitted underneath them can be rejected, and a
+        # leg that outlives the close is a live order against a position that is gone --
+        # on a long-only spot account, a surviving stop is a sell with nothing to sell.
+        # The four futures venues need none of this; they close reduce_only.
+        #
+        # By id, NOT cancel_open_orders(): that falls through to the account-wide
+        # cancel-all (#289), which would kill an unrelated symbol's orders mid-episode.
+        # Fail CLOSED on a lookup failure. `get_open_orders()` returns [] for it, and
+        # reading that as "no legs to clear" is the same fail-open shape as closing
+        # underneath them -- the outage is precisely when we cannot tell.
         try:
-            if qty is not None:
-                # Close specific quantity
-                self.client.close_position(
-                    symbol_or_asset_id=self.symbol,
-                    close_options=ClosePositionRequest(qty=str(qty)),
-                )
-            else:
-                # Close entire position
-                self.client.close_position(symbol_or_asset_id=self.symbol)
+            working = self._working_orders()
+        except Exception as e:
+            logger.error(
+                f"{self.symbol}: cannot read working orders, so refusing to close "
+                f"underneath them: {e}"
+            )
+            return False
+
+        for order in working:
+            try:
+                self.client.cancel_order_by_id(order.id)
+            except Exception:
+                # Expected, not exceptional: a bracket's TP and SL are an OCO pair, so
+                # cancelling one terminates the other and the second attempt here hits an
+                # order the venue has already closed. Warning per attempt would put a line
+                # in the operator's log on every successful close, which is how a log
+                # learns to be ignored. Whether it MATTERED is answered once, below.
+                pass
+
+        # Re-read rather than trusting the attempts: this warns only when a leg actually
+        # survived, which is the case that gets the close rejected for held shares. A
+        # failed re-read warns too -- it cannot confirm -- but does NOT refuse: the
+        # cancels have already gone out, and blocking the flatten at that point would
+        # trade a possible stranded leg for a certain stuck position.
+        try:
+            remaining = self._working_orders()
+        except Exception:
+            remaining = True
+        if remaining:
+            logger.warning(
+                f"{self.symbol}: working orders remain after cancelling; the close may "
+                f"be rejected for held shares"
+            )
+
+        try:
+            self.client.close_position(symbol_or_asset_id=self.symbol)
             return True
         except Exception as e:
             logger.error(f"Error closing position: {str(e)}", exc_info=True)

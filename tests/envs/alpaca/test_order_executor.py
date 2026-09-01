@@ -3,6 +3,8 @@
 Order execution, position management, and error handling against a mock client.
 """
 
+import logging
+
 import pytest
 import warnings
 
@@ -13,7 +15,9 @@ from torchtrade.envs.live.alpaca.order_executor import (
     OrderStatus,
     PositionStatus,
 )
-from tests.mocks.alpaca import MockTradingClient, MockOrder, MockOrderStatus, MockAsset
+from tests.mocks.alpaca import (
+    MockTradingClient, MockOrder, MockOrderSide, MockOrderStatus, MockAsset,
+)
 
 
 # Standalone by design: the shared exchange test base assumes an enum TradeMode and a
@@ -215,6 +219,109 @@ class TestAlpacaOrderClass:
 
     # --- status ---
 
+    def test_closing_clears_the_brackets_working_legs_first(self, oc, client):
+        """A bracket's SL/TP legs reserve the inventory, so the close must clear them.
+
+        Before #418 alpaca's CLOSE action was inert, so nothing ever closed mid-episode
+        underneath live legs. `_reset` and `__init__` have cancelled before closing since
+        #289; this is the third path that closes, and it had no cancel at all.
+        """
+        oc.trade(side="buy", amount=1000.0, order_type="market",
+                 stop_loss=90000.0, take_profit=110000.0)
+        legs = [o for o in client.orders.values() if o.status == MockOrderStatus.NEW]
+        assert legs, "setup: the bracket must leave working orders"
+
+        oc.close_position()
+
+        assert not [o for o in client.orders.values() if o.status == MockOrderStatus.NEW]
+        assert "BTCUSD" not in client.positions
+
+    def test_a_leg_that_will_not_cancel_does_not_abort_the_close(self, oc, client, caplog):
+        """The close reports its own outcome; a stuck leg must not skip the attempt.
+
+        Counting the attempts, because asserting only that the close succeeded passes
+        with the cancel loop deleted entirely -- the test would then pin nothing.
+        """
+        oc.trade(side="buy", amount=1000.0, order_type="market",
+                 stop_loss=90000.0, take_profit=110000.0)
+        attempts = []
+
+        def stuck(order_id):
+            attempts.append(order_id)
+            raise RuntimeError("leg stuck")
+
+        client.cancel_order_by_id = stuck
+
+        with caplog.at_level(logging.WARNING):
+            assert oc.close_position() is True
+
+        assert len(attempts) == 2, "both bracket legs must be attempted"
+        assert "working orders remain" in caplog.text
+        assert "BTCUSD" not in client.positions
+
+    def test_a_lookup_failure_refuses_the_close_rather_than_assuming_no_legs(self, oc, client):
+        """`get_open_orders()` returns [] on error, which must not read as "no legs".
+
+        Fail-open here is the same defect as closing underneath the legs: an order-API
+        outage is exactly when we cannot tell whether anything is holding the shares, and
+        [] says confidently that nothing is. The close must not go out.
+        """
+        oc.trade(side="buy", amount=1000.0, order_type="market",
+                 stop_loss=90000.0, take_profit=110000.0)
+        closes = []
+        client.close_position = lambda **kw: closes.append(kw)
+
+        def blind(request):
+            raise RuntimeError("order API down")
+
+        client.get_orders = blind
+
+        assert oc.close_position() is False
+        assert closes == [], "the close went out under legs we could not see"
+
+    def test_a_normal_close_does_not_warn(self, oc, client, caplog):
+        """The OCO sibling's 'already cancelled' must not log on every successful close.
+
+        Cancelling one leg of a bracket terminates the other at the venue, so the second
+        attempt in the loop always fails. Warning per attempt would put a line in the
+        operator's log every single time -- which is how a log learns to be ignored.
+        """
+        oc.trade(side="buy", amount=1000.0, order_type="market",
+                 stop_loss=90000.0, take_profit=110000.0)
+        first = {"done": False}
+
+        def oco(order_id):
+            # The venue's behaviour: the first cancel takes both legs down, so the
+            # second call is against an order that no longer exists.
+            if first["done"]:
+                raise Exception("order is not cancelable")
+            first["done"] = True
+            for o in client.orders.values():
+                if o.status == MockOrderStatus.NEW:
+                    o.status = MockOrderStatus.CANCELED
+
+        client.cancel_order_by_id = oco
+
+        with caplog.at_level(logging.WARNING):
+            assert oc.close_position() is True
+
+        assert caplog.text == "", f"a clean close must be silent, got: {caplog.text}"
+
+    def test_the_cancel_is_scoped_to_this_symbol(self, oc, client):
+        """Another symbol's working orders must survive a close (#289).
+
+        The account-wide `cancel_orders()` would pass every other test in this file.
+        """
+        oc.trade(side="buy", amount=1000.0, order_type="market",
+                 stop_loss=90000.0, take_profit=110000.0)
+        other = MockOrder(symbol="ETHUSD", side=MockOrderSide.SELL,
+                          status=MockOrderStatus.NEW, qty=1.0)
+        client.orders[other.id] = other
+
+        oc.close_position()
+
+        assert other.status == MockOrderStatus.NEW, "an unrelated symbol was cancelled"
+
     def test_get_status_order_filled(self, oc):
         """After a market buy the order status is filled and a position exists."""
         oc.trade(side="buy", amount=1000, order_type="market")
@@ -245,14 +352,6 @@ class TestAlpacaOrderClass:
 
         assert oc.close_position() is True
         assert oc.get_status()["position_status"] is None
-
-    def test_close_position_partial(self, oc):
-        """close_position(qty=...) leaves the remainder open."""
-        oc.trade(side="buy", amount=1000, order_type="market")
-        initial_qty = oc.get_status()["position_status"].qty
-
-        assert oc.close_position(qty=initial_qty / 2) is True
-        assert oc.get_status()["position_status"].qty < initial_qty
 
     def test_close_all_positions(self, oc):
         """close_all_positions() reports success per symbol."""

@@ -23,93 +23,53 @@ from torchtrade.envs.live.alpaca.env_sltp import (
     AlpacaSLTPTorchTradingEnv,
     AlpacaSLTPTradingEnvConfig,
 )
-from torchtrade.envs.utils.action_maps import create_alpaca_sltp_action_map as combinatory_action_map
 from .mocks import MockObserver, MockTrader
 
 
+def _sltp_env(*, include_close_action=False, sl=(-0.05,), tp=(0.1,)):
+    """A constructed env, because the map under test is the one ALPACA asks for.
+
+    A helper that called the shared builder directly instead asserted only that the
+    builder honours its own arguments: flipping alpaca's `include_short_positions` to
+    True left it green.
+    """
+    env = AlpacaSLTPTorchTradingEnv(
+        config=AlpacaSLTPTradingEnvConfig(
+            symbol="BTC/USD", window_sizes=[10],
+            stoploss_levels=sl, takeprofit_levels=tp,
+            include_close_action=include_close_action,
+        ),
+        observer=MockObserver(window_sizes=[10]),
+        trader=MockTrader(initial_cash=10000.0),
+    )
+    env._wait_for_next_timestamp = lambda: None
+    return env
+
+
 class TestCombinatorActionMap:
-    """Tests for action map generation."""
+    """The action map alpaca builds. Size arithmetic belongs to the shared builder and is
+    tested against it in tests/envs/binance/test_torch_env_futures_sltp.py.
+    """
 
-    def test_action_map_basic(self):
-        """Test basic action map generation."""
-        stoploss_levels = [-0.05, -0.1]
-        takeprofit_levels = [0.05, 0.1]
+    @pytest.mark.parametrize("include_close,expected", [
+        (False, {0: (None, None, None), 1: ("long", -0.05, 0.1)}),
+        (True, {0: (None, None, None), 1: ("close", None, None), 2: ("long", -0.05, 0.1)}),
+    ])
+    def test_the_env_builds_a_long_only_map_that_keeps_the_close_marker(self, include_close, expected):
+        """No 'short' entry, and CLOSE is a real action rather than a second HOLD.
 
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
-
-        # Action 0 should be HOLD
-        assert action_map[0] == (None, None)
-        # Should have 1 + (2 * 2) = 5 actions (HOLD + 4 SL/TP combinations)
-        assert len(action_map) == 5
-
-    def test_action_map_single_level(self):
-        """Test action map with single SL/TP level."""
-        stoploss_levels = [-0.05]
-        takeprofit_levels = [0.1]
-
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
-
-        assert len(action_map) == 2  # HOLD + 1 SL/TP combination
-        assert action_map[0] == (None, None)
-        assert action_map[1] == (-0.05, 0.1)
-
-    def test_action_map_multiple_levels(self):
-        """Test action map with multiple levels."""
-        stoploss_levels = [-0.025, -0.05, -0.1]
-        takeprofit_levels = [0.05, 0.1, 0.2]
-
-        action_map = combinatory_action_map(stoploss_levels, takeprofit_levels, include_close_action=False)
-
-        # 1 HOLD + 3*3 combinations = 10 actions (no CLOSE)
-        assert len(action_map) == 10
+        The wrapper this replaced returned (sl, tp) 2-tuples, so the "close" marker had
+        nowhere to live and was dropped: `include_close_action=True` produced
+        `m[0] == m[1] == (None, None)`, widening the action space by a slot that
+        provably could not do anything (#418).
+        """
+        env = _sltp_env(include_close_action=include_close)
+        assert env.action_map == expected
+        assert env.action_spec.n == len(expected)
 
 
 class TestAlpacaSLTPTradingEnvInitialization:
     """Tests for environment initialization."""
-
-    def test_action_spec_size(self):
-        """Test that action spec has correct size."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-            stoploss_levels=(-0.025, -0.05, -0.1),
-            takeprofit_levels=(0.05, 0.1, 0.2),
-        )
-
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockTrader()
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-
-        # 1 HOLD + 3*3 SL/TP combinations = 10 actions
-        assert env.action_spec.n == 10
-
-    def test_action_map_created(self):
-        """Test that action map is correctly created."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-            stoploss_levels=(-0.02, -0.05),
-            takeprofit_levels=(0.03, 0.06),
-        )
-
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockTrader()
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-
-        # 1 HOLD + 2*2 combinations = 5 actions
-        assert len(env.action_map) == 5
-        assert env.action_map[0] == (None, None)
-
 
 class TestAlpacaSLTPTradingEnvReset:
     """Tests for environment reset."""
@@ -207,6 +167,98 @@ class TestAlpacaSLTPTradingEnvReset:
 
         assert env.active_stop_loss == 0.0
         assert env.active_take_profit == 0.0
+
+
+class TestAlpacaSLTPCloseAction:
+    """`include_close_action=True` must produce an action that flattens (#418).
+
+    Before the map switched to the shared 3-tuple builder, enabling the flag widened the
+    Categorical by one and put `(None, None)` -- HOLD's own tuple -- in the new slot. The
+    policy could emit it, and nothing happened. The two that go through `_step` are what
+    fail on a map that carries the marker but an executor that ignores it; the rest drive
+    `_execute_trade_if_needed` directly to reach branches a map cannot produce.
+    """
+
+    @pytest.fixture
+    def env(self):
+        return _sltp_env(include_close_action=True, sl=(-0.02,), tp=(0.03,))
+
+    def test_close_flattens_an_open_position(self, env):
+        """The action the flag adds must reach the venue and leave the account flat."""
+        env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+        assert env.trader.position_qty > 0, "setup: the bracket entry must fill"
+
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+        assert env.trader.position_qty == 0
+        assert env.position.current_position == 0
+        # Brackets go with the position -- a stale leg would price against a position
+        # that no longer exists.
+        assert env.active_stop_loss == 0.0
+        assert env.active_take_profit == 0.0
+        # The history row, not just the account: recording the CLOSE as a long (1.0) left
+        # the position correctly flat and the action trace quietly wrong, and passed the
+        # whole alpaca suite. `actions` feeds the reward and every offline read of what
+        # the policy did.
+        assert env.history.actions[-1] == 0.0
+
+    @pytest.mark.parametrize("outcome", ["refused", "raised"])
+    def test_a_close_the_venue_does_not_take_is_not_reported_as_a_close(self, env, outcome):
+        """Refused or raised, the position stays and the caller is told (#295).
+
+        Without `success=False` a failed close returns `success=None` -- HOLD's value --
+        and the refusal is invisible to the caller.
+        """
+        env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+        env.trader.close_position = (
+            (lambda qty=None: False) if outcome == "refused"
+            else MagicMock(side_effect=RuntimeError("venue down"))
+        )
+
+        info = env._execute_trade_if_needed(("close", None, None))
+
+        assert info["success"] is False
+        assert env.position.current_position == 1, "the position is still at the venue"
+        assert env.active_stop_loss != 0.0, "brackets must not be cleared on a failed close"
+
+    def test_a_close_on_a_flat_account_does_not_reach_the_venue(self, env):
+        """No position, no order -- and `executed` stays False so it reads as a no-op."""
+        env.trader.close_position = MagicMock()
+
+        info = env._execute_trade_if_needed(("close", None, None))
+
+        env.trader.close_position.assert_not_called()
+        assert info["executed"] is False and info["closed_position"] is False
+
+    def test_a_long_action_on_top_of_a_short_does_not_buy(self, env):
+        """Alpaca equities permit shorts, so a synced -1 is a reachable state.
+
+        The guard used to read `current_position == 1`, which a -1 falls straight through:
+        the entry then submitted a full-balance market BUY on top of the short, with
+        brackets priced for a long. Nothing covered it.
+        """
+        env.position.current_position = -1
+
+        info = env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+        assert info["executed"] is False
+        assert env.trader.position_qty == 0
+
+    def test_a_side_alpaca_cannot_fill_raises_rather_than_buying(self, env):
+        """A "short" tuple would otherwise submit a BUY -- the opposite of the action."""
+        with pytest.raises(ValueError, match="long-only"):
+            env._execute_trade_if_needed(("short", 0.02, -0.03))
+        assert env.trader.position_qty == 0
+
+    def test_close_is_ignored_while_the_position_is_locked(self, env):
+        """`lock_position_until_sltp` means SL/TP is the only exit, CLOSE included."""
+        env.config.lock_position_until_sltp = True
+        env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+        qty = env.trader.position_qty
+
+        env._step(TensorDict({"action": torch.tensor(1)}, batch_size=()))
+
+        assert env.trader.position_qty == qty
 
 
 class TestAlpacaSLTPTradingEnvStep:
