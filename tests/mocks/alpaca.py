@@ -239,8 +239,16 @@ class MockTradingClient:
         return list(self.positions.values())
 
     def get_orders(self, request: Any) -> List[MockOrder]:
-        """Get orders based on request filters."""
-        return [o for o in self.orders.values() if o.status == MockOrderStatus.NEW]
+        """Get orders based on request filters.
+
+        The symbol filter is honoured. While it was ignored, swapping the executor's
+        per-id cancel for the account-wide `cancel_orders()` -- the exact thing its
+        comment says would kill another symbol's orders -- passed the whole suite.
+        """
+        symbols = getattr(request, "symbols", None)
+        return [o for o in self.orders.values()
+                if o.status == MockOrderStatus.NEW
+                and (not symbols or o.symbol in symbols)]
 
     def cancel_orders(self):
         """Cancel all open orders. Account-wide, as the real client is."""

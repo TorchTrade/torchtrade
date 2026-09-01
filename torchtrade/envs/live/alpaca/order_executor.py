@@ -7,7 +7,6 @@ from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus, TimeInForce, OrderClass
 from alpaca.trading.requests import (
-    ClosePositionRequest,
     GetOrdersRequest,
     LimitOrderRequest,
     MarketOrderRequest,
@@ -379,12 +378,12 @@ class AlpacaOrderClass:
             logger.error(f"Error cancelling open orders: {str(e)}", exc_info=True)
             return False
 
-    def close_position(self, qty: Optional[float] = None) -> bool:
-        """
-        Close the current position, either partially or fully.
+    def close_position(self) -> bool:
+        """Flatten the position, clearing the bracket's working legs first.
 
-        Args:
-            qty: Optional quantity to close. If None, closes entire position.
+        Full closes only. The partial form took a `qty` no caller ever passed, and the
+        leg cancel below made it unsafe: it clears EVERY leg and would then have left the
+        residual position with no stop.
 
         Returns:
             bool: True if position was closed successfully, False otherwise
@@ -397,27 +396,27 @@ class AlpacaOrderClass:
         #
         # By id, NOT cancel_open_orders(): that falls through to the account-wide
         # cancel-all (#289), which would kill an unrelated symbol's orders mid-episode.
-        # `_reset` and `__init__` already cancel account-wide before closing, so this is
-        # a no-op fetch on those paths.
         for order in self.get_open_orders():
             try:
                 self.client.cancel_order_by_id(order.id)
-            except Exception as e:
-                # Not fatal, and not silent: the close below reports its own outcome, and
-                # a leg we could not cancel is exactly what makes it fail.
-                logger.warning(f"Could not cancel order {getattr(order, 'id', '?')} "
-                               f"before closing {self.symbol}: {e}")
+            except Exception:
+                # Expected, not exceptional: a bracket's TP and SL are an OCO pair, so
+                # cancelling one terminates the other and the second attempt here hits an
+                # order the venue has already closed. Warning per attempt would put a line
+                # in the operator's log on every successful close, which is how a log
+                # learns to be ignored. Whether it MATTERED is answered once, below.
+                pass
+
+        # Re-read rather than trusting the attempts: this warns only when a leg actually
+        # survived, which is the case that gets the close rejected for held shares.
+        if self.get_open_orders():
+            logger.warning(
+                f"{self.symbol}: working orders remain after cancelling; the close may "
+                f"be rejected for held shares"
+            )
 
         try:
-            if qty is not None:
-                # Close specific quantity
-                self.client.close_position(
-                    symbol_or_asset_id=self.symbol,
-                    close_options=ClosePositionRequest(qty=str(qty)),
-                )
-            else:
-                # Close entire position
-                self.client.close_position(symbol_or_asset_id=self.symbol)
+            self.client.close_position(symbol_or_asset_id=self.symbol)
             return True
         except Exception as e:
             logger.error(f"Error closing position: {str(e)}", exc_info=True)

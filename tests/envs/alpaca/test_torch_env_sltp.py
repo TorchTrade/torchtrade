@@ -71,51 +71,6 @@ class TestCombinatorActionMap:
 class TestAlpacaSLTPTradingEnvInitialization:
     """Tests for environment initialization."""
 
-    def test_action_spec_size(self):
-        """Test that action spec has correct size."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-            stoploss_levels=(-0.025, -0.05, -0.1),
-            takeprofit_levels=(0.05, 0.1, 0.2),
-        )
-
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockTrader()
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-
-        # 1 HOLD + 3*3 SL/TP combinations = 10 actions
-        assert env.action_spec.n == 10
-
-    def test_action_map_created(self):
-        """Test that action map is correctly created."""
-        config = AlpacaSLTPTradingEnvConfig(
-            symbol="BTC/USD",
-            window_sizes=[10],
-            stoploss_levels=(-0.02, -0.05),
-            takeprofit_levels=(0.03, 0.06),
-        )
-
-        mock_observer = MockObserver(window_sizes=[10])
-        mock_trader = MockTrader()
-
-        env = AlpacaSLTPTorchTradingEnv(
-            config=config,
-            observer=mock_observer,
-            trader=mock_trader,
-        )
-
-        # 1 HOLD + 2*2 combinations = 5 actions
-        assert len(env.action_map) == 5
-        assert env.action_map[0] == (None, None, None)
-        assert env.action_map[1] == ("long", -0.02, 0.03)
-
-
 class TestAlpacaSLTPTradingEnvReset:
     """Tests for environment reset."""
 

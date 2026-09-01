@@ -4266,7 +4266,7 @@ _SHARED_METHOD_OWNERSHIP = [
     # SLTP_FUTURES_ENVS), so a re-fork here would be unguarded twice over. `_mark_flat`'s
     # balance pop is a no-op for alpaca, which re-reads cash each step; the rest applies.
     *((AlpacaSLTPTorchTradingEnv, SLTPMixin, m) for m in (
-        "_resolve_action_tuple", "_record_sltp_position", "_reset_sltp_state",
+        "_reset", "_resolve_action_tuple", "_record_sltp_position", "_reset_sltp_state",
         "_close_action", "_mark_flat",
     )),
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (

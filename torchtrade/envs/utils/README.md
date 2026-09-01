@@ -50,9 +50,6 @@ Discrete action space mappings for different trading strategies.
   `(side, sl_pct, tp_pct)`; pass `include_short_positions=True` for the short half and
   `include_close_action=True` for a `("close", None, None)` slot, both off by default
 
-One builder, for spot and futures alike — long-only is `include_short_positions=False`
-([#418](https://github.com/TorchTrade/torchtrade/issues/418)).
-
 This is not a BUY/SELL/HOLD map. Index 0 is the flat/no-bracket action; the long grid adds
 `len(sl) * len(tp)` entries, and `create_sltp_action_map(..., include_short_positions=True)`
 adds that many again for the short side.
