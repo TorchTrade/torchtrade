@@ -4662,20 +4662,26 @@ def test_an_unusable_balance_is_not_stored_as_the_last_confirmed_read():
     assert "balance" not in env._last_confirmed_read
 
 
-def test_an_unusable_balance_counts_as_an_outage():
+def test_an_unusable_balance_flags_the_bar_before_it_halts():
     """#416(2). The read produced nothing usable, so the bar is unconfirmed and must say
     so -- the old code returned successfully and left the flag clear.
 
-    Deliberately asserts the FLAG and not truncation, and the reason is measured rather
-    than reasoned: the counter advances in `_finalize_step_flags`, which only runs if
-    `_step` COMPLETES, and on a readable 0.0 balance the halt leaves `_step` first. Driven
-    against a real plain futures env at budget=0, both a hold and an open action raise
-    `LiveObservationHalt` out of `step()`, so nothing reaches the counter either way.
+    The name is deliberately not "counts as an outage", and the docstring is deliberately
+    only what was measured. Three earlier attempts to explain this were wrong:
 
-    Two earlier explanations of this in this docstring were wrong -- the first implied
-    truncation would otherwise happen, the second blamed `_get_portfolio_value` reading
-    outside the halt policy, which it does not (it raises only on a non-finite equity, and
-    0.0 is finite). Hence stating only what was observed.
+    1. Claimed the flag leads to truncation here. It does not: since the eviction, an
+       unusable balance is not grace-eligible, so the halt always leaves `_step` and
+       `_finalize_step_flags` -- which owns the counter -- never runs. Driven at budget=0,
+       both a hold and an open action raise out of `step()`.
+    2. Blamed `_get_portfolio_value` for reading outside the halt policy. It does not, and
+       on a 0.0 balance it does not raise at all -- it guards non-finite equity only.
+    3. Concluded from (2) that the chain was broken. It is not. For a genuine READ
+       FAILURE with a warm cache the chain works end to end -- measured:
+       `bar1 unknown=1 counter=1`, `bar2 unknown=1 truncated=True`. That case is already
+       pinned by `test_a_real_env_flags_the_outage_and_truncates_on_the_budgeted_bar` in
+       tests/envs/test_live_observation_failsafe.py, so it is not re-tested here.
+
+    So: an unusable balance flags the bar and then halts. That is what this asserts.
     """
     env = _refused_sizing_env()
 
