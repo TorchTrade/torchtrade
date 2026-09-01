@@ -215,6 +215,34 @@ class TestAlpacaOrderClass:
 
     # --- status ---
 
+    def test_closing_clears_the_brackets_working_legs_first(self, oc, client):
+        """A bracket's SL/TP legs reserve the inventory, so the close must clear them.
+
+        Before #418 alpaca's CLOSE action was inert, so nothing ever closed mid-episode
+        underneath live legs. `_reset` and `__init__` have cancelled before closing since
+        #289; this is the third path that closes, and it had no cancel at all.
+        """
+        oc.trade(side="buy", amount=1000.0, order_type="market",
+                 stop_loss=90000.0, take_profit=110000.0)
+        legs = [o for o in client.orders.values() if o.status == MockOrderStatus.NEW]
+        assert legs, "setup: the bracket must leave working orders"
+
+        oc.close_position()
+
+        assert not [o for o in client.orders.values() if o.status == MockOrderStatus.NEW]
+        assert "BTCUSD" not in client.positions
+
+    def test_a_leg_that_will_not_cancel_does_not_abort_the_close(self, oc, client):
+        """The close reports its own outcome; a stuck leg must not skip the attempt."""
+        oc.trade(side="buy", amount=1000.0, order_type="market",
+                 stop_loss=90000.0, take_profit=110000.0)
+        client.cancel_order_by_id = lambda order_id: (_ for _ in ()).throw(
+            RuntimeError("leg stuck")
+        )
+
+        assert oc.close_position() is True
+        assert "BTCUSD" not in client.positions
+
     def test_get_status_order_filled(self, oc):
         """After a market buy the order status is filled and a position exists."""
         oc.trade(side="buy", amount=1000, order_type="market")

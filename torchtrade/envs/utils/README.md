@@ -47,8 +47,8 @@ Discrete action space mappings for different trading strategies.
 
 **Functions:**
 - `create_sltp_action_map(stoploss_levels, takeprofit_levels)`: bracket map of
-  `(side, sl_pct, tp_pct)`; pass `include_short_positions=True` for the short half,
-  which is off by default
+  `(side, sl_pct, tp_pct)`; pass `include_short_positions=True` for the short half and
+  `include_close_action=True` for a `("close", None, None)` slot, both off by default
 
 One builder, for spot and futures alike — long-only is `include_short_positions=False`
 ([#418](https://github.com/TorchTrade/torchtrade/issues/418)).

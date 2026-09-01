@@ -4260,11 +4260,11 @@ _SHARED_METHOD_OWNERSHIP = [
     # cannot: all four venues share the close, only the price acquisition forked. It was
     # three byte-identical copies (mixin, bybit, okx) until #288 -- one more than the two
     # the fold set out to remove, and the copy the `success=False` contract first missed.
-    # alpaca joins this table for the methods it genuinely INHERITS -- not `_step` or
-    # `_execute_trade_if_needed`, which it overrides for the spot reasons above. #418 made
-    # it depend on the mixin's close machinery, and without this row a re-fork onto the
-    # one venue whose close is NOT covered by the cross-venue behavioural tests (they
-    # parametrize over SLTP_FUTURES_ENVS) would be unguarded in both places at once.
+    # alpaca joins for the methods it genuinely INHERITS -- not `_step` or
+    # `_execute_trade_if_needed`, which it overrides for the spot reasons above. It is the
+    # one SLTP venue the cross-venue close tests do NOT reach (they parametrize over
+    # SLTP_FUTURES_ENVS), so a re-fork here would be unguarded twice over. `_mark_flat`'s
+    # balance pop is a no-op for alpaca, which re-reads cash each step; the rest applies.
     *((AlpacaSLTPTorchTradingEnv, SLTPMixin, m) for m in (
         "_resolve_action_tuple", "_record_sltp_position", "_reset_sltp_state",
         "_close_action", "_mark_flat",

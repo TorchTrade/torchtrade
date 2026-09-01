@@ -389,6 +389,25 @@ class AlpacaOrderClass:
         Returns:
             bool: True if position was closed successfully, False otherwise
         """
+        # A bracket entry leaves WORKING SL/TP child legs, and on alpaca those legs
+        # reserve the inventory: a close submitted underneath them can be rejected, and a
+        # leg that outlives the close is a live order against a position that is gone --
+        # on a long-only spot account, a surviving stop is a sell with nothing to sell.
+        # The four futures venues need none of this; they close reduce_only.
+        #
+        # By id, NOT cancel_open_orders(): that falls through to the account-wide
+        # cancel-all (#289), which would kill an unrelated symbol's orders mid-episode.
+        # `_reset` and `__init__` already cancel account-wide before closing, so this is
+        # a no-op fetch on those paths.
+        for order in self.get_open_orders():
+            try:
+                self.client.cancel_order_by_id(order.id)
+            except Exception as e:
+                # Not fatal, and not silent: the close below reports its own outcome, and
+                # a leg we could not cancel is exactly what makes it fail.
+                logger.warning(f"Could not cancel order {getattr(order, 'id', '?')} "
+                               f"before closing {self.symbol}: {e}")
+
         try:
             if qty is not None:
                 # Close specific quantity

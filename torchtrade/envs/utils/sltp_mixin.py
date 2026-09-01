@@ -298,7 +298,9 @@ class SLTPMixin:
         if side not in self.SIDE_DIRECTION:
             raise ValueError(f"Invalid side: {side}. Must be 'long' or 'short'.")
 
-        if side in self.SIDE_DIRECTION and self.position.current_position == self.SIDE_DIRECTION[side]:
+        # No `side in SIDE_DIRECTION and`: the raise above already returned on anything
+        # else, so the conjunct was dead and read as if the side could still be unknown.
+        if self.position.current_position == self.SIDE_DIRECTION[side]:
             return trade_info
 
         current_price = self._bracket_entry_price(current_price)

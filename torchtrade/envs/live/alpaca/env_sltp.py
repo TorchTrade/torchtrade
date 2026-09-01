@@ -158,9 +158,6 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         side = action_tuple[0]
 
         # Calculate and execute trade if needed (duplicate guard uses synced state)
-        # No `trade_info["position_closed"]`: nothing reads it. The mixin dropped it and
-        # leaving alpaca's would be this issue's own defect -- a change applied to some
-        # copies and not others -- committed while reviewing the change that made it.
         trade_info = self._execute_trade_if_needed(action_tuple)
 
         # Eagerly update position from trade result so the rest of this step
@@ -243,21 +240,17 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         if side == "close":
             return self._close_action(trade_info)
 
-        # Alpaca is spot. A "short" tuple would submit a BUY below, silently trading the
-        # opposite of what the action says, so refuse it the way the mixin does rather
-        # than relying on `include_short_positions=False` staying hardcoded upstream.
+        # Spot: a "short" tuple would submit a BUY below. Mixin parity (sltp_mixin.py).
         if side != "long":
             raise ValueError(f"Invalid side: {side!r}. Alpaca is long-only.")
 
-        # `!= 0`, not `== 1`: a -1 that somehow reached here must not fall through to an
-        # entry. Makes the `current_position == 0` in the branch below redundant.
+        # `!= 0`, not `== 1`: alpaca equities permit shorts, so a synced -1 is reachable,
+        # and under `== 1` it fell through to a full-balance BUY on top of the short.
         if self.position.current_position != 0:
             return trade_info
 
         amount = self._calculate_trade_amount("buy")
 
-        # Get current price to calculate absolute SL/TP levels
-        # Use market data to get current price
         obs = self.observer.get_observations(return_base_ohlc=True)
         current_price = float(obs["base_features"][-1, 3])  # Close price
         # This prices BOTH brackets: a NaN close sends NaN legs, and a negative one

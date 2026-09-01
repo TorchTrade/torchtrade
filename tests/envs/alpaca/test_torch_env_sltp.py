@@ -23,7 +23,6 @@ from torchtrade.envs.live.alpaca.env_sltp import (
     AlpacaSLTPTorchTradingEnv,
     AlpacaSLTPTradingEnvConfig,
 )
-from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from .mocks import MockObserver, MockTrader
 
 
@@ -220,8 +219,9 @@ class TestAlpacaSLTPCloseAction:
 
     Before the map switched to the shared 3-tuple builder, enabling the flag widened the
     Categorical by one and put `(None, None)` -- HOLD's own tuple -- in the new slot. The
-    policy could emit it, and nothing happened. These drive the env rather than the map,
-    so they fail on a map that carries the marker but an executor that ignores it.
+    policy could emit it, and nothing happened. The two that go through `_step` are what
+    fail on a map that carries the marker but an executor that ignores it; the rest drive
+    `_execute_trade_if_needed` directly to reach branches a map cannot produce.
     """
 
     @pytest.fixture
@@ -247,15 +247,24 @@ class TestAlpacaSLTPCloseAction:
         # the policy did.
         assert env.history.actions[-1] == 0.0
 
-    def test_a_refused_close_leaves_the_position_and_reports_failure(self, env):
-        """A close the venue rejects must not read as HOLD (#295's contract)."""
+    @pytest.mark.parametrize("outcome", ["refused", "raised"])
+    def test_a_close_the_venue_does_not_take_is_not_reported_as_a_close(self, env, outcome):
+        """Refused or raised, the position stays and the caller is told (#295).
+
+        Without `success=False` a failed close returns `success=None` -- HOLD's value --
+        and the refusal is invisible to the caller.
+        """
         env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
-        env.trader.close_position = lambda qty=None: False
+        env.trader.close_position = (
+            (lambda qty=None: False) if outcome == "refused"
+            else MagicMock(side_effect=RuntimeError("venue down"))
+        )
 
         info = env._execute_trade_if_needed(("close", None, None))
 
         assert info["success"] is False
         assert env.position.current_position == 1, "the position is still at the venue"
+        assert env.active_stop_loss != 0.0, "brackets must not be cleared on a failed close"
 
     def test_a_close_on_a_flat_account_does_not_reach_the_venue(self, env):
         """No position, no order -- and `executed` stays False so it reads as a no-op."""
@@ -266,16 +275,19 @@ class TestAlpacaSLTPCloseAction:
         env.trader.close_position.assert_not_called()
         assert info["executed"] is False and info["closed_position"] is False
 
-    def test_a_close_the_venue_raises_on_leaves_the_position(self, env):
-        """The outage path: the position is still there, and the caller is told."""
-        env._step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
-        env.trader.close_position = MagicMock(side_effect=RuntimeError("venue down"))
+    def test_a_long_action_on_top_of_a_short_does_not_buy(self, env):
+        """Alpaca equities permit shorts, so a synced -1 is a reachable state.
 
-        info = env._execute_trade_if_needed(("close", None, None))
+        The guard used to read `current_position == 1`, which a -1 falls straight through:
+        the entry then submitted a full-balance market BUY on top of the short, with
+        brackets priced for a long. Nothing covered it.
+        """
+        env.position.current_position = -1
 
-        assert info["success"] is False
-        assert env.position.current_position == 1
-        assert env.active_stop_loss != 0.0, "brackets must not be cleared on a failed close"
+        info = env._execute_trade_if_needed(("long", -0.02, 0.03))
+
+        assert info["executed"] is False
+        assert env.trader.position_qty == 0
 
     def test_a_side_alpaca_cannot_fill_raises_rather_than_buying(self, env):
         """A "short" tuple would otherwise submit a BUY -- the opposite of the action."""
