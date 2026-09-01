@@ -3188,7 +3188,7 @@ emergency flatten:</p>
 </tr>
 <tr>
 <td>the sizing balance / portfolio checks</td>
-<td><code>ValueError</code></td>
+<td><code>LiveObservationHalt</code> on the four futures venues, whose verdict is inside the <code>_halting</code> closure (<a href="https://github.com/TorchTrade/torchtrade/issues/416">#416</a>); bare <code>ValueError</code> on alpaca, which has no halt policy</td>
 </tr>
 <tr>
 <td>the candle close that prices SL/TP brackets</td>
