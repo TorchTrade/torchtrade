@@ -350,13 +350,24 @@ class AlpacaOrderClass:
             List of open orders
         """
         try:
-            request = GetOrdersRequest(
-                status=QueryOrderStatus.OPEN, symbols=[self.symbol]
-            )
-            return self.client.get_orders(request)
+            return self._working_orders()
         except Exception as e:
             logger.error(f"Error getting open orders: {str(e)}", exc_info=True)
             return []
+
+    def _working_orders(self) -> List:
+        """Open orders for this symbol, RAISING if the lookup itself failed.
+
+        `get_open_orders()` swallowing the error and returning [] is the right shape for a
+        caller that just wants a list. It is exactly wrong for a caller that must not
+        confuse "there are no legs" with "I could not tell" -- which is what the close
+        below has to distinguish, since one of those is safe to close underneath and the
+        other is not.
+        """
+        request = GetOrdersRequest(
+            status=QueryOrderStatus.OPEN, symbols=[self.symbol]
+        )
+        return self.client.get_orders(request)
         
     def cancel_open_orders(self) -> bool:
         """
@@ -396,7 +407,19 @@ class AlpacaOrderClass:
         #
         # By id, NOT cancel_open_orders(): that falls through to the account-wide
         # cancel-all (#289), which would kill an unrelated symbol's orders mid-episode.
-        for order in self.get_open_orders():
+        # Fail CLOSED on a lookup failure. `get_open_orders()` returns [] for it, and
+        # reading that as "no legs to clear" is the same fail-open shape as closing
+        # underneath them -- the outage is precisely when we cannot tell.
+        try:
+            working = self._working_orders()
+        except Exception as e:
+            logger.error(
+                f"{self.symbol}: cannot read working orders, so refusing to close "
+                f"underneath them: {e}"
+            )
+            return False
+
+        for order in working:
             try:
                 self.client.cancel_order_by_id(order.id)
             except Exception:
@@ -408,8 +431,15 @@ class AlpacaOrderClass:
                 pass
 
         # Re-read rather than trusting the attempts: this warns only when a leg actually
-        # survived, which is the case that gets the close rejected for held shares.
-        if self.get_open_orders():
+        # survived, which is the case that gets the close rejected for held shares. A
+        # failed re-read warns too -- it cannot confirm -- but does NOT refuse: the
+        # cancels have already gone out, and blocking the flatten at that point would
+        # trade a possible stranded leg for a certain stuck position.
+        try:
+            remaining = self._working_orders()
+        except Exception:
+            remaining = True
+        if remaining:
             logger.warning(
                 f"{self.symbol}: working orders remain after cancelling; the close may "
                 f"be rejected for held shares"

@@ -259,6 +259,26 @@ class TestAlpacaOrderClass:
         assert "working orders remain" in caplog.text
         assert "BTCUSD" not in client.positions
 
+    def test_a_lookup_failure_refuses_the_close_rather_than_assuming_no_legs(self, oc, client):
+        """`get_open_orders()` returns [] on error, which must not read as "no legs".
+
+        Fail-open here is the same defect as closing underneath the legs: an order-API
+        outage is exactly when we cannot tell whether anything is holding the shares, and
+        [] says confidently that nothing is. The close must not go out.
+        """
+        oc.trade(side="buy", amount=1000.0, order_type="market",
+                 stop_loss=90000.0, take_profit=110000.0)
+        closes = []
+        client.close_position = lambda **kw: closes.append(kw)
+
+        def blind(request):
+            raise RuntimeError("order API down")
+
+        client.get_orders = blind
+
+        assert oc.close_position() is False
+        assert closes == [], "the close went out under legs we could not see"
+
     def test_a_normal_close_does_not_warn(self, oc, client, caplog):
         """The OCO sibling's 'already cancelled' must not log on every successful close.
 
