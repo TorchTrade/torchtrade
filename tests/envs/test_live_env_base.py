@@ -2209,7 +2209,10 @@ def test_okx_clamps_a_sub_minimum_quantity_UP_to_the_venue_minimum():
 
 
 @pytest.mark.parametrize("qty,expected", [
-    (1.2345678901, 1.234567890),   # 9dp is the documented maximum, and it FLOORS
+    # abs=, not the default rel=1e-6: a 9dp truncation moves the value by <1e-9, which
+    # `approx`'s default tolerance cannot see -- deleting the ROUND_DOWN quantize
+    # entirely still passed this row.
+    (1.2345678901, 1.234567890),
     (0.5, 0.5),
     (2.0, 2.0),
 ], ids=["truncates-to-9dp", "half-share", "whole"])
@@ -2230,7 +2233,7 @@ def test_alpaca_rounds_a_fractionable_equity_to_nine_decimals(qty, expected):
                              min_trade_increment=None, price_increment=0.01)
     oc = AlpacaOrderClass(symbol="AAPL", trade_mode="quantity", client=client)
 
-    assert oc._round_qty(qty) == pytest.approx(expected)
+    assert oc._round_qty(qty) == pytest.approx(expected, abs=1e-12)
 
 
 @pytest.mark.parametrize("position_mode,reduce_only,expected", [
@@ -2283,12 +2286,15 @@ def _bitget_mark(ticker):
 
 
 @pytest.mark.parametrize("ticker,expected", [
-    ({"info": {"markPrice": "102.0"}}, 102.0),           # the mark, preferred
+    # BOTH present and DIFFERENT: without this row, inverting the priority to prefer
+    # `last` passed every bitget mark test -- brackets would price off a stale
+    # last-trade print instead of the live mark, silently.
+    ({"info": {"markPrice": "102.0"}, "last": 50.0}, 102.0),
     ({"last": 101.0}, 101.0),                            # venue OMITS a mark -> last
     ({"info": {"markPrice": None}, "last": 101.0}, 101.0),
-], ids=["mark", "no-mark-falls-back", "null-mark-falls-back"])
+], ids=["mark-wins-over-last", "no-mark-falls-back", "null-mark-falls-back"])
 def test_bitget_reports_the_mark_it_has(ticker, expected):
-    """The fallback itself is right: `last` is a real price when the venue omits a mark."""
+    """The fallback is right, and the PRIORITY matters: `last` only when there is no mark."""
     assert _bitget_mark(ticker) == pytest.approx(expected)
 
 
@@ -2299,16 +2305,77 @@ def test_bitget_reports_the_mark_it_has(ticker, expected):
     {"info": {"markPrice": "nan"}},
 ], ids=["both-absent", "zero-string-mark", "zero-last", "nan-mark"])
 def test_bitget_refuses_a_mark_price_it_does_not_have(ticker):
-    """`float(ticker.get('last', 0))` returned 0.0 from a method documented to raise.
+    """A method documented to raise returned 0.0 instead (#421).
 
-    Two ways in, and the conftest supplied both fields so neither was ever executed
-    (#421): `if mark_price:` passes the string "0" because a non-empty string is truthy,
-    and the `, 0)` default fires when both fields are absent. A zero mark divides into
-    sizing and prices both bracket legs -- binance, bybit and okx all raise rather than
-    report one, and bitget's own docstring says it does too.
+    Two ways in, and the conftest supplied both fields so neither was ever executed:
+    `if mark_price:` passes the string "0" because a non-empty string is truthy, and
+    `float(ticker.get('last', 0))`'s default fires when both fields are absent.
+
+    Scope, stated precisely because the first version of this docstring overclaimed: a
+    0.0 CANNOT currently reach sizing -- `_current_mark_price` validates finiteness and
+    `> 0` before any order is sized (#347), and `_acquire_post_bar_state` guards its own
+    read. What was broken is this method's own contract, on all four venues at once. The
+    value is parity and defence in depth for a direct caller, not a live sizing bug.
     """
     with pytest.raises(RuntimeError, match="mark price"):
         _bitget_mark(ticker)
+
+
+def _binance_mark(raw):
+    from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+    client = MagicMock()
+    client.futures_mark_price = MagicMock(
+        return_value={} if raw is None else {"markPrice": raw})
+    client.futures_change_leverage = MagicMock(return_value=_LEVERAGE_BODIES["binance"])
+    # A real LOT_SIZE, or construction fails first and the test passes on the wrong
+    # exception -- which the `match=` caught.
+    client.futures_exchange_info = MagicMock(return_value={"symbols": [
+        {"symbol": "BTCUSDT", "filters": [
+            {"filterType": "LOT_SIZE", "minQty": "0.001", "stepSize": "0.001"},
+            {"filterType": "MIN_NOTIONAL", "notional": "5"},
+        ]},
+    ]})
+    ex = BinanceFuturesOrderClass(symbol="BTCUSDT", trade_mode="quantity", demo=True,
+                                  leverage=10, client=client)
+    return ex.get_mark_price()
+
+
+def _bybit_mark(raw):
+    from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
+    client = MagicMock()
+    ticker = {} if raw is None else {"markPrice": raw, "lastPrice": raw}
+    client.get_tickers = MagicMock(
+        return_value={"retCode": 0, "result": {"list": [ticker]}})
+    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["bybit"])
+    client.switch_margin_mode = MagicMock(return_value={"retCode": 0})
+    client.switch_position_mode = MagicMock(return_value={"retCode": 0})
+    ex = BybitFuturesOrderClass(symbol="BTCUSDT", trade_mode="quantity", demo=True,
+                                leverage=10, client=client)
+    return ex.get_mark_price()
+
+
+def _okx_mark(raw):
+    ex = _okx_executor(get_mark_price=MagicMock(return_value={
+        "code": "0", "data": [{} if raw is None else {"markPx": raw}]}))
+    return ex.get_mark_price()
+
+
+_MARK_READERS = {"binance": _binance_mark, "bybit": _bybit_mark, "okx": _okx_mark}
+
+
+@pytest.mark.parametrize("venue", ["binance", "bybit", "okx"])
+@pytest.mark.parametrize("raw", ["0", "nan", None], ids=["zero-string", "nan", "absent"])
+def test_no_venue_reports_a_mark_price_it_does_not_have(venue, raw):
+    """The same rule on the other three, because my fix named only bitget.
+
+    The comment I first wrote said "every other venue raises rather than reporting one".
+    That was false on all three: binance had no guard at all (`float(ticker["markPrice"])`
+    returns 0.0 for "0"), and bybit and okx both used `if mark_price:`, which a non-empty
+    string passes. Two reviewers found it independently -- prose vouching for other
+    venues is exactly the shape that let bybit's dead guard survive (#421).
+    """
+    with pytest.raises((RuntimeError, ValueError), match="mark price"):
+        _MARK_READERS[venue](raw)
 
 
 # The direction readers, per venue. A venue absent from this table has NO coverage of

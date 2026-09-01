@@ -500,12 +500,15 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         Raises:
             RuntimeError: If mark price cannot be retrieved
         """
+        # Only the FETCH is wrapped: a refusal below is already a RuntimeError, and
+        # re-wrapping it doubled the message and logged an expected outcome as an ERROR.
         try:
             ticker = self.client.futures_mark_price(symbol=self.symbol)
-            return float(ticker["markPrice"])
         except Exception as e:
             logger.error(f"Error getting mark price: {str(e)}")
             raise RuntimeError(f"Failed to get mark price: {e}") from e
+
+        return self._validated_mark(ticker.get("markPrice"), field="markPrice")
 
     def get_open_orders(self) -> List[Dict]:
         """Get all open orders for the symbol."""

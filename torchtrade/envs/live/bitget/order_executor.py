@@ -1,4 +1,3 @@
-import math
 import logging
 
 from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
@@ -681,30 +680,21 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
         Raises:
             RuntimeError: If mark price cannot be retrieved
         """
+        # Only the FETCH is wrapped. Wrapping the verdict too logged an expected refusal
+        # at ERROR and re-wrapped it into "Failed to get mark price: <the refusal>" -- and
+        # it is what turned a missing `math` import into a message that read like a venue
+        # failure.
         try:
-            # Fetch ticker using CCXT
             ticker = self.client.fetch_ticker(self.symbol)
-
-            # Fall back to `last` only when the venue OMITS a mark, and then validate
-            # the value. `if mark_price:` alone let "0" through -- a non-empty string is
-            # truthy -- and the fallback's `, 0)` default returned 0.0 when both were
-            # absent, silently, from a method whose docstring says it raises. A zero mark
-            # divides into sizing and prices both bracket legs; every other venue raises
-            # rather than reporting one (#421).
-            raw = ticker.get('info', {}).get('markPrice')
-            if raw is None or raw == '':
-                raw = ticker.get('last')
-            price = float(raw) if raw is not None and raw != '' else 0.0
-            if not math.isfinite(price) or price <= 0:
-                raise ValueError(
-                    f"bitget reported no usable mark price for {self.symbol} "
-                    f"(markPrice/last resolved to {raw!r})"
-                )
-            return price
-
         except Exception as e:
             logger.error(f"Error getting mark price: {str(e)}")
             raise RuntimeError(f"Failed to get mark price: {e}") from e
+
+        # `last` only when the venue OMITS a mark; the value is validated either way.
+        raw = ticker.get('info', {}).get('markPrice')
+        if raw is None or raw == '':
+            raw = ticker.get('last')
+        return self._validated_mark(raw, field="markPrice/last")
 
     def get_open_orders(self) -> List[Dict]:
         """Get all open orders for the symbol using CCXT."""

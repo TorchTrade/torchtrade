@@ -539,9 +539,7 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
 
         data = response.get("data", [])
         if data:
-            mark_price = data[0].get("markPx")
-            if mark_price:
-                return float(mark_price)
+            return self._validated_mark(data[0].get("markPx"), field="markPx")
 
         raise RuntimeError(f"No mark price data for {self.symbol}")
 
