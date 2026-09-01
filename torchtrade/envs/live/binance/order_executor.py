@@ -189,7 +189,10 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                         # Read here rather than re-fetched: the env's own
                         # `_get_min_notional` walks these same filters on the plain path,
                         # and the SLTP path had no notional check at all (#414).
-                        self._min_notional = float(f.get('notional') or 0.0)
+                        # A present filter with a missing/empty `notional` is
+                        # incomplete metadata, not a zero floor (#414).
+                        raw = f.get('notional')
+                        self._min_notional = None if raw in (None, '') else float(raw)
                     elif f['filterType'] == 'PRICE_FILTER' and symbol == self.symbol:
                         tick_str = f['tickSize']
                         tick_size = float(tick_str)

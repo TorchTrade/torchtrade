@@ -152,7 +152,10 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                     "min_qty": float(lot_filter.get("minOrderQty", 0.001)),
                     "qty_step": float(lot_filter.get("qtyStep", 0.001)),
                     # Same filter, read at the same time, previously discarded (#414).
-                    "min_notional": float(lot_filter.get("minNotionalValue", 0.0)),
+                    # Absent means the payload did not carry it -- unknown, not zero.
+                    "min_notional": (
+                        None if lot_filter.get("minNotionalValue") in (None, "")
+                        else float(lot_filter["minNotionalValue"])),
                 }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
@@ -539,7 +542,10 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                     "min_qty": float(lot_filter.get("minOrderQty", 0.001)),
                     "qty_step": float(lot_filter.get("qtyStep", 0.001)),
                     # Same filter, read at the same time, previously discarded (#414).
-                    "min_notional": float(lot_filter.get("minNotionalValue", 0.0)),
+                    # Absent means the payload did not carry it -- unknown, not zero.
+                    "min_notional": (
+                        None if lot_filter.get("minNotionalValue") in (None, "")
+                        else float(lot_filter["minNotionalValue"])),
                 }
             else:
                 logger.warning(f"No instrument info for {self.symbol}, using defaults")

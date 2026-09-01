@@ -139,7 +139,11 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
             return self._create_trade_info(executed=False, at_target=True)
 
         # The venue's notional floor, on the floored quantity actually sent (#414).
-        min_notional = float(lot_size["min_notional"])
+        raw_floor = lot_size["min_notional"]
+        if raw_floor is None:
+            # Unknown floor: refuse rather than assume there is none (#414).
+            return self._create_trade_info(executed=False, at_target=True)
+        min_notional = float(raw_floor)
         if min_notional > 0 and amount * current_price < min_notional:
             return self._create_trade_info(executed=False, at_target=True)
 

@@ -153,10 +153,13 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         self.action_spec = Categorical(len(self.action_levels))
 
 
-    def _get_min_notional(self) -> float:
+    def _get_min_notional(self) -> float | None:
         """The venue's floor, from the executor's cached filters. One owner, not two.
+
+        None means the floor is not known -- the caller must refuse, not assume zero.
         """
-        return float(self.trader.get_lot_size()["min_notional"])
+        raw = self.trader.get_lot_size()["min_notional"]
+        return None if raw is None else float(raw)
 
     def _calculate_fractional_position(
         self, action_value: float, current_price: float
@@ -249,6 +252,12 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # Before the switch's close: after it, refusing would describe an account that
         # has already changed.
         min_notional = self._get_min_notional()
+        if min_notional is None:
+            logger.warning(
+                f"{self.config.symbol}: the venue minimum is not known; refusing rather "
+                f"than assuming there is no floor"
+            )
+            return self._create_trade_info(executed=False, at_target=not switching)
         if amount * current_price < min_notional:
             # `at_target` means "already there"; on a switch we hold the opposite side
             # at full size, so claiming it latches the level to a direction we do not

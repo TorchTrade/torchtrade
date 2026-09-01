@@ -196,7 +196,9 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             self._lot_size_cache = {
                 "min_qty": float(min_qty) if min_qty is not None else _DEFAULT_LOT_SIZE["min_qty"],
                 "qty_step": float(qty_step) if qty_step is not None else _DEFAULT_LOT_SIZE["qty_step"],
-                "min_notional": float(min_notional) if min_notional is not None else 0.0,
+                # CCXT omits limits.cost.min for non-USDT-quoted markets; that is
+                # unknown, not a zero floor (#414).
+                "min_notional": None if min_notional is None else float(min_notional),
             }
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")

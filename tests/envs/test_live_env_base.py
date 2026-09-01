@@ -6076,3 +6076,82 @@ def test_an_unknown_venue_minimum_is_not_treated_as_no_minimum(floor, expect_ref
         f"floor={floor!r}: {'refused' if refused else 'accepted'}, expected "
         f"{'refused' if expect_refused else 'accepted'}"
     )
+
+
+@pytest.mark.parametrize("venue", ["binance", "bitget", "bybit"])
+def test_the_plain_path_refuses_an_unknown_floor_rather_than_raising(venue):
+    """The plain paths called `float(min_notional)` directly, so an unknown floor raised
+    TypeError out of the live step instead of the controlled refusal the shared guard
+    gives. @CharlieHelps found it -- the SLTP path was fixed and this one was not.
+
+    A crash in `_step` is not the fail-closed behaviour; it is an unhandled exception on
+    the money path.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue)
+    trader.get_lot_size.return_value = {
+        "min_qty": 0.001, "qty_step": 0.001, "min_notional": None
+    }
+    trader.quantize_quantity.side_effect = lambda q: float(q)
+    sent = {}
+    env._execute_market_order = lambda side, quantity: sent.update(
+        side=side, quantity=quantity) or {
+        "executed": True, "success": True, "side": side, "quantity": quantity}
+    env._calculate_fractional_position = lambda av, cp: (0.5, 0.5 * cp, "buy")
+
+    info = env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
+
+    assert not sent, f"{venue}: submitted against a floor it could not read"
+    assert not info["executed"]
+
+
+@pytest.mark.parametrize("venue,complete", [
+    ("bitget", False), ("bitget", True),
+    ("bybit", False), ("bybit", True),
+    ("binance", False), ("binance", True),
+], ids=["bitget-incomplete", "bitget-complete", "bybit-incomplete", "bybit-complete",
+        "binance-incomplete", "binance-complete"])
+def test_incomplete_metadata_is_unknown_not_a_zero_floor(venue, complete):
+    """A venue that RESPONDS but omits the notional field is not a venue with no floor.
+
+    Collapsing the two kept the fail-open path alive for every successful-but-incomplete
+    response -- which is most of them for a non-USDT-quoted bitget market, where CCXT
+    simply does not populate `limits.cost.min`.
+    """
+    mod = importlib.import_module(f"torchtrade.envs.live.{venue}.order_executor")
+    cls = _sole(mod, "OrderClass")
+    ex = cls.__new__(cls)
+    ex.symbol = "BTC/USDT:USDT" if venue == "bitget" else "BTCUSDT"
+    ex._lot_size_cache = None
+    ex._qty_steps, ex._min_qtys, ex._min_notional = {}, {}, None
+    ex._tick_size = ex._tick_decimals = ex._lot_size_decimals = None
+    client = MagicMock()
+    if venue == "bitget":
+        limits = {"amount": {"min": 0.001}}
+        if complete:
+            limits["cost"] = {"min": 5.0}
+        client.market = MagicMock(
+            return_value={"limits": limits, "precision": {"amount": 0.001}})
+    elif venue == "bybit":
+        lot = {"minOrderQty": "0.001", "qtyStep": "0.001"}
+        if complete:
+            lot["minNotionalValue"] = "5"
+        client.get_instruments_info = MagicMock(return_value={
+            "retCode": 0, "result": {"list": [
+                {"symbol": "BTCUSDT", "lotSizeFilter": lot,
+                 "priceFilter": {"tickSize": "0.01"}}]}})
+    else:                                   # binance
+        filters = [{"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                   {"filterType": "PRICE_FILTER", "tickSize": "0.01"}]
+        # A PRESENT filter with an empty `notional` is incomplete, not a zero floor.
+        filters.append({"filterType": "MIN_NOTIONAL",
+                        "notional": "5" if complete else ""})
+        client.futures_exchange_info = MagicMock(
+            return_value={"symbols": [{"symbol": "BTCUSDT", "filters": filters}]})
+    ex.client = ex.public_client = client
+    if venue == "binance":
+        ex._fetch_symbol_filters()
+
+    floor = ex.get_lot_size()["min_notional"]
+    assert (floor is not None) is complete, (
+        f"{venue}: an incomplete payload reported {floor!r}; absent is unknown, not zero"
+    )
