@@ -4588,11 +4588,14 @@ def test_a_grace_budget_does_not_ride_out_an_account_the_venue_says_is_empty(slt
         healthy, total_margin_balance=0.0, available_balance=0.0
     )
 
+    # Through the method that actually reaches `trader.trade`, not the sizing helper --
+    # `_resolve_bracket_quantity` and `_calculate_fractional_position` cannot submit an
+    # order at all, so asserting `not trader.trade.called` on them asserts nothing.
     with pytest.raises(LiveObservationHalt):
         if sltp:
-            env._resolve_bracket_quantity(100.0)
+            env._execute_trade_if_needed(("long", -0.02, 0.03), current_price=100.0)
         else:
-            env._calculate_fractional_position(1.0, 100.0)
+            env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
 
     assert not trader.trade.called, "sized an order against equity the venue disowned"
     assert "balance" not in env._last_confirmed_read, (
