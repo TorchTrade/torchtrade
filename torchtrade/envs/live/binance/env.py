@@ -177,8 +177,16 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return position_size, notional_value, side
 
         # Below the venue minimum the position is NOT opened, rather than rounded up:
-        # rounding up would allocate beyond what the action asked for.
+        # rounding up would allocate beyond what the action asked for. An UNKNOWN floor
+        # refuses the same way -- this is the second of two call sites, and guarding only
+        # the other one left `float(None)` raising out of the live step here (#414).
         min_notional = self._get_min_notional()
+        if min_notional is None:
+            logger.warning(
+                f"{self.config.symbol}: the venue minimum is not known; not opening "
+                f"rather than assuming there is no floor"
+            )
+            return 0.0, 0.0, "flat"
         if notional_value < min_notional:
             logger.warning(
                 f"Action {action_value} resulted in notional {notional_value:.2f} "

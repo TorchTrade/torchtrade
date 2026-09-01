@@ -6096,7 +6096,12 @@ def test_the_plain_path_refuses_an_unknown_floor_rather_than_raising(venue):
     env._execute_market_order = lambda side, quantity: sent.update(
         side=side, quantity=quantity) or {
         "executed": True, "success": True, "side": side, "quantity": quantity}
-    env._calculate_fractional_position = lambda av, cp: (0.5, 0.5 * cp, "buy")
+    # NOT stubbed: binance overrides `_calculate_fractional_position` and reads the floor
+    # a SECOND time inside it. Stubbing this bypassed that site entirely, which is how a
+    # `float(None)` survived a test written to catch exactly this (@CharlieHelps).
+    trader.get_account_balance.return_value = {
+        "available_balance": 1e4, "total_margin_balance": 1e4,
+        "total_wallet_balance": 1e4, "total_maintenance_margin": 0.0}
 
     info = env._execute_fractional_action(1.0, current_qty=0.0, current_price=100.0)
 
