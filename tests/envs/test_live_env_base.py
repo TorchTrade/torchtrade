@@ -4600,6 +4600,38 @@ def test_a_grace_budget_does_not_ride_out_an_account_the_venue_says_is_empty(slt
     )
 
 
+def test_flatten_closes_once_and_sends_no_bracket_on_an_unusable_balance():
+    """@CharlieHelps' follow-up: pin the sharp edge of FLATTEN + a dead account.
+
+    FLATTEN bypasses grace by design -- "get me out while I cannot see the account" and
+    "ride it out" are contradictory postures -- so this behaves the same before and after
+    the eviction. One close request, no bracket, and the balance ValueError preserved as
+    the halt's cause so an operator can tell WHY it flattened.
+    """
+    from torchtrade.envs.core.live import ObservationFailurePolicy
+
+    env, trader = _real_futures_env(budget=2, venue="binance", sltp=True)
+    env.config.trade_mode = "fractional"
+    healthy = {"available_balance": 10000.0, "total_margin_balance": 10000.0,
+               "total_wallet_balance": 10000.0, "total_maintenance_margin": 0.0}
+    trader.get_account_balance.return_value = healthy
+    env.reset()
+    env.config.observation_failure_policy = ObservationFailurePolicy.FLATTEN
+    trader.close_position.reset_mock()
+    trader.trade.reset_mock()
+    trader.get_account_balance.return_value = dict(
+        healthy, total_margin_balance=0.0, available_balance=0.0
+    )
+
+    with pytest.raises(LiveObservationHalt) as halt:
+        env._resolve_bracket_quantity(100.0)
+
+    assert trader.close_position.call_count == 1, "FLATTEN must request exactly one close"
+    assert not trader.trade.called, "no bracket may go out behind the flatten"
+    assert isinstance(halt.value.__cause__, ValueError)
+    assert "portfolio value of 0.0" in str(halt.value.__cause__)
+
+
 def _refused_sizing_env():
     """An SLTP env whose balance read produces nothing usable."""
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
