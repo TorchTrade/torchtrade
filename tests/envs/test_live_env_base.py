@@ -4500,45 +4500,104 @@ def test_an_unusable_balance_halts_the_sltp_sizing_too(balance):
         env._resolve_bracket_quantity(100.0)
 
 
-def test_a_string_balance_sizes_rather_than_crashing_the_step():
+@pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
+def test_a_string_balance_sizes_rather_than_crashing_the_sizing_path(sltp):
     """`float()` before `math.isfinite`, because isfinite raises TypeError on a str.
 
-    An adapter that reports numbers as strings -- which is what several venue REST APIs
-    do -- crashed the plain sizing path out of `_step` on a perfectly good balance, since
-    `math.isfinite("1000.0")` is a TypeError, not False. The conversion has to come first.
-    A string that is not a number is a different case and still halts, below.
+    An adapter that reports numbers as strings -- which several venue REST APIs do --
+    crashed sizing on a perfectly good balance, since `math.isfinite("1000.0")` is a
+    TypeError, not False. TypeError is not in `_halting`'s catch tuple, so it left the
+    halt policy entirely.
+
+    BOTH entry points, because the helper returns the adapter's dict untouched and each
+    caller re-coerces: dropping the conversion in `_calculate_fractional_position` killed
+    no test at all while the SLTP twin was covered.
+
+    Scoped to the sizing path on purpose -- `_get_observation` still hands the raw value
+    to `math.isfinite`, so a string-reporting adapter cannot yet complete a step. That is
+    a separate read with a separate rule (it must accept <= 0 so `is_bankrupt` can see it)
+    and is deliberately not fixed here.
     """
-    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=sltp)
     env.config.trade_mode = "fractional"
     trader.get_account_balance.return_value = {
         "available_balance": "1000.0", "total_margin_balance": "1000.0",
         "total_wallet_balance": "1000.0", "total_maintenance_margin": 0.0,
     }
 
-    assert env._resolve_bracket_quantity(100.0) > 0
+    if sltp:
+        assert env._resolve_bracket_quantity(100.0) > 0
+    else:
+        assert env._calculate_fractional_position(1.0, 100.0)[0] > 0
 
     trader.get_account_balance.return_value["total_margin_balance"] = "n/a"
     with pytest.raises(LiveObservationHalt):
-        env._resolve_bracket_quantity(100.0)
+        if sltp:
+            env._resolve_bracket_quantity(100.0)
+        else:
+            env._calculate_fractional_position(1.0, 100.0)
 
 
-def test_reset_cannot_seed_the_balance_cache_with_a_value_sizing_would_refuse():
+@pytest.mark.parametrize("balance", [0.0, -5.0, float("nan")],
+                         ids=["zero", "negative", "nan"])
+def test_reset_cannot_seed_the_balance_cache_with_a_value_sizing_would_refuse(balance):
     """`_reset` writes the same cache slot the sizing paths read (#416).
 
     It used to pass the bare callable, so the slot had one writer but two standards: a
-    NaN stored at reset was served, unvalidated, into sizing on the next failed read --
+    value stored at reset was served, unvalidated, into sizing on the next failed read --
     the poisoning this issue is about, arriving through the one door that had no guard.
+
+    0.0 and -5.0 are the values that matter. NaN already aborted the reset via
+    `_get_observation`'s own isfinite guard, so it never reached a trade; zero and
+    negative equity STARTED an episode and left an unusable entry in the slot.
     """
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
     trader.get_account_balance.return_value = {
-        "available_balance": float("nan"), "total_margin_balance": float("nan"),
-        "total_wallet_balance": float("nan"), "total_maintenance_margin": 0.0,
+        "available_balance": balance, "total_margin_balance": balance,
+        "total_wallet_balance": balance, "total_maintenance_margin": 0.0,
     }
 
     with pytest.raises(LiveObservationHalt):
         env.reset()
 
     assert "balance" not in env._last_confirmed_read
+
+
+@pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
+def test_a_grace_budget_does_not_ride_out_an_account_the_venue_says_is_empty(sltp):
+    """Grace is for a venue that cannot be READ, not for an answer we dislike.
+
+    An unusable balance raises inside the `_halting` closure so it is never cached -- but
+    that alone made it indistinguishable from a read FAILURE, so `_halting` caught it,
+    found a healthy balance from an earlier bar, and sized a live order against
+    pre-liquidation equity. Measured on main before this fix: a venue reporting 0.0
+    produced a 97.96-unit long on the plain path.
+
+    Both paths, because the fold made it one line and the plain path had the bug first.
+    """
+    env, trader = _real_futures_env(budget=2, venue="binance", sltp=sltp)
+    env.config.trade_mode = "fractional"
+    healthy = {"available_balance": 10000.0, "total_margin_balance": 10000.0,
+               "total_wallet_balance": 10000.0, "total_maintenance_margin": 0.0}
+    trader.get_account_balance.return_value = healthy
+    env.reset()
+    assert "balance" in env._last_confirmed_read, "setup: a healthy read must be cached"
+
+    # The venue ANSWERS, and the answer is that the account is gone.
+    trader.get_account_balance.return_value = dict(
+        healthy, total_margin_balance=0.0, available_balance=0.0
+    )
+
+    with pytest.raises(LiveObservationHalt):
+        if sltp:
+            env._resolve_bracket_quantity(100.0)
+        else:
+            env._calculate_fractional_position(1.0, 100.0)
+
+    assert not trader.trade.called, "sized an order against equity the venue disowned"
+    assert "balance" not in env._last_confirmed_read, (
+        "the stale balance is still there for the next grace bar to serve"
+    )
 
 
 def _refused_sizing_env():
@@ -4569,9 +4628,15 @@ def test_an_unusable_balance_is_not_stored_as_the_last_confirmed_read():
 
 
 def test_an_unusable_balance_counts_as_an_outage():
-    """#416(2). Nothing raised means the bar is never flagged, so the outage counter
-    never advances and a permanently broken feed refuses every open forever without
-    truncating. This is the only assertion in the file that pins the flag for this path.
+    """#416(2). The read produced nothing usable, so the bar is unconfirmed and must say
+    so -- the old code returned successfully and left the flag clear.
+
+    Deliberately asserts the FLAG and not truncation. I tried to pin the whole chain and
+    could not: the counter advances in `_finalize_step_flags`, which only runs if `_step`
+    completes, and a balance-feed outage does not get that far because
+    `_get_portfolio_value` reads the balance OUTSIDE the halt policy and dies with a raw
+    RuntimeError first. So the flag is what is true here; claiming truncation would be
+    claiming a chain that is currently broken elsewhere.
     """
     env = _refused_sizing_env()
 

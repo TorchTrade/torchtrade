@@ -188,6 +188,15 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
             # balance sizes an inf target (#277, #347).
             if not math.isfinite(total_balance) or total_balance <= 0:
+                # Evict BEFORE raising, so the grace period has nothing to serve.
+                #
+                # Grace exists for a venue that cannot be READ. This is not that: the
+                # venue answered, and the answer is that the account is empty. Left
+                # cacheable, `_halting` cannot tell the two apart -- it catches this
+                # ValueError, finds a healthy balance from an earlier bar, and sizes a
+                # live order against pre-liquidation equity. Measured on the plain path
+                # before the fold: a venue reporting 0.0 produced a 97.96-unit long.
+                self._last_confirmed_read.pop("balance", None)
                 raise ValueError(
                     f"cannot size against a portfolio value of {total_balance}"
                 )
