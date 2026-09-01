@@ -2096,19 +2096,82 @@ def _bitget_status(**pos_overrides):
     return ex.get_status().get("position_status")
 
 
-@pytest.mark.parametrize("field", ["liquidationPrice", "entryPrice", "markPrice",
-                                   "unrealizedPnl", "notional"])
-def test_a_null_venue_field_does_not_turn_a_healthy_position_into_an_outage(field):
-    """#341: bare `float(None)` raised TypeError into bitget's broad except, so a cross
-    position with `liquidationPrice: None` reported POSITION_UNKNOWN.
+def _binance_status(**pos_overrides):
+    """Real binance adapter over a stubbed client."""
+    from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
 
-    That is the worst shape available: POSITION_UNKNOWN is deliberately fail-closed, so a
-    perfectly healthy position froze the env every bar -- on a lie.
+    pos = {"symbol": "BTCUSDT", "positionAmt": "1.0", "entryPrice": "100",
+           "markPrice": "101", "unRealizedProfit": "1", "notional": "101",
+           "leverage": "10", "marginType": "isolated", "liquidationPrice": "50"}
+    pos.update(pos_overrides)
+    client = MagicMock()
+    client.futures_position_information = MagicMock(return_value=[pos])
+    client.futures_get_open_orders = MagicMock(return_value=[])
+    client.futures_change_leverage = MagicMock(return_value=_LEVERAGE_BODIES["binance"])
+    client.futures_exchange_info = MagicMock(return_value={"symbols": [
+        {"symbol": "BTCUSDT", "filters": [
+            {"filterType": "LOT_SIZE", "minQty": "0.001", "stepSize": "0.001"}]}]})
+    ex = BinanceFuturesOrderClass(symbol="BTCUSDT", trade_mode="quantity", demo=True,
+                                  leverage=10, client=client)
+    return ex.get_status().get("position_status")
+
+
+# The same optional field under each venue's own name. A venue missing from this table has
+# no coverage of #341's rule -- which is exactly what happened: bitget got the test,
+# bitget/bybit/okx got the `or` fix, and BINANCE got neither. A blank `liquidationPrice`
+# is binance's ordinary cross-margin shape, and it reported POSITION_UNKNOWN for it.
+_NULLABLE_POSITION_FIELDS = {
+    "bitget": (_bitget_status, ["liquidationPrice", "entryPrice", "markPrice",
+                                "unrealizedPnl", "notional"]),
+    "binance": (_binance_status, ["liquidationPrice", "entryPrice", "markPrice",
+                                  "unRealizedProfit", "notional"]),
+}
+
+
+@pytest.mark.parametrize("venue", sorted(_NULLABLE_POSITION_FIELDS))
+@pytest.mark.parametrize("blank", [None, ""], ids=["null", "empty-string"])
+def test_a_blank_venue_field_does_not_turn_a_healthy_position_into_an_outage(venue, blank):
+    """#341: a bare `float(None)` raises into the adapter's broad except, so a healthy
+    position reports POSITION_UNKNOWN.
+
+    That is the worst shape available -- POSITION_UNKNOWN is deliberately fail-closed, so
+    a perfectly good position freezes the env every bar, on a lie, and at the default
+    outage budget of 0 the episode truncates while still holding it.
+
+    Both blank shapes, because they fail differently: `None` is a TypeError and `""` a
+    ValueError, and binance's `liquidationPrice` key is PRESENT-and-empty on cross margin,
+    so a `.get(key, 0)` default never fired for it.
     """
-    status = _bitget_status(**{field: None})
+    build, fields = _NULLABLE_POSITION_FIELDS[venue]
+    for field in fields:
+        status = build(**{field: blank})
+        assert status is not POSITION_UNKNOWN, f"{venue}: a blank {field} read as an outage"
+        assert status.qty == pytest.approx(1.0)
 
-    assert status is not POSITION_UNKNOWN, f"a null {field} read as an outage"
-    assert status.qty == pytest.approx(1.0)
+
+@pytest.mark.parametrize("venue", sorted(_NULLABLE_POSITION_FIELDS))
+@pytest.mark.parametrize("zero", [0, "0"], ids=["numeric", "string"])
+def test_a_venue_reported_zero_leverage_is_not_swapped_for_the_config(venue, zero):
+    """Behavioural, because the existing guard is a source-text SCAN for "or self.leverage".
+
+    That scan catches the bug only when it is spelled with `or`; the same swap written as
+    `if not pos.get("leverage")` walks straight through it. #277's rule is that a
+    venue-reported 0 is an ANSWER, not an absence -- swapping it for the config invents a
+    liquidation distance the venue never confirmed, and account_state[4] then tells the
+    policy a leverage nothing reported.
+
+    NUMERIC zero is the row that does the work, and it is why this is parametrized: these
+    venues send numbers as strings, and `not "0"` is False, so a string zero cannot tell
+    the correct guard from the falsy one. Only a numeric zero separates them.
+    """
+    build, _ = _NULLABLE_POSITION_FIELDS[venue]
+
+    status = build(leverage=zero)
+
+    assert status is not POSITION_UNKNOWN
+    assert status.leverage == pytest.approx(0.0), (
+        f"{venue} swapped a venue-reported zero leverage for the config value"
+    )
 
 
 def _bybit_status(side="Buy"):

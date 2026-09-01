@@ -424,11 +424,19 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             # Get position status
             positions = self.client.futures_position_information(symbol=self.symbol)
             for pos in positions:
-                qty = float(pos["positionAmt"])
+                # `or 0` on every optional field, as bitget, bybit and okx have done
+                # since #341 -- binance alone never got that fix. A bare `float(None)` or
+                # `float("")` raises TypeError/ValueError into the broad `except` below
+                # and reports a HEALTHY position as POSITION_UNKNOWN, which is fail-closed
+                # on a lie: the env freezes every bar, and at the default budget of 0 it
+                # truncates while still holding the position. binance blanks
+                # `liquidationPrice` on cross-margin, so this is the ordinary case, not a
+                # malformed one (#421).
+                qty = float(pos.get("positionAmt") or 0)
                 if qty != 0:
-                    entry_price = float(pos["entryPrice"])
-                    mark_price = float(pos["markPrice"])
-                    unrealized_pnl = float(pos["unRealizedProfit"])
+                    entry_price = float(pos.get("entryPrice") or 0)
+                    mark_price = float(pos.get("markPrice") or entry_price)
+                    unrealized_pnl = float(pos.get("unRealizedProfit") or 0)
 
                     unrealized_pnl_pct = self._calculate_unrealized_pnl_pct(
                         qty, entry_price, mark_price
@@ -452,7 +460,9 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                             self.leverage if pos.get("leverage") in (None, "") else pos.get("leverage")
                         ),
                         margin_mode=pos.get("marginType", self.margin_mode.value),
-                        liquidation_price=float(pos.get("liquidationPrice", 0)),
+                        # `or 0` and not `, 0)`: the key is PRESENT and blank on a
+                        # cross-margin position, so the default never fired (#421).
+                        liquidation_price=float(pos.get("liquidationPrice") or 0),
                     )
                     break
             else:
