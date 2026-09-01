@@ -104,6 +104,9 @@ def mock_pybit_client():
             "lotSizeFilter": {
                 "minOrderQty": "0.001",
                 "qtyStep": "0.001",
+                # Real payloads carry this; the mock omitted it, so nothing could tell
+                # whether the executor read it or hardcoded 0.0 (#414).
+                "minNotionalValue": "5",
             },
             "priceFilter": {
                 "tickSize": "0.01",
@@ -158,7 +161,7 @@ def mock_env_trader():
     trader.get_mark_price = MagicMock(return_value=50000.0)
     trader.get_status = MagicMock(return_value={"position_status": None})
     trader.trade = MagicMock(return_value=True)
-    trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001})
+    trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
     return trader
 
 

@@ -279,6 +279,12 @@ class TestOKXFuturesOrderClass:
         init_call_count = mock_okx_public_client.get_instruments.call_count
         lot_size = order_executor.get_lot_size()
         assert lot_size["min_qty"] == 0.001
+        # 0.0 is a DESIGN DECISION, not an absent value: okx derivatives bind on
+        # minSz/lotSz and have no separate notional floor, so the shared guard's notional
+        # half is deliberately a no-op here. Pinned because only the key's PRESENCE was
+        # enforced -- writing 999999.0 there passed the whole suite and would have refused
+        # every okx bracket, silently, forever (#414).
+        assert lot_size["min_notional"] == 0.0
         lot_size2 = order_executor.get_lot_size()
         assert lot_size2 is lot_size
         assert mock_okx_public_client.get_instruments.call_count == init_call_count
@@ -344,3 +350,20 @@ class TestOKXFuturesOrderClass:
         )
         executor.trade(side=side, quantity=0.001, reduce_only=reduce_only)
         assert mock_okx_trade_client.place_order.call_args[1]["posSide"] == expected_pos_side
+
+    def test_the_lazy_lot_size_fetch_also_reports_the_notional_floor(
+        self, order_executor, mock_okx_public_client
+    ):
+        """okx caches the lot size twice, like bybit: once at construction inside the
+        tick-size fetch, once lazily when that first call threw.
+
+        The lazy write was never executed by any test, so a wrong `min_notional` there
+        survived the whole suite -- and 999999.0 would refuse every okx bracket forever,
+        on the path taken precisely when the venue was flaky at startup.
+        """
+        order_executor._lot_size_cache = None          # force the lazy path
+        lot = order_executor.get_lot_size()
+        assert lot["min_notional"] == 0.0, (
+            "the lazy fetch reports a floor okx does not have; its derivatives bind on "
+            "minSz/lotSz"
+        )

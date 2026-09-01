@@ -108,6 +108,12 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         # _fetch_symbol_filters -- close_all_positions closes whatever the account holds.
         self._qty_steps: Dict[str, tuple] = {}
         self._min_qtys: Dict[str, float] = {}
+        # Always present, so `get_lot_size` needs no getattr fallback: a fail-open
+        # default is how a missing floor becomes an unchecked order (#414).
+        # None = not yet read. 0.0 would mean 'this symbol has no floor', which is
+        # a different claim -- collapsing them makes an outage look like a venue
+        # with no minimum, and the guard then refuses nothing (#414).
+        self._min_notional: float | None = None
         self._tick_decimals: int = 0
 
         # Initialize client
@@ -179,6 +185,14 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                     if f['filterType'] == 'LOT_SIZE':
                         self._qty_steps[symbol] = _step_and_decimals(f['stepSize'])
                         self._min_qtys[symbol] = float(f.get('minQty') or 0.0)
+                    elif f['filterType'] == 'MIN_NOTIONAL' and symbol == self.symbol:
+                        # Read here rather than re-fetched: the env's own
+                        # `_get_min_notional` walks these same filters on the plain path,
+                        # and the SLTP path had no notional check at all (#414).
+                        # A present filter with a missing/empty `notional` is
+                        # incomplete metadata, not a zero floor (#414).
+                        raw = f.get('notional')
+                        self._min_notional = None if raw in (None, '') else float(raw)
                     elif f['filterType'] == 'PRICE_FILTER' and symbol == self.symbol:
                         tick_str = f['tickSize']
                         tick_size = float(tick_str)
@@ -205,6 +219,26 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 f"binance returned no LOT_SIZE for {self.symbol}: not a futures symbol on "
                 f"this venue, or the payload changed shape."
             )
+
+    def get_lot_size(self) -> Dict[str, float]:
+        """`{min_qty, qty_step, min_notional}`, from filters already cached (#414)."""
+        # Lazily re-fetch on an empty cache: `_fetch_symbol_filters` returns early on a
+        # transient failure, before its own raise, and binance alone never retried.
+        if self.symbol not in self._qty_steps:
+            self._fetch_symbol_filters()
+
+        step = self._qty_steps.get(self.symbol, _FALLBACK_QTY_STEP_PAIR)
+        return {
+            "min_qty": float(self._min_qtys.get(self.symbol, 0.0)),
+            "qty_step": float(step[0]),
+            "min_notional": (None if self._min_notional is None
+                             else float(self._min_notional)),
+        }
+
+    def quantize_quantity(self, quantity: float) -> float:
+        """The quantity this executor will actually submit, for a caller that must
+        validate against it rather than against its own guess (#414)."""
+        return self.round_quantity(quantity)
 
     def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
         """Floor a quantity toward zero to the symbol's LOT_SIZE step.

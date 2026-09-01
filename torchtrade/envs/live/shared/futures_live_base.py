@@ -215,10 +215,18 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         the same input becomes a halt instead -- a divergence this fold preserves rather
         than endorses (#416).
         """
+        # Every mode goes through the venue-minimum refusal below. The two fixed-size
+        # modes returned early and skipped it, which is the same "validated one thing,
+        # sent another" shape as the direction-switch bug -- here it was "validated
+        # nothing at all" for two of the three modes.
         if self.config.trade_mode == "notional":
-            return float(self.config.quantity_per_trade) / current_price
+            return self._refuse_below_venue_minimums(
+                float(self.config.quantity_per_trade) / current_price, current_price
+            )
         if self.config.trade_mode == "quantity":
-            return float(self.config.quantity_per_trade)
+            return self._refuse_below_venue_minimums(
+                float(self.config.quantity_per_trade), current_price
+            )
         if self.config.trade_mode != "fractional":
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
@@ -271,6 +279,52 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
             logger.error(
                 f"{self.config.symbol}: sizing produced {quantity!r}, refusing rather than "
                 f"handing it to the venue formatter"
+            )
+            return None
+        return self._refuse_below_venue_minimums(quantity, current_price)
+
+    def _refuse_below_venue_minimums(
+        self, quantity: float, current_price: float
+    ) -> float | None:
+        """Refuse a quantity the venue will reject, rather than submitting it (#414).
+
+        Refuse, never round UP: rounding up allocates more than the action asked for.
+        NOTIONAL only -- the min-quantity floor is okx's `_resolve_bracket_quantity`.
+        """
+        lot = self.trader.get_lot_size()
+
+        # Ask the executor what it will submit, rather than reproducing its rule here.
+        # A shared floor is wrong per venue: binance epsilon-floors, bitget truncates via
+        # CCXT, okx clamps UP to min_qty, bybit sends the raw float. Copying one venue's
+        # arithmetic accepted 0.0499999999999995 as 5.00 that bitget submits as 4.90.
+        sendable = float(self.trader.quantize_quantity(quantity))
+        if not sendable > 0:
+            logger.warning(
+                f"{self.config.symbol}: quantity {quantity} quantizes to {sendable}; "
+                f"refusing rather than submitting nothing"
+            )
+            return None
+
+        notional = sendable * current_price
+
+        # UNKNOWN is not "no floor". A failed metadata fetch used to report 0.0, which
+        # skipped the check entirely -- so the guard was off precisely during an outage,
+        # which is when the venue is least predictable. None means "not read yet";
+        # refuse until it is. okx reports a real 0.0 (its derivatives bind on minSz).
+        raw_floor = lot["min_notional"]
+        if raw_floor is None:
+            logger.warning(
+                f"{self.config.symbol}: the venue minimum is not known (metadata fetch "
+                f"failed); refusing rather than assuming there is no floor"
+            )
+            return None
+
+        min_notional = float(raw_floor)
+        if min_notional > 0 and notional < min_notional:
+            logger.warning(
+                f"{self.config.symbol}: notional {notional:.2f} is below the venue "
+                f"minimum {min_notional:.2f}; refusing rather than submitting an order "
+                f"the exchange will reject"
             )
             return None
         return quantity

@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 # Venue taker rate, read by env.py and env_sltp.py alike (#278).
 TAKER_FEE = 0.0005
 
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
+# okx derivatives bind on minSz/lotSz; there is no separate notional floor, so
+# this is 0.0 rather than absent -- the shared guard reads one key on every venue.
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": None}
 
 
 class PositionMode(Enum):
@@ -171,9 +173,20 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 min_qty = float(instrument.get("minSz", 0.001))
                 lot_decimals = decimals_for_step(lot_sz_str)
                 self._lot_size_decimals = lot_decimals
-                self._lot_size_cache = {"min_qty": min_qty, "qty_step": qty_step}
+                # Three keys, like every other write of this cache. Updating the
+                # fallback branch and not THIS one -- the construction-time write --
+                # is how okx would have returned a two-key dict at runtime and
+                # KeyError'd on every bracket open once the guard indexed strictly.
+                self._lot_size_cache = {
+                    "min_qty": min_qty, "qty_step": qty_step, "min_notional": 0.0,
+                }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
+
+    def quantize_quantity(self, quantity: float) -> float:
+        """The quantity this executor will actually submit. Note `_format_size` clamps UP
+        to `min_qty`, so this can exceed what was asked -- the caller must see that."""
+        return float(self._format_size(quantity))
 
     def _format_size(self, qty: float) -> str:
         """Quantize quantity to lot size step, enforce minimum, and format as string."""
@@ -537,7 +550,7 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         Get and cache lot size constraints for the symbol.
 
         Returns:
-            Dictionary with 'min_qty' and 'qty_step' for the symbol.
+            Dictionary with 'min_qty', 'qty_step' and 'min_notional' for the symbol.
         """
         if self._lot_size_cache is not None:
             return self._lot_size_cache
@@ -550,7 +563,7 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             if str(code) != "0":
                 msg = response.get("msg", "unknown error")
                 logger.warning(f"get_instruments failed (code={code}): {msg}, using defaults")
-                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+                return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
                 return self._lot_size_cache
             instruments = response.get("data", [])
             if instruments:
@@ -558,13 +571,14 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 self._lot_size_cache = {
                     "min_qty": float(instrument.get("minSz", 0.001)),
                     "qty_step": float(instrument.get("lotSz", 0.001)),
+                    "min_notional": 0.0,
                 }
             else:
                 logger.warning(f"No instrument info for {self.symbol}, using defaults")
-                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+                return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
-            self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+            return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
 
         return self._lot_size_cache
 

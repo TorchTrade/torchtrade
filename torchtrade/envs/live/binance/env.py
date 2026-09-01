@@ -153,34 +153,13 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         self.action_spec = Categorical(len(self.action_levels))
 
 
-    def _get_symbol_info(self) -> Dict:
-        """Get exchange symbol information for precision and lot size.
+    def _get_min_notional(self) -> float | None:
+        """The venue's floor, from the executor's cached filters. One owner, not two.
 
-        Binance-specific implementation that queries futures_exchange_info() API.
+        None means the floor is not known -- the caller must refuse, not assume zero.
         """
-        try:
-            exchange_info = self.trader.client.futures_exchange_info()
-            for symbol in exchange_info['symbols']:
-                if symbol['symbol'] == self.config.symbol:
-                    return symbol
-            raise ValueError(f"Symbol {self.config.symbol} not found in exchange info")
-        except Exception as e:
-            logger.error(f"Error getting symbol info: {e}")
-            # Return defaults if exchange query fails
-            return {
-                'filters': [
-                    {'filterType': 'LOT_SIZE', 'stepSize': '0.001'},
-                    {'filterType': 'MIN_NOTIONAL', 'notional': '100'}
-                ]
-            }
-
-    def _get_min_notional(self) -> float:
-        """Get the minimum notional value for orders."""
-        symbol_info = self._get_symbol_info()
-        for filter_item in symbol_info.get('filters', []):
-            if filter_item['filterType'] == 'MIN_NOTIONAL':
-                return float(filter_item.get('notional', 100))
-        return 100.0  # Default fallback
+        raw = self.trader.get_lot_size()["min_notional"]
+        return None if raw is None else float(raw)
 
     def _calculate_fractional_position(
         self, action_value: float, current_price: float
@@ -198,8 +177,16 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
             return position_size, notional_value, side
 
         # Below the venue minimum the position is NOT opened, rather than rounded up:
-        # rounding up would allocate beyond what the action asked for.
+        # rounding up would allocate beyond what the action asked for. An UNKNOWN floor
+        # refuses the same way -- this is the second of two call sites, and guarding only
+        # the other one left `float(None)` raising out of the live step here (#414).
         min_notional = self._get_min_notional()
+        if min_notional is None:
+            logger.warning(
+                f"{self.config.symbol}: the venue minimum is not known; not opening "
+                f"rather than assuming there is no floor"
+            )
+            return 0.0, 0.0, "flat"
         if notional_value < min_notional:
             logger.warning(
                 f"Action {action_value} resulted in notional {notional_value:.2f} "
@@ -232,56 +219,36 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         Returns:
             trade_info: Dict with execution details
         """
-        # 1. Query actual position from exchange (source of truth)
+        # Query actual position from exchange (source of truth)
         # Threaded from `_step`'s halted read; required, never defaulted (#295).
         if action_value == 0.0:
             if abs(current_qty) > 0:
                 return self._handle_close_action(current_qty)
             return self._create_trade_info(executed=False)
 
-        # 3. Calculate target position
+        # Calculate target position
         target_qty, target_notional, target_side = self._calculate_fractional_position(
             action_value, current_price
         )
 
-        # 4. Check if target is achievable
+        # Check if target is achievable
         if target_qty == 0.0:
             return self._create_trade_info(executed=False)
 
-        # 5. Calculate delta
+        # Calculate delta
         delta = target_qty - current_qty
 
-        # 6. Check if delta is significant enough to trade
+        # Check if delta is significant enough to trade
         sign = 1 if delta > 0 else -1
         delta = self.trader.round_quantity(abs(delta)) * sign
         if delta == 0:
             return self._create_trade_info(executed=False)  # Already close enough
 
-        # 8. Check delta notional meets exchange minimum
-        delta_notional = abs(delta) * current_price
-        min_notional = self._get_min_notional()
-        if delta_notional < min_notional:
-            return self._create_trade_info(executed=False, at_target=True)  # Delta too small for exchange
-
-        # 9. Determine trade direction and execute
-        if (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0):
-            # Direction switch: close current, then open opposite
-            #
-            # Edge case handling:
-            #   1. If close fails → Return early, don't open opposite position
-            #      This prevents doubling position size if close is rejected
-            #   2. If close succeeds but open fails → Agent ends up flat instead of target
-            #      Trade info will show close executed=True but may not reflect open failure
-            #   3. Between close and open, account balance changes (from PnL)
-            #      Target calculation uses current balance which may differ
-            #
-            # TODO: Consider tracking partial execution state for observation
-            close_info = self._handle_close_action(current_qty)
-            if not close_info["executed"] or close_info.get("success") is False:
-                logger.warning("Direction switch failed: unable to close current position")
-                return close_info
-
-            # Open new position in opposite direction
+        # Decide what will be SENT before validating: a switch closes, then opens
+        # `abs(target_qty)`, not the delta. On a switch `|delta| = |target| + |current|`,
+        # so validating the delta clears a floor the submitted quantity does not (#414).
+        switching = (current_qty > 0 and target_qty < 0) or (current_qty < 0 and target_qty > 0)
+        if switching:
             side, amount = ("buy" if target_qty > 0 else "sell"), abs(target_qty)
         elif delta > 0:
             side, amount = "buy", abs(delta)          # increase, or open long from flat
@@ -290,10 +257,39 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         else:
             return self._create_trade_info(executed=False)
 
+        # Before the switch's close: after it, refusing would describe an account that
+        # has already changed.
+        min_notional = self._get_min_notional()
+        if min_notional is None:
+            logger.warning(
+                f"{self.config.symbol}: the venue minimum is not known; refusing rather "
+                f"than assuming there is no floor"
+            )
+            return self._create_trade_info(executed=False, at_target=not switching)
+        if amount * current_price < min_notional:
+            # `at_target` means "already there"; on a switch we hold the opposite side
+            # at full size, so claiming it latches the level to a direction we do not
+            # hold and the duplicate-action guard suppresses every retry (#414).
+            return self._create_trade_info(executed=False, at_target=not switching)
+
+        # If the close fails, do not open the opposite side -- that doubles rather than
+        # reverses.
+        if switching:
+            close_info = self._handle_close_action(current_qty)
+            if not close_info["executed"] or close_info.get("success") is False:
+                logger.warning("Direction switch failed: unable to close current position")
+                return close_info
+
         # One exit, so a new branch cannot skip the target and disable the check.
         info = self._execute_market_order(side, amount)
         info["target_qty"] = target_qty
-        info["target_tol"] = min_notional / current_price
+        # The venue's minimum tradeable size, as the other three venues pass. It was
+        # `min_notional / price`, which the removed 100.0 fallback kept non-zero; with
+        # the executor's real 0.0 it becomes 0.0, and `_sync_position_from_exchange`
+        # then compares against POSITION_DUST_EPS (1e-9). binance's delta is
+        # lot-rounded, so every complete fill would read as a divergence, NaN the
+        # action level, and re-size every bar (#414).
+        info["target_tol"] = float(self.trader.get_lot_size()["min_qty"])
         return info
 
     def _execute_trade_if_needed(

@@ -483,13 +483,22 @@ class TestBitgetLotSize:
     def test_reads_market_info_and_caches(self, order_executor, mock_ccxt_client):
         mock_ccxt_client.market.reset_mock()
         lot = order_executor.get_lot_size()
-        assert lot == {"min_qty": 0.0001, "qty_step": 0.0001}
+        # min_notional is bitget's minTradeUSDT, which CCXT normalises to limits.cost.min.
+        # It was fetched with the rest of the market info and dropped, so an order under
+        # the floor was submitted and rejected (#414).
+        assert lot == {"min_qty": 0.0001, "qty_step": 0.0001, "min_notional": 5.0}
         order_executor.get_lot_size()  # second call served from cache
         mock_ccxt_client.market.assert_called_once()
 
     def test_falls_back_to_default_on_error(self, order_executor, mock_ccxt_client):
         mock_ccxt_client.market = MagicMock(side_effect=Exception("no market info"))
-        assert order_executor.get_lot_size() == {"min_qty": 0.001, "qty_step": 0.001}
+        # `min_notional` is None, not 0.0: a failed lookup means the floor is UNKNOWN,
+        # and reporting 0.0 made the shared guard skip the check during an outage (#414).
+        assert order_executor.get_lot_size() == {
+            "min_qty": 0.001, "qty_step": 0.001, "min_notional": None
+        }
+        # And the failure is not cached, so a recovered venue is picked up.
+        assert order_executor._lot_size_cache is None
 
     @pytest.mark.parametrize("amount,expected", [
         (0.00037, 0.0003),   # truncates down to the 0.0001 step (never rounds up -> margin-safe)

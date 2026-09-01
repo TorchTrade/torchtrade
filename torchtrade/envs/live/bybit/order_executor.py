@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Venue taker rate, read by env.py and env_sltp.py alike (#278).
 TAKER_FEE = 0.00055
 
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": None}
 
 
 class PositionMode(Enum):
@@ -151,6 +151,11 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 self._lot_size_cache = {
                     "min_qty": float(lot_filter.get("minOrderQty", 0.001)),
                     "qty_step": float(lot_filter.get("qtyStep", 0.001)),
+                    # Same filter, read at the same time, previously discarded (#414).
+                    # Absent means the payload did not carry it -- unknown, not zero.
+                    "min_notional": (
+                        None if lot_filter.get("minNotionalValue") in (None, "")
+                        else float(lot_filter["minNotionalValue"])),
                 }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
@@ -504,12 +509,18 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
 
         raise RuntimeError(f"No ticker data for {self.symbol}")
 
+    def quantize_quantity(self, quantity: float) -> float:
+        """bybit submits `str(quantity)` unquantized, so this is the identity -- stated
+        rather than assumed, because the shared guard must not floor what the venue will
+        not floor (#414)."""
+        return float(quantity)
+
     def get_lot_size(self) -> Dict[str, float]:
         """
         Get and cache lot size constraints for the symbol.
 
         Returns:
-            Dictionary with 'min_qty' and 'qty_step' for the symbol.
+            Dictionary with 'min_qty', 'qty_step' and 'min_notional' for the symbol.
         """
         if self._lot_size_cache is not None:
             return self._lot_size_cache
@@ -522,7 +533,7 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             if ret_code is not None and int(ret_code) != 0:
                 ret_msg = response.get("retMsg", "unknown error")
                 logger.warning(f"get_instruments_info failed (retCode={ret_code}): {ret_msg}, using defaults")
-                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+                return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
                 return self._lot_size_cache
             instruments = response.get("result", {}).get("list", [])
             if instruments:
@@ -530,13 +541,18 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 self._lot_size_cache = {
                     "min_qty": float(lot_filter.get("minOrderQty", 0.001)),
                     "qty_step": float(lot_filter.get("qtyStep", 0.001)),
+                    # Same filter, read at the same time, previously discarded (#414).
+                    # Absent means the payload did not carry it -- unknown, not zero.
+                    "min_notional": (
+                        None if lot_filter.get("minNotionalValue") in (None, "")
+                        else float(lot_filter["minNotionalValue"])),
                 }
             else:
                 logger.warning(f"No instrument info for {self.symbol}, using defaults")
-                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+                return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
-            self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+            return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
 
         return self._lot_size_cache
 

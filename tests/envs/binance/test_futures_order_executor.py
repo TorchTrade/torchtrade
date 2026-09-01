@@ -73,6 +73,18 @@ class TestBinanceFuturesOrderClass:
                 "filters": [
                     {"filterType": "PRICE_FILTER", "tickSize": "0.10"},
                     {"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"},
+                    # Real payloads carry this; the mock omitted it, so nothing could tell
+                    # whether the executor read it or hardcoded 0.0 (#414).
+                    {"filterType": "MIN_NOTIONAL", "notional": "5"},
+                ],
+            }, {
+                # A SECOND symbol, with a different floor. With one symbol nothing could
+                # tell whether MIN_NOTIONAL is scoped to this symbol or whichever one the
+                # payload happens to list last (#414).
+                "symbol": "ETHUSDT",
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.01", "minQty": "0.01"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "20"},
                 ],
             }]
         })
@@ -243,6 +255,51 @@ class TestBinanceFuturesOrderClass:
         """Tick size should be cached from exchange info at init."""
         assert order_executor._tick_size == 0.1
         assert order_executor._tick_decimals == 1
+
+    def test_get_lot_size_recovers_after_a_transient_exchange_info_failure(self, mock_client):
+        """binance was the only venue whose `get_lot_size` never re-fetched.
+
+        `_fetch_symbol_filters` returns early on a transient failure -- BEFORE its own
+        fail-closed "no LOT_SIZE" raise -- so one blip at construction left every cache
+        empty and nothing repaired them. Both floors were then silently 0.0 for the life
+        of the process, which is the fail-open this whole change exists to remove (#414).
+        """
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+        good = mock_client.futures_exchange_info
+        mock_client.futures_exchange_info = MagicMock(side_effect=Exception("503 blip"))
+        executor = BinanceFuturesOrderClass(symbol="BTCUSDT", client=mock_client)
+        assert executor.get_lot_size()["min_notional"] is None   # never read != no floor
+
+        mock_client.futures_exchange_info = good                # the venue comes back
+        assert executor.get_lot_size()["min_notional"] == 5.0, (
+            "the floor never repaired itself; one transient failure at startup disables "
+            "the notional guard permanently"
+        )
+
+    def test_get_lot_size_reports_the_venue_minimums_from_the_cached_filters(self, mock_client):
+        """binance was the only executor without `get_lot_size`, so the shared sizing
+        could not ask it for a notional floor and the SLTP path submitted whatever it
+        had computed (#414).
+
+        The values come from filters `_fetch_symbol_filters` already walks, so this adds
+        no API call -- `futures_exchange_info` is still called exactly once, at
+        construction.
+        """
+        from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
+        executor = BinanceFuturesOrderClass(symbol="BTCUSDT", client=mock_client)
+        calls = mock_client.futures_exchange_info.call_count
+
+        lot = executor.get_lot_size()
+
+        assert lot["min_notional"] == 5.0, (
+            "MIN_NOTIONAL was not captured; the shared guard would read a 0.0 floor and "
+            "refuse nothing"
+        )
+        assert lot["min_qty"] == 0.001
+        assert lot["qty_step"] == 0.001
+        assert mock_client.futures_exchange_info.call_count == calls, (
+            "get_lot_size re-fetched exchange info instead of using the cached filters"
+        )
 
     def test_round_price_without_precision(self, mock_client):
         """When tick size fetch fails, prices pass through unmodified."""

@@ -174,7 +174,8 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         delta_qty = target_qty - current_qty
 
         # Query real min-order-size from Bitget market info (not hardcoded)
-        min_qty = self.trader.get_lot_size()["min_qty"]
+        lot_size = self.trader.get_lot_size()
+        min_qty = lot_size["min_qty"]
 
         if abs(delta_qty) < min_qty:
             # Already at target (delta below the minimum tradeable size)
@@ -185,6 +186,15 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         amount = self.trader._round_amount(abs(delta_qty))
 
         if amount < min_qty:
+            return self._create_trade_info(executed=False, at_target=True)
+
+        # The venue's notional floor, on the floored quantity actually sent (#414).
+        raw_floor = lot_size["min_notional"]
+        if raw_floor is None:
+            # Unknown floor: refuse rather than assume there is none (#414).
+            return self._create_trade_info(executed=False, at_target=True)
+        min_notional = float(raw_floor)
+        if min_notional > 0 and amount * current_price < min_notional:
             return self._create_trade_info(executed=False, at_target=True)
 
         # Execute market order

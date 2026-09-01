@@ -25,7 +25,7 @@ TAKER_FEE = 0.0006
 BITGET_NO_POSITION_ERRORS = ["22002", "40773", "No position to close"]
 
 # Fallback used if the exchange lot-size cannot be read from CCXT market info
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001}
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": None}
 
 
 class PositionMode(Enum):
@@ -176,7 +176,7 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             logger.warning(f"Could not load markets for {self.symbol}: {e}")
 
     def get_lot_size(self) -> Dict[str, float]:
-        """Return the symbol's ``{'min_qty', 'qty_step'}`` from CCXT market info (cached).
+        """Return the symbol's ``{'min_qty', 'qty_step', 'min_notional'}`` from CCXT (cached).
 
         Bitget's CCXT precision mode is TICK_SIZE, so ``precision.amount`` is the
         quantity step directly (e.g. 0.0001 for BTC/USDT:USDT). Falls back to
@@ -189,13 +189,20 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             market = self.client.market(self.symbol)
             min_qty = market.get("limits", {}).get("amount", {}).get("min")
             qty_step = market.get("precision", {}).get("amount")
+            # `limits.cost.min` is CCXT's normalisation of bitget's minTradeUSDT. It was
+            # fetched with the rest of the market info and dropped, so an order under the
+            # venue's notional floor was submitted and rejected (#414).
+            min_notional = market.get("limits", {}).get("cost", {}).get("min")
             self._lot_size_cache = {
                 "min_qty": float(min_qty) if min_qty is not None else _DEFAULT_LOT_SIZE["min_qty"],
                 "qty_step": float(qty_step) if qty_step is not None else _DEFAULT_LOT_SIZE["qty_step"],
+                # CCXT omits limits.cost.min for non-USDT-quoted markets; that is
+                # unknown, not a zero floor (#414).
+                "min_notional": None if min_notional is None else float(min_notional),
             }
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
-            self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+            return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
 
         return self._lot_size_cache
 
@@ -206,6 +213,12 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
         except Exception as e:
             logger.warning(f"price_to_precision failed for {self.symbol}, using unrounded price: {e}")
             return price
+
+    def quantize_quantity(self, quantity: float) -> float:
+        """The quantity this executor will actually submit. CCXT truncates for bitget,
+        which is NOT binance's epsilon floor -- validating against the wrong one accepts
+        orders the venue rejects (#414)."""
+        return self._round_amount(quantity)
 
     def _round_amount(self, amount: float) -> float:
         """Floor a quantity to the exchange's lot-size step using CCXT.

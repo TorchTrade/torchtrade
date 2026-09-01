@@ -545,6 +545,10 @@ class TestBybitFuturesOrderClass:
 
         lot_size = order_executor.get_lot_size()
         assert lot_size["min_qty"] == 0.001
+
+        # bybit reports minNotionalValue in the SAME lotSizeFilter it already reads.
+        # It was discarded, so the SLTP path submitted sub-minimum orders (#414).
+        assert lot_size["min_notional"] == 5.0
         assert lot_size["qty_step"] == 0.001
 
         # Should use cache from init, no additional API call
@@ -650,3 +654,22 @@ class TestBybitFuturesOrderClass:
         })
         status = order_executor.get_status()
         assert status["position_status"] is POSITION_UNKNOWN
+
+
+    def test_the_lazy_lot_size_fetch_also_reports_the_notional_floor(
+        self, order_executor, mock_pybit_client
+    ):
+        """bybit caches the lot size TWICE: once opportunistically in
+        `_fetch_price_precision` at construction, and once lazily in `get_lot_size` when
+        that first call threw.
+
+        The lazy path is taken precisely when the venue was flaky at startup -- so a floor
+        of 0.0 there fails open exactly when you most want it. Mutating only the lazy site
+        survived the whole suite, because every test reaches the init path.
+        """
+        order_executor._lot_size_cache = None          # force the lazy path
+        lot = order_executor.get_lot_size()
+        assert lot["min_notional"] == 5.0, (
+            "the lazy fetch reports no notional floor; after a startup failure bybit "
+            "would submit sub-minimum orders with nothing to refuse them"
+        )
