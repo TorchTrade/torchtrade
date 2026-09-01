@@ -831,7 +831,7 @@ emergency flatten:
 | position read at the top of `_step()` (position sync, duplicate-action guard) | `PositionUnknownError` |
 | the initial read inside `_reset()` | `ValueError`, or `PositionUnknownError` if the position is the unreadable part |
 | `_current_mark_price()` at the **sizing** call sites in `_execute_fractional_action` / `_execute_trade_if_needed` | `ValueError` |
-| the sizing balance / portfolio checks | `ValueError` |
+| the sizing balance / portfolio checks | `LiveObservationHalt` on the four futures venues, whose verdict is inside the `_halting` closure ([#416](https://github.com/TorchTrade/torchtrade/issues/416)); bare `ValueError` on alpaca, which has no halt policy |
 | the candle close that prices SL/TP brackets | `ValueError` |
 
 So `except LiveObservationHalt` covers the two state reads and nothing else. Catch
