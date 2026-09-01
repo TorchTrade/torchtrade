@@ -31,6 +31,37 @@ class TestBitgetFuturesOrderClass:
             executor.client = mock_ccxt_client
             return executor
 
+    @pytest.mark.parametrize("position_mode,reduce_only,expected", [
+        ("hedge", False, "open"),
+        ("hedge", True, "close"),
+        ("one_way", False, None),
+        ("one_way", True, None),
+    ], ids=["hedge-open", "hedge-close", "oneway-open", "oneway-close"])
+    def test_a_hedge_account_is_told_whether_an_order_opens_or_closes(
+            self, mock_ccxt_client, position_mode, reduce_only, expected
+        ):
+        """On a hedge account `tradeSide` is what says an order REDUCES rather than opens.
+
+        `position_mode` is user-settable config, bybit has three hedge tests and bitget had
+        none, so the whole branch was unbuilt: inverting open/close failed nothing (#421).
+        Sending 'open' for a close on a hedge account stacks a second position instead of
+        flattening the first.
+        """
+        from torchtrade.envs.live.bitget.order_executor import (
+            BitgetFuturesOrderClass, PositionMode,
+        )
+
+        ex = BitgetFuturesOrderClass(
+            symbol="BTC/USDT:USDT", trade_mode="quantity", demo=True, leverage=10,
+            position_mode=PositionMode.HEDGE if position_mode == "hedge"
+            else PositionMode.ONE_WAY,
+            client=mock_ccxt_client,
+        )
+
+        params = ex._build_order_params(reduce_only=reduce_only)
+
+        assert params.get("tradeSide") == expected
+
     def test_initialization(self, order_executor, mock_ccxt_client):
         """Test order executor initialization."""
         assert order_executor.symbol == "BTC/USDT:USDT"
