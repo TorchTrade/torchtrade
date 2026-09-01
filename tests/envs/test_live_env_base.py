@@ -2147,6 +2147,67 @@ def _okx_status(pos_side="net"):
     return ex.get_status().get("position_status")
 
 
+@pytest.mark.parametrize("pos_side,expected_sign", [("long", 1), ("short", -1)],
+                         ids=["hedge-long", "hedge-short"])
+def test_okx_signs_a_hedge_position_from_posside(pos_side, expected_sign):
+    """okx reports hedge size as a POSITIVE `pos`; the direction is only in `posSide`.
+
+    The "long" leg was unreachable: the parametrize covered "short" and "net", and the one
+    fixture carrying "long" supplied two positions so the multi-position guard returned
+    first. Signing a hedge LONG as a short passed the entire suite (#421).
+    """
+    status = _okx_status(pos_side)
+
+    assert status is not POSITION_UNKNOWN
+    assert status.qty == pytest.approx(expected_sign * 1.0)
+
+
+def _okx_executor(**client_overrides):
+    """Real okx adapter over stubbed Account/PublicData clients."""
+    from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
+
+    account = MagicMock()
+    account.get_positions = MagicMock(return_value={"code": "0", "data": []})
+    account.set_position_mode = MagicMock(return_value={"code": "0"})
+    account.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["okx"])
+    public = MagicMock()
+    public.get_instruments = MagicMock(return_value={"data": [
+        {"minSz": "0.001", "lotSz": "0.001", "ctVal": "1"}]})
+    for k, v in client_overrides.items():
+        setattr(public, k, v)
+    return OKXFuturesOrderClass(symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True,
+                                leverage=10, account_client=account, public_client=public,
+                                client=MagicMock())
+
+
+def test_okx_reads_the_mark_price_not_the_index_price():
+    """`markPx` and `idxPx` arrive in the SAME payload and are different numbers.
+
+    The only test driving the real `get_mark_price()` omitted `markPx` to exercise the
+    raise, and everything else stubbed `trader.get_mark_price` wholesale -- so swapping
+    the field to `idxPx` failed nothing (#421). The mark feeds unrealized_pnl_pct,
+    distance_to_liquidation and fractional sizing.
+    """
+    ex = _okx_executor(get_mark_price=MagicMock(return_value={
+        "code": "0", "data": [{"markPx": "101.5", "idxPx": "99.0"}]}))
+
+    assert ex.get_mark_price() == pytest.approx(101.5)
+
+
+def test_okx_clamps_a_sub_minimum_quantity_UP_to_the_venue_minimum():
+    """okx alone rounds UP, and the shared refusal depends on knowing that.
+
+    `_format_size` floors onto the step and then raises anything below `min_qty` to it, so
+    a 0.0001 ask becomes a 0.001 order -- a 10x position. binance raises, bitget floors,
+    bybit sends the raw value. The conftest's `minSz == lotSz` meant deleting the clamp
+    failed no test, while `_refuse_below_venue_minimums` is written around its existence.
+    """
+    ex = _okx_executor()
+
+    assert ex.quantize_quantity(0.0001) == pytest.approx(0.001)
+    assert ex.quantize_quantity(0.0029) == pytest.approx(0.002), "still floors above the min"
+
+
 def _bitget_mark(ticker):
     """Real bitget adapter over a stubbed ccxt client, for one fetch_ticker payload."""
     from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
