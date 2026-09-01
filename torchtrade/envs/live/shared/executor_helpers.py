@@ -18,12 +18,17 @@ class ExecutorHelpersMixin:
 
         Every venue wrote `if mark_price: return float(mark_price)`, which passes the
         STRING "0" -- a non-empty string is truthy -- so a venue reporting a zero mark
-        returned 0.0 from a method each of their docstrings says raises. A zero or NaN
-        mark is not a small error: it divides into fractional sizing and prices both
-        bracket legs.
+        returned 0.0 from a method each of their docstrings says raises.
+
+        Defence in depth, not a live sizing bug: `_current_mark_price` already rejects a
+        non-positive mark before anything is sized (#347), so a 0.0 could not reach an
+        order. What was broken is this method's own contract, on four venues at once.
 
         RuntimeError, which is what all four `get_mark_price` docstrings promise and what
-        the venue suites already assert.
+        the venue suites already assert -- but that type only holds for a DIRECT caller.
+        Every reachable rollout reads this through `_current_mark_price`, whose broad
+        `except Exception` re-wraps it into a ValueError on purpose, so that `_halting`
+        takes the halt/FLATTEN branch rather than the raw-RuntimeError bypass (#394).
         """
         try:
             price = float(raw)

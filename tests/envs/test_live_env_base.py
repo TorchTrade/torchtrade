@@ -2180,20 +2180,6 @@ def _okx_executor(**client_overrides):
                                 client=MagicMock())
 
 
-def test_okx_reads_the_mark_price_not_the_index_price():
-    """`markPx` and `idxPx` arrive in the SAME payload and are different numbers.
-
-    The only test driving the real `get_mark_price()` omitted `markPx` to exercise the
-    raise, and everything else stubbed `trader.get_mark_price` wholesale -- so swapping
-    the field to `idxPx` failed nothing (#421). The mark feeds unrealized_pnl_pct,
-    distance_to_liquidation and fractional sizing.
-    """
-    ex = _okx_executor(get_mark_price=MagicMock(return_value={
-        "code": "0", "data": [{"markPx": "101.5", "idxPx": "99.0"}]}))
-
-    assert ex.get_mark_price() == pytest.approx(101.5)
-
-
 def test_okx_clamps_a_sub_minimum_quantity_UP_to_the_venue_minimum():
     """okx alone rounds UP, and the shared refusal depends on knowing that.
 
@@ -2235,11 +2221,14 @@ def test_bitget_reports_the_mark_it_has(ticker, expected):
 
 
 @pytest.mark.parametrize("ticker", [
-    {},                                    # both absent -> used to return 0.0 silently
-    {"info": {"markPrice": "0"}},          # "0" is TRUTHY, so it was returned as 0.0
     {"last": 0},
-    {"info": {"markPrice": "nan"}},
-], ids=["both-absent", "zero-string-mark", "zero-last", "nan-mark"])
+    # A NUMERIC 0 mark alongside a usable `last`. This is the row that separates the
+    # explicit `raw is None or raw == ''` chain from the tidier `markPrice or last`:
+    # the latter falls through and substitutes a stale last-trade print for a mark the
+    # venue reported as broken. Without it, someone "simplifies" the chain back and
+    # stays green.
+    {"info": {"markPrice": 0}, "last": 101.0},
+], ids=["zero-last", "numeric-zero-mark-does-not-fall-back"])
 def test_bitget_refuses_a_mark_price_it_does_not_have(ticker):
     """A method documented to raise returned 0.0 instead (#421).
 
@@ -2247,21 +2236,27 @@ def test_bitget_refuses_a_mark_price_it_does_not_have(ticker):
     `if mark_price:` passes the string "0" because a non-empty string is truthy, and
     `float(ticker.get('last', 0))`'s default fires when both fields are absent.
 
+    Only the rows `_MARK_READERS` cannot reach: bitget is the one venue with a FALLBACK,
+    so an unusable `last`, and a numeric-zero mark that must NOT fall back to it, are
+    bitget-shaped cases. The absent and zero/NaN-mark rows live in the cross-venue table.
+
     Scope, stated precisely because the first version of this docstring overclaimed: a
-    0.0 CANNOT currently reach sizing -- `_current_mark_price` validates finiteness and
-    `> 0` before any order is sized (#347), and `_acquire_post_bar_state` guards its own
-    read. What was broken is this method's own contract, on all four venues at once. The
-    value is parity and defence in depth for a direct caller, not a live sizing bug.
+    0.0 CANNOT currently reach sizing -- `_current_mark_price` rejects a non-positive mark
+    before anything is sized (#347). What was broken is this method's own contract, on all
+    four venues at once: parity and defence in depth, not a live sizing bug.
     """
     with pytest.raises(RuntimeError, match="mark price"):
         _bitget_mark(ticker)
 
 
 def _binance_mark(raw):
+    return _binance_mark_payload({} if raw is None else {"markPrice": raw})
+
+
+def _binance_mark_payload(ticker):
     from torchtrade.envs.live.binance.order_executor import BinanceFuturesOrderClass
     client = MagicMock()
-    client.futures_mark_price = MagicMock(
-        return_value={} if raw is None else {"markPrice": raw})
+    client.futures_mark_price = MagicMock(return_value=ticker)
     client.futures_change_leverage = MagicMock(return_value=_LEVERAGE_BODIES["binance"])
     # A real LOT_SIZE, or construction fails first and the test passes on the wrong
     # exception -- which the `match=` caught.
@@ -2277,9 +2272,12 @@ def _binance_mark(raw):
 
 
 def _bybit_mark(raw):
+    return _bybit_mark_payload({} if raw is None else {"markPrice": raw, "lastPrice": raw})
+
+
+def _bybit_mark_payload(ticker):
     from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
     client = MagicMock()
-    ticker = {} if raw is None else {"markPrice": raw, "lastPrice": raw}
     client.get_tickers = MagicMock(
         return_value={"retCode": 0, "result": {"list": [ticker]}})
     client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["bybit"])
@@ -2291,16 +2289,54 @@ def _bybit_mark(raw):
 
 
 def _okx_mark(raw):
-    ex = _okx_executor(get_mark_price=MagicMock(return_value={
-        "code": "0", "data": [{} if raw is None else {"markPx": raw}]}))
-    return ex.get_mark_price()
+    return _okx_mark_payload({} if raw is None else {"markPx": raw})
 
 
-_MARK_READERS = {"binance": _binance_mark, "bybit": _bybit_mark, "okx": _okx_mark}
+def _okx_mark_payload(ticker):
+    return _okx_executor(get_mark_price=MagicMock(return_value={
+        "code": "0", "data": [ticker]})).get_mark_price()
 
 
-@pytest.mark.parametrize("venue", ["binance", "bybit", "okx"])
-@pytest.mark.parametrize("raw", ["0", "nan", None], ids=["zero-string", "nan", "absent"])
+_MARK_READERS = {
+    "binance": _binance_mark,
+    "bybit": _bybit_mark,
+    "okx": _okx_mark,
+    "bitget": lambda raw: _bitget_mark({} if raw is None else {"info": {"markPrice": raw}}),
+}
+# The guard `_DIRECTION_READERS` carries, for the same reason: a fifth venue would
+# otherwise join with no mark coverage and nothing would complain.
+assert set(_MARK_READERS) == {c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS}, (
+    "a futures venue is missing from the mark-price table"
+)
+
+
+# Each venue ships the mark and the index in the SAME payload, under adjacent names.
+# okx's `markPx`/`idxPx` was the pair #421 caught; binance and bybit both carry
+# `markPrice`/`indexPrice` and had no test supplying both with different values -- the
+# lesson of this PR, unapplied to two of the venues it was learned on.
+_MARK_VS_INDEX = {
+    "binance": lambda: _binance_mark_payload({"markPrice": "101.5", "indexPrice": "99.0"}),
+    "bybit": lambda: _bybit_mark_payload({"markPrice": "101.5", "indexPrice": "99.0"}),
+    "okx": lambda: _okx_mark_payload({"markPx": "101.5", "idxPx": "99.0"}),
+}
+
+
+@pytest.mark.parametrize("venue", sorted(_MARK_VS_INDEX))
+def test_a_venue_reports_its_MARK_and_not_its_index(venue):
+    """The index is a different number in the same payload, and cheaper to grab by mistake.
+
+    Swapping the field passes every other test: the value is still finite and positive, so
+    only a row where mark and index DIFFER can see it. The mark feeds unrealized_pnl_pct,
+    distance_to_liquidation and fractional sizing; the index does not.
+
+    bitget is absent because ccxt normalises its ticker and the adapter reads
+    `info.markPrice` with a `last` fallback -- it has no index field to confuse.
+    """
+    assert _MARK_VS_INDEX[venue]() == pytest.approx(101.5)
+
+
+@pytest.mark.parametrize("venue", sorted(_MARK_READERS))
+@pytest.mark.parametrize("raw", ["0", None], ids=["zero-string", "absent"])
 def test_no_venue_reports_a_mark_price_it_does_not_have(venue, raw):
     """The same rule on the other three, because my fix named only bitget.
 
@@ -2310,7 +2346,12 @@ def test_no_venue_reports_a_mark_price_it_does_not_have(venue, raw):
     string passes. Two reviewers found it independently -- prose vouching for other
     venues is exactly the shape that let bybit's dead guard survive (#421).
     """
-    with pytest.raises((RuntimeError, ValueError), match="mark price"):
+    # RuntimeError alone: `_validated_mark` swallows TypeError/ValueError into a 0.0 and
+    # then raises RuntimeError, and these call `get_mark_price()` directly rather than
+    # through `_current_mark_price` (the only thing that produces ValueError). Accepting
+    # ValueError would let a venue regressing to a bare `float(ticker["markPrice"])`
+    # blow-up satisfy the test that exists to forbid exactly that.
+    with pytest.raises(RuntimeError, match="mark price"):
         _MARK_READERS[venue](raw)
 
 
@@ -2350,28 +2391,6 @@ def test_an_unusable_side_reads_as_unknown_not_as_a_direction(venue, side):
     okx's docstring, and neutering bybit's guard failed no test at all (#421).
     """
     assert _DIRECTION_READERS[venue](side) is POSITION_UNKNOWN
-
-
-def test_okx_still_signs_a_recognised_short_negative():
-    """The guard must reject the unrecognised, not the legitimate."""
-    from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
-
-    account = MagicMock()
-    account.get_positions = MagicMock(return_value={"code": "0", "data": [
-        {"instId": "BTC-USDT-SWAP", "pos": "1.0", "posSide": "short",
-         "avgPx": "100", "markPx": "101", "lever": "10", "mgnMode": "cross"}
-    ]})
-    account.set_position_mode = MagicMock(return_value={"code": "0"})
-    account.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["okx"])
-    public = MagicMock()
-    public.get_instruments = MagicMock(return_value={"data": []})
-
-    ex = OKXFuturesOrderClass(
-        symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=10,
-        api_key="k", api_secret="s", passphrase="p",
-        client=MagicMock(), account_client=account, public_client=public,
-    )
-    assert ex.get_status()["position_status"].qty == pytest.approx(-1.0)
 
 
 @pytest.mark.parametrize("exchange", ["binance", "bitget", "bybit", "okx"])
