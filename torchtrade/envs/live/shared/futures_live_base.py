@@ -167,6 +167,43 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     # sibling's MRO runs SLTPMixin -> <Venue>Base -> here and never touches the leaf.
     TAKER_FEE: float
 
+    def _read_sizing_balance(self) -> dict:
+        """The account read that money decisions are made from, under the halt policy.
+
+        total_margin_balance, not total_wallet_balance or available_balance: binance's
+        wallet figure excludes unrealized PnL and would under-size, and available_balance
+        omits margin already locked in open positions (#295).
+
+        The VERDICT lives INSIDE the closure. `_halting` catches ValueError precisely so
+        an impossible account becomes a halt, and it stores on the way out of a read that
+        SUCCEEDED -- so a check made one frame above it has already lost: the rejected
+        value is cached as the last CONFIRMED read a grace period will serve, and the bar
+        is never flagged, so the outage counter never advances (#416). `equity == 0.0` is
+        what a venue reports while liquidating you.
+
+        Three callers, one rule. It was written out three times and had already drifted
+        twice: the SLTP path checked after the call, and `_reset` seeded this same cache
+        slot with no check at all -- so a NaN stored at reset was served, unvalidated,
+        into sizing on the next failed read.
+
+        Returns the whole dict, not the float: `_reset` reads `available_balance` from it,
+        and the grace path replays whatever was stored.
+        """
+        def read_balance():
+            info = self.trader.get_account_balance()
+            # float() first: an adapter that returns strings made `math.isfinite` raise
+            # TypeError straight out of `_step`, on a perfectly good balance.
+            total_balance = float(info["total_margin_balance"])
+            # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
+            # balance sizes an inf target (#277, #347).
+            if not math.isfinite(total_balance) or total_balance <= 0:
+                raise ValueError(
+                    f"cannot size against a portfolio value of {total_balance}"
+                )
+            return info
+
+        return self._halting(read_balance, cache_key="balance")
+
     def _calculate_fractional_position(
         self, action_value: float, current_price: float
     ) -> tuple[float, float, str]:
@@ -177,28 +214,10 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         if action_value == 0.0:
             return 0.0, 0.0, "flat"
 
-        # The VERDICT is inside the closure, not just the read. `_halting` catches
-        # ValueError precisely so an impossible account state becomes a halt; raising one
-        # frame above it sent that straight out of `_step`. `equity == 0.0` is what a
-        # venue reports while liquidating you -- the worst moment to crash rather than
-        # halt under policy (#295).
-        def read_balance():
-            info = self.trader.get_account_balance()
-            total_balance = info["total_margin_balance"]
-            # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
-            # balance sizes an inf target (#277).
-            if not math.isfinite(total_balance) or total_balance <= 0:
-                raise ValueError(
-                    f"cannot size a trade against a portfolio value of {total_balance}"
-                )
-            return info
-
-        balance_info = self._halting(read_balance, cache_key="balance")
-
-        # total_margin_balance, not available_balance: the target must reflect the whole
-        # portfolio including margin already locked in open positions.
         # The 2% buffer is the venue's maintenance-margin headroom.
-        effective_balance = balance_info["total_margin_balance"] * 0.98
+        effective_balance = float(
+            self._read_sizing_balance()["total_margin_balance"]
+        ) * 0.98
         return calculate_fractional_position(PositionCalculationParams(
             balance=effective_balance,
             action_value=action_value,
@@ -231,30 +250,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         if self.config.trade_mode != "fractional":
             raise ValueError(f"Unsupported trade_mode={self.config.trade_mode!r}")
 
-        # The VERDICT goes INSIDE the closure, as the plain path's does. Validating after
-        # `_halting` returns is the "guard hoisted one frame up" that its own comment
-        # warns about, and here it cost two things (#416): the closure returned
-        # successfully, so the unusable value reached the store and became the last
-        # CONFIRMED read a grace period would go on serving; and nothing raised, so the
-        # bar was never flagged unknown, the outage counter never advanced, and a
-        # permanently broken balance feed refused every open forever without ever
-        # truncating. The plain path, for the same input, did neither.
-        def read_balance():
-            # total_margin_balance, not total_wallet_balance: binance's wallet figure
-            # excludes unrealized PnL and would under-size (#295).
-            info = self.trader.get_account_balance()
-            total_balance = float(info["total_margin_balance"])
-            # isfinite, not just `<= 0`: `nan <= 0` is False, so a NaN balance would size
-            # a NaN bracket (#347). Callers validate current_price before calling.
-            if not math.isfinite(total_balance) or total_balance <= 0:
-                raise ValueError(
-                    f"cannot size a bracket against a portfolio value of {total_balance}"
-                )
-            return info
-
-        balance = float(
-            self._halting(read_balance, cache_key="balance")["total_margin_balance"]
-        )
+        balance = float(self._read_sizing_balance()["total_margin_balance"])
 
         # Reserve what the trader will CHARGE: ReplayOrderExecutor carries its own rate,
         # so reserving the venue constant refused every open for a higher-fee caller (#278).
@@ -937,11 +933,12 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # rather than a bare PositionUnknownError, which is what `except
         # LiveObservationHalt` and the FLATTEN policy were always documented to cover and
         # what the reset path actually bypassed until now.
-        # Two `_halting` calls rather than one closure plus a manual cache seed: the
-        # balance goes through the same "balance" slot the sizing path uses, so
-        # `_last_confirmed_read` keeps exactly one writer. `_reset_outage_state` has just
-        # cleared it, so a failure here still raises -- an episode cannot start on cache.
-        balance = self._halting(self.trader.get_account_balance, cache_key="balance")
+        # Through the sizing reader, so the "balance" slot keeps one writer AND one
+        # standard. It used to pass the bare callable: the slot was shared but the verdict
+        # was not, so a NaN stored here was served straight into sizing on the next failed
+        # read (#416). `_reset_outage_state` has just cleared it, so a failure here still
+        # raises -- an episode cannot start on cache.
+        balance = self._read_sizing_balance()
 
         # The CONVERSION is inside the closure, not just the call. No adapter raises from
         # `get_status`: all four RETURN the POSITION_UNKNOWN sentinel, and the error comes

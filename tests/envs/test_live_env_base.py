@@ -3522,7 +3522,11 @@ class _ResetStub:
         class _Trader:
             def cancel_open_orders(self): return cancel_ok
             def close_position(self): return close_ok
-            def get_account_balance(self): return {"available_balance": 1000.0}
+            def get_account_balance(self):
+                # total_margin_balance too: every real adapter returns it, and reset now
+                # reads the balance through the same verdict sizing does (#416), so a
+                # stub that omits it is testing a venue that cannot exist.
+                return {"available_balance": 1000.0, "total_margin_balance": 1000.0}
             def get_status(self): return {"position_status": None}
 
         class _Observer:
@@ -3536,9 +3540,15 @@ class _ResetStub:
             lambda: TorchTradeLiveEnv._reset_outage_state(self)
         )
         self._max_unknown_status_steps = 0
-        # The reset read runs under the halt policy as of #295.
+        # The reset read runs under the halt policy as of #295, and through the same
+        # verdict the sizing paths use as of #416 -- so the real reader is bound here
+        # rather than stubbed, or this would assert reset's cache write is validated
+        # while never running the code that validates it.
         self._halting = lambda read, cache_key=None: (
             TorchTradeFuturesLiveEnv._halting(self, read, cache_key)
+        )
+        self._read_sizing_balance = lambda: (
+            TorchTradeFuturesLiveEnv._read_sizing_balance(self)
         )
         self.trader, self.observer = _Trader(), _Observer()
         self.history = SimpleNamespace(reset=lambda: setattr(
@@ -4466,11 +4476,9 @@ def test_a_bracket_that_cannot_be_sized_is_a_failed_trade_on_every_venue(venue):
     )
 
 
-@pytest.mark.parametrize("venue",
-                         [c.__module__.split(".")[-2] for c in SLTP_FUTURES_ENVS])
 @pytest.mark.parametrize("balance", [0.0, -1.0, float("nan"), float("inf")],
                          ids=["zero", "negative", "nan", "inf"])
-def test_an_unusable_balance_halts_the_sltp_sizing_too(venue, balance):
+def test_an_unusable_balance_halts_the_sltp_sizing_too(balance):
     """An unusable ACCOUNT halts, on the SLTP path as on the plain one (#416).
 
     The verdict has to be raised INSIDE the `_halting` closure. Hoisted one frame up --
@@ -4478,7 +4486,10 @@ def test_an_unusable_balance_halts_the_sltp_sizing_too(venue, balance):
     wrong at once, both of them silent. This asserts the halt; the two tests below assert
     the consequences, because the halt alone does not prove either.
     """
-    env, trader = _real_futures_env(budget=0, venue=venue, sltp=True)
+    # One venue, not four: only okx overrides `_resolve_bracket_quantity`, and its first
+    # line delegates to super(). Reverting the fix failed all sixteen rows identically,
+    # so the venue axis asserted nothing the shared method does not already give.
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
     env.config.trade_mode = "fractional"
     trader.get_account_balance.return_value = {
         "available_balance": balance, "total_margin_balance": balance,
@@ -4489,12 +4500,59 @@ def test_an_unusable_balance_halts_the_sltp_sizing_too(venue, balance):
         env._resolve_bracket_quantity(100.0)
 
 
-def test_an_unusable_balance_is_not_stored_as_the_last_confirmed_read():
-    """#416(1): the value the guard just rejected must not be what a grace period serves.
+def test_a_string_balance_sizes_rather_than_crashing_the_step():
+    """`float()` before `math.isfinite`, because isfinite raises TypeError on a str.
 
-    `_halting` stores on the way OUT of a successful read, so a verdict reached after it
-    returns has already been overtaken -- and `_reset` reads `available_balance` from
-    that same slot. `equity == 0.0` is what a venue reports while liquidating you.
+    An adapter that reports numbers as strings -- which is what several venue REST APIs
+    do -- crashed the plain sizing path out of `_step` on a perfectly good balance, since
+    `math.isfinite("1000.0")` is a TypeError, not False. The conversion has to come first.
+    A string that is not a number is a different case and still halts, below.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
+    env.config.trade_mode = "fractional"
+    trader.get_account_balance.return_value = {
+        "available_balance": "1000.0", "total_margin_balance": "1000.0",
+        "total_wallet_balance": "1000.0", "total_maintenance_margin": 0.0,
+    }
+
+    assert env._resolve_bracket_quantity(100.0) > 0
+
+    trader.get_account_balance.return_value["total_margin_balance"] = "n/a"
+    with pytest.raises(LiveObservationHalt):
+        env._resolve_bracket_quantity(100.0)
+
+
+def test_reset_cannot_seed_the_balance_cache_with_a_value_sizing_would_refuse():
+    """`_reset` writes the same cache slot the sizing paths read (#416).
+
+    It used to pass the bare callable, so the slot had one writer but two standards: a
+    NaN stored at reset was served, unvalidated, into sizing on the next failed read --
+    the poisoning this issue is about, arriving through the one door that had no guard.
+    """
+    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
+    trader.get_account_balance.return_value = {
+        "available_balance": float("nan"), "total_margin_balance": float("nan"),
+        "total_wallet_balance": float("nan"), "total_maintenance_margin": 0.0,
+    }
+
+    with pytest.raises(LiveObservationHalt):
+        env.reset()
+
+    assert "balance" not in env._last_confirmed_read
+
+
+def test_an_unusable_balance_is_neither_cached_nor_uncounted():
+    """The two consequences, which the halt above is blind to (#416).
+
+    A fix that halts from the WRONG PLACE -- after `_halting` returns rather than inside
+    its closure -- passes the halt test and fails both of these. That is the whole point
+    of the issue, so they are asserted directly rather than inferred from the raise.
+
+    1. `_halting` stores on the way OUT of a successful read, so a verdict reached after
+       it returns has already been overtaken. `equity == 0.0` is what a venue reports
+       while liquidating you, and `_reset` reads `available_balance` from that same slot.
+    2. Nothing raised means the bar is never flagged, so the outage counter never
+       advances and a permanently broken feed refuses every open forever.
     """
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
     env.config.trade_mode = "fractional"
@@ -4507,25 +4565,6 @@ def test_an_unusable_balance_is_not_stored_as_the_last_confirmed_read():
         env._resolve_bracket_quantity(100.0)
 
     assert "balance" not in env._last_confirmed_read
-
-
-def test_an_unusable_balance_counts_as_an_outage():
-    """#416(2): a read that produces nothing usable is an outage, and must be counted.
-
-    Because the old closure returned successfully, `_status_unknown_this_step` was never
-    set: a permanently broken balance feed failed every SLTP open forever, with no
-    `status_unknown` in the observation and no truncation. The plain path truncates.
-    """
-    env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
-    env.config.trade_mode = "fractional"
-    trader.get_account_balance.return_value = {
-        "available_balance": 0.0, "total_margin_balance": 0.0,
-        "total_wallet_balance": 0.0, "total_maintenance_margin": 0.0,
-    }
-
-    with pytest.raises(LiveObservationHalt):
-        env._resolve_bracket_quantity(100.0)
-
     assert env._status_unknown_this_step is True
 
 
