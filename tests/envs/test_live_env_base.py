@@ -4666,12 +4666,16 @@ def test_an_unusable_balance_counts_as_an_outage():
     """#416(2). The read produced nothing usable, so the bar is unconfirmed and must say
     so -- the old code returned successfully and left the flag clear.
 
-    Deliberately asserts the FLAG and not truncation. I tried to pin the whole chain and
-    could not: the counter advances in `_finalize_step_flags`, which only runs if `_step`
-    completes, and a balance-feed outage does not get that far because
-    `_get_portfolio_value` reads the balance OUTSIDE the halt policy and dies with a raw
-    RuntimeError first. So the flag is what is true here; claiming truncation would be
-    claiming a chain that is currently broken elsewhere.
+    Deliberately asserts the FLAG and not truncation, and the reason is measured rather
+    than reasoned: the counter advances in `_finalize_step_flags`, which only runs if
+    `_step` COMPLETES, and on a readable 0.0 balance the halt leaves `_step` first. Driven
+    against a real plain futures env at budget=0, both a hold and an open action raise
+    `LiveObservationHalt` out of `step()`, so nothing reaches the counter either way.
+
+    Two earlier explanations of this in this docstring were wrong -- the first implied
+    truncation would otherwise happen, the second blamed `_get_portfolio_value` reading
+    outside the halt policy, which it does not (it raises only on a non-finite equity, and
+    0.0 is finite). Hence stating only what was observed.
     """
     env = _refused_sizing_env()
 
