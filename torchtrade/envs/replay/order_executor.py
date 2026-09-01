@@ -394,6 +394,11 @@ class ReplayOrderExecutor:
         """
         return {"min_qty": 0.000001, "qty_step": 0.000001, "min_notional": 0.0}
 
+    def quantize_quantity(self, quantity: float) -> float:
+        """What replay would submit, so a live env backtested here sees the same
+        refusals it would see live (#414)."""
+        return self._round_amount(quantity)
+
     def _round_amount(self, amount: float) -> float:
         """Floor a quantity to the replay lot step (never rounds up — margin-safe,
         matching the live truncation path)."""

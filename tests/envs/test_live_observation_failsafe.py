@@ -188,6 +188,8 @@ def _real_futures_env(budget, venue="binance", sltp=False, position_status=None,
     trader.get_mark_price.return_value = 100.0
     trader.get_lot_size.return_value = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
     trader.round_quantity.side_effect = lambda q: round(float(q), 3)
+    # The executor is the authority on what it will submit; the shared guard asks it.
+    trader.quantize_quantity.side_effect = lambda q: round(float(q), 3)
     trader._round_amount.side_effect = lambda q: round(float(q), 3)   # bitget/okx spelling
     trader.trade.return_value = True
     trader.close_position.return_value = True

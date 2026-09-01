@@ -110,7 +110,10 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         self._min_qtys: Dict[str, float] = {}
         # Always present, so `get_lot_size` needs no getattr fallback: a fail-open
         # default is how a missing floor becomes an unchecked order (#414).
-        self._min_notional: float = 0.0
+        # None = not yet read. 0.0 would mean 'this symbol has no floor', which is
+        # a different claim -- collapsing them makes an outage look like a venue
+        # with no minimum, and the guard then refuses nothing (#414).
+        self._min_notional: float | None = None
         self._tick_decimals: int = 0
 
         # Initialize client
@@ -225,8 +228,14 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
         return {
             "min_qty": float(self._min_qtys.get(self.symbol, 0.0)),
             "qty_step": float(step[0]),
-            "min_notional": float(self._min_notional),
+            "min_notional": (None if self._min_notional is None
+                             else float(self._min_notional)),
         }
+
+    def quantize_quantity(self, quantity: float) -> float:
+        """The quantity this executor will actually submit, for a caller that must
+        validate against it rather than against its own guess (#414)."""
+        return self.round_quantity(quantity)
 
     def round_quantity(self, quantity: float, symbol: Optional[str] = None) -> float:
         """Floor a quantity toward zero to the symbol's LOT_SIZE step.

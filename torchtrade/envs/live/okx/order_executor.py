@@ -28,7 +28,7 @@ TAKER_FEE = 0.0005
 
 # okx derivatives bind on minSz/lotSz; there is no separate notional floor, so
 # this is 0.0 rather than absent -- the shared guard reads one key on every venue.
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": None}
 
 
 class PositionMode(Enum):
@@ -182,6 +182,11 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 }
         except Exception as e:
             logger.warning(f"Could not fetch tick size for {self.symbol}: {e}")
+
+    def quantize_quantity(self, quantity: float) -> float:
+        """The quantity this executor will actually submit. Note `_format_size` clamps UP
+        to `min_qty`, so this can exceed what was asked -- the caller must see that."""
+        return float(self._format_size(quantity))
 
     def _format_size(self, qty: float) -> str:
         """Quantize quantity to lot size step, enforce minimum, and format as string."""
@@ -558,7 +563,7 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             if str(code) != "0":
                 msg = response.get("msg", "unknown error")
                 logger.warning(f"get_instruments failed (code={code}): {msg}, using defaults")
-                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+                return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
                 return self._lot_size_cache
             instruments = response.get("data", [])
             if instruments:
@@ -570,10 +575,10 @@ class OKXFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 }
             else:
                 logger.warning(f"No instrument info for {self.symbol}, using defaults")
-                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+                return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
-            self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+            return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
 
         return self._lot_size_cache
 

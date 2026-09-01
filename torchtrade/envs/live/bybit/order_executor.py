@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Venue taker rate, read by env.py and env_sltp.py alike (#278).
 TAKER_FEE = 0.00055
 
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": None}
 
 
 class PositionMode(Enum):
@@ -506,6 +506,12 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
 
         raise RuntimeError(f"No ticker data for {self.symbol}")
 
+    def quantize_quantity(self, quantity: float) -> float:
+        """bybit submits `str(quantity)` unquantized, so this is the identity -- stated
+        rather than assumed, because the shared guard must not floor what the venue will
+        not floor (#414)."""
+        return float(quantity)
+
     def get_lot_size(self) -> Dict[str, float]:
         """
         Get and cache lot size constraints for the symbol.
@@ -524,7 +530,7 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
             if ret_code is not None and int(ret_code) != 0:
                 ret_msg = response.get("retMsg", "unknown error")
                 logger.warning(f"get_instruments_info failed (retCode={ret_code}): {ret_msg}, using defaults")
-                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+                return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
                 return self._lot_size_cache
             instruments = response.get("result", {}).get("list", [])
             if instruments:
@@ -537,10 +543,10 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 }
             else:
                 logger.warning(f"No instrument info for {self.symbol}, using defaults")
-                self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+                return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
-            self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+            return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
 
         return self._lot_size_cache
 

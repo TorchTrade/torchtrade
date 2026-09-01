@@ -268,7 +268,7 @@ class TestBinanceFuturesOrderClass:
         good = mock_client.futures_exchange_info
         mock_client.futures_exchange_info = MagicMock(side_effect=Exception("503 blip"))
         executor = BinanceFuturesOrderClass(symbol="BTCUSDT", client=mock_client)
-        assert executor.get_lot_size()["min_notional"] == 0.0   # nothing was ever read
+        assert executor.get_lot_size()["min_notional"] is None   # never read != no floor
 
         mock_client.futures_exchange_info = good                # the venue comes back
         assert executor.get_lot_size()["min_notional"] == 5.0, (

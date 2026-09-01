@@ -293,29 +293,33 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         """
         lot = self.trader.get_lot_size()
 
-        # Validate what the venue will receive. binance/bitget/okx truncate to the step;
-        # bybit sends the raw float, so flooring for it is conservative, never wrong.
-        # Return `quantity`, not `sendable` -- re-flooring an already-floored float
-        # shaves a step (2.001 -> 2.0 in 1463 of the first 200k multiples of 0.001).
-        step = float(lot["qty_step"])
-        sendable = quantity
-        if step > 0 and math.isfinite(step):
-            # The SAME epsilon `round_quantity` uses, and for the reason its docstring
-            # gives: `quantity / step` lands just under an integer for many exact
-            # multiples (0.29/0.01 is 28.999999999999996). A bare floor is a whole step
-            # below what the venue actually sends, so it refuses legal orders -- the
-            # round-2 bug with the sign flipped.
-            ratio = quantity / step
-            sendable = math.floor(ratio + max(1e-9, ratio * 1e-12)) * step
-            if not sendable > 0:
-                logger.warning(
-                    f"{self.config.symbol}: quantity {quantity} floors to {sendable} at "
-                    f"lot step {step}; refusing rather than submitting nothing"
-                )
-                return None
+        # Ask the executor what it will submit, rather than reproducing its rule here.
+        # A shared floor is wrong per venue: binance epsilon-floors, bitget truncates via
+        # CCXT, okx clamps UP to min_qty, bybit sends the raw float. Copying one venue's
+        # arithmetic accepted 0.0499999999999995 as 5.00 that bitget submits as 4.90.
+        sendable = float(self.trader.quantize_quantity(quantity))
+        if not sendable > 0:
+            logger.warning(
+                f"{self.config.symbol}: quantity {quantity} quantizes to {sendable}; "
+                f"refusing rather than submitting nothing"
+            )
+            return None
 
         notional = sendable * current_price
-        min_notional = float(lot["min_notional"])
+
+        # UNKNOWN is not "no floor". A failed metadata fetch used to report 0.0, which
+        # skipped the check entirely -- so the guard was off precisely during an outage,
+        # which is when the venue is least predictable. None means "not read yet";
+        # refuse until it is. okx reports a real 0.0 (its derivatives bind on minSz).
+        raw_floor = lot["min_notional"]
+        if raw_floor is None:
+            logger.warning(
+                f"{self.config.symbol}: the venue minimum is not known (metadata fetch "
+                f"failed); refusing rather than assuming there is no floor"
+            )
+            return None
+
+        min_notional = float(raw_floor)
         if min_notional > 0 and notional < min_notional:
             logger.warning(
                 f"{self.config.symbol}: notional {notional:.2f} is below the venue "

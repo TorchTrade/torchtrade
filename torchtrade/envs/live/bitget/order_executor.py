@@ -25,7 +25,7 @@ TAKER_FEE = 0.0006
 BITGET_NO_POSITION_ERRORS = ["22002", "40773", "No position to close"]
 
 # Fallback used if the exchange lot-size cannot be read from CCXT market info
-_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0}
+_DEFAULT_LOT_SIZE = {"min_qty": 0.001, "qty_step": 0.001, "min_notional": None}
 
 
 class PositionMode(Enum):
@@ -200,7 +200,7 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             }
         except Exception as e:
             logger.warning(f"Failed to fetch lot size for {self.symbol}: {e}, using defaults")
-            self._lot_size_cache = _DEFAULT_LOT_SIZE.copy()
+            return _DEFAULT_LOT_SIZE.copy()   # NOT cached: retry next call
 
         return self._lot_size_cache
 
@@ -211,6 +211,12 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
         except Exception as e:
             logger.warning(f"price_to_precision failed for {self.symbol}, using unrounded price: {e}")
             return price
+
+    def quantize_quantity(self, quantity: float) -> float:
+        """The quantity this executor will actually submit. CCXT truncates for bitget,
+        which is NOT binance's epsilon floor -- validating against the wrong one accepts
+        orders the venue rejects (#414)."""
+        return self._round_amount(quantity)
 
     def _round_amount(self, amount: float) -> float:
         """Floor a quantity to the exchange's lot-size step using CCXT.
