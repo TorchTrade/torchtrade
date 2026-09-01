@@ -50,12 +50,8 @@ Discrete action space mappings for different trading strategies.
   `(side, sl_pct, tp_pct)`; pass `include_short_positions=True` for the short half,
   which is off by default
 
-One builder, for spot and futures alike. There was an alpaca-specific wrapper that
-returned `(sl_pct, tp_pct)` 2-tuples by discarding the `side` field, and the CLOSE
-marker rode in that field — so `include_close_action=True` handed the policy a slot
-byte-identical to HOLD
-([#418](https://github.com/TorchTrade/torchtrade/issues/418)). Long-only is
-`include_short_positions=False`, which says what it means.
+One builder, for spot and futures alike — long-only is `include_short_positions=False`
+([#418](https://github.com/TorchTrade/torchtrade/issues/418)).
 
 This is not a BUY/SELL/HOLD map. Index 0 is the flat/no-bracket action; the long grid adds
 `len(sl) * len(tp)` entries, and `create_sltp_action_map(..., include_short_positions=True)`

@@ -18,6 +18,7 @@ from tensordict import TensorDictBase
 from torchrl.data import Categorical
 from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
+from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 
 
@@ -26,7 +27,8 @@ class AlpacaSLTPTradingEnvConfig:
     """Configuration for AlpacaSLTPTorchTradingEnv.
 
     This environment uses a combinatorial action space where each action
-    represents a (stop_loss_pct, take_profit_pct) pair for bracket orders.
+    represents a ("long", stop_loss_pct, take_profit_pct) bracket, plus HOLD and
+    optionally CLOSE.
     """
     symbol: str = "BTC/USD"
     time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
@@ -77,9 +79,8 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
     functionality. The action space is a categorical distribution over all
     combinations of (stop_loss, take_profit) levels plus a HOLD action.
 
-    Action mapping:
-        - 0: HOLD (do nothing)
-        - 1..N: BUY with specific (stop_loss_pct, take_profit_pct) combination
+    The action map is the shared `create_sltp_action_map` one, long-only: index 0 HOLD,
+    then CLOSE if `include_close_action`, then the (stop_loss_pct, take_profit_pct) grid.
 
     The environment automatically sells when either the stop-loss or take-profit
     is triggered by Alpaca's bracket order system.
@@ -120,11 +121,6 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Create action map from SL/TP combinations
         self.stoploss_levels = list(config.stoploss_levels)
         self.takeprofit_levels = list(config.takeprofit_levels)
-        # The shared builder, not an alpaca-only wrapper around it. That wrapper
-        # dropped the `side` field to hand back 2-tuples, and the CLOSE marker rode in
-        # that field -- so `include_close_action=True` produced a slot byte-identical to
-        # HOLD (#418). Long-only is expressed by `include_short_positions=False`, which
-        # is what it means, rather than by discarding the side of every action.
         self.action_map = create_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
@@ -159,6 +155,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
 
         # Get action and map to SL/TP tuple
         action_tuple = self._resolve_action_tuple(tensordict)
+        side = action_tuple[0]
 
         # Calculate and execute trade if needed (duplicate guard uses synced state)
         # No `trade_info["position_closed"]`: nothing reads it. The mixin dropped it and
@@ -169,7 +166,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         # Eagerly update position from trade result so the rest of this step
         # sees the new state without waiting for the next sync cycle.
         if trade_info["executed"] and trade_info.get("success") is not False:
-            self._record_sltp_position(action_tuple[0])
+            self._record_sltp_position(side)
 
         # Wait for next time step
         self._wait_for_next_timestamp()
@@ -212,9 +209,8 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
             )
             new_price = current_price
 
-        # Long-only, so CLOSE and HOLD both record flat -- and they are now distinct
-        # actions rather than the same tuple.
-        action_value = 1.0 if action_tuple[0] == "long" else 0.0
+        # Long-only: CLOSE and HOLD both record flat.
+        action_value = 1.0 if side == "long" else 0.0
 
         return self._record_and_score(
             next_tensordict, price=new_price, action=action_value,
@@ -230,7 +226,8 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         Returns:
             Dict with trade execution info
         """
-        trade_info = {"executed": False, "amount": 0, "side": None, "success": None}
+        trade_info = {"executed": False, "amount": 0, "side": None, "success": None,
+                      "closed_position": False}
 
         side, stop_loss_pct, take_profit_pct = action_tuple
 
@@ -238,71 +235,74 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         if side is None:
             return trade_info
 
-        # Position locking: ignore all actions while in position. Above CLOSE, as on the
-        # four futures venues -- a locked position exits via SL/TP only.
+        # A locked position exits via SL/TP only -- CLOSE included, so this outranks it.
         if self.config.lock_position_until_sltp and self.position.current_position != 0:
             return trade_info
 
-        # Inherited from SLTPMixin, unchanged: alpaca's executor has close_position() and
-        # the same refused-close contract applies. Must sit above the in-position guard
-        # below, which is the reason CLOSE did nothing even once it had a side to carry.
+        # Above the in-position guard: CLOSE is the one action that NEEDS a position.
         if side == "close":
             return self._close_action(trade_info)
 
-        # Already in position (Alpaca is long-only, so position=1 means locked)
-        if self.position.current_position == 1:
+        # Alpaca is spot. A "short" tuple would submit a BUY below, silently trading the
+        # opposite of what the action says, so refuse it the way the mixin does rather
+        # than relying on `include_short_positions=False` staying hardcoded upstream.
+        if side != "long":
+            raise ValueError(f"Invalid side: {side!r}. Alpaca is long-only.")
+
+        # `!= 0`, not `== 1`: a -1 that somehow reached here must not fall through to an
+        # entry. Makes the `current_position == 0` in the branch below redundant.
+        if self.position.current_position != 0:
             return trade_info
 
-        # BUY with SL/TP bracket order
-        if self.position.current_position == 0 and stop_loss_pct is not None and take_profit_pct is not None:
-            amount = self._calculate_trade_amount("buy")
+        amount = self._calculate_trade_amount("buy")
 
-            # Get current price to calculate absolute SL/TP levels
-            # Use market data to get current price
-            obs = self.observer.get_observations(return_base_ohlc=True)
-            current_price = float(obs["base_features"][-1, 3])  # Close price
-            # This prices BOTH brackets: a NaN close sends NaN legs, and a negative one
-            # puts the stop above the take-profit. The entry is a full-balance market buy
-            # either way, and if the venue takes it while rejecting the legs the position
-            # sits unprotected in an env whose only exit is SL/TP (#347).
-            if not math.isfinite(current_price) or current_price <= 0:
-                raise ValueError(
-                    f"unusable close price ({current_price}) for {self.config.symbol}"
-                )
+        # Get current price to calculate absolute SL/TP levels
+        # Use market data to get current price
+        obs = self.observer.get_observations(return_base_ohlc=True)
+        current_price = float(obs["base_features"][-1, 3])  # Close price
+        # This prices BOTH brackets: a NaN close sends NaN legs, and a negative one
+        # puts the stop above the take-profit. The entry is a full-balance market buy
+        # either way, and if the venue takes it while rejecting the legs the position
+        # sits unprotected in an env whose only exit is SL/TP (#347).
+        if not math.isfinite(current_price) or current_price <= 0:
+            raise ValueError(
+                f"unusable close price ({current_price}) for {self.config.symbol}"
+            )
 
-            stop_loss_price = current_price * (1 + stop_loss_pct)
-            take_profit_price = current_price * (1 + take_profit_pct)
+        stop_loss_price, take_profit_price = calculate_bracket_prices(
+            side, current_price, stop_loss_pct, take_profit_pct
+        )
 
-            try:
-                success = self.trader.trade(
-                    side="buy",
-                    amount=amount,
-                    order_type="market",
-                    time_in_force="gtc",
-                    take_profit=take_profit_price,
-                    stop_loss=stop_loss_price,
-                )
+        try:
+            success = self.trader.trade(
+                side="buy",
+                amount=amount,
+                order_type="market",
+                time_in_force="gtc",
+                take_profit=take_profit_price,
+                stop_loss=stop_loss_price,
+            )
 
-                if success:
-                    # Only record SL/TP levels that actually placed on-exchange
-                    bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
-                    self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
-                    self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
+            if success:
+                # Only record SL/TP levels that actually placed on-exchange
+                bs = getattr(self.trader, 'bracket_status', {"tp_placed": True, "sl_placed": True})
+                self.active_stop_loss = stop_loss_price if bs["sl_placed"] else 0.0
+                self.active_take_profit = take_profit_price if bs["tp_placed"] else 0.0
 
-                trade_info.update({
-                    "executed": True,
-                    "amount": amount,
-                    "side": "buy",
-                    "success": success,
-                    "stop_loss": stop_loss_price,
-                    "take_profit": take_profit_price,
-                })
-            except Exception as e:
-                logger.error(
-                    f"SLTP trade execution failed: buy ${amount:.2f} with SL={stop_loss_price:.2f}, TP={take_profit_price:.2f} - {str(e)}",
-                    exc_info=True
-                )
-                trade_info["success"] = False
+            trade_info.update({
+                "executed": True,
+                "amount": amount,
+                "side": "buy",
+                "success": success,
+                "stop_loss": stop_loss_price,
+                "take_profit": take_profit_price,
+            })
+        except Exception as e:
+            logger.error(
+                f"SLTP trade execution failed: buy ${amount:.2f} with SL={stop_loss_price:.2f}, TP={take_profit_price:.2f} - {str(e)}",
+                exc_info=True
+            )
+            trade_info["success"] = False
 
         return trade_info
 

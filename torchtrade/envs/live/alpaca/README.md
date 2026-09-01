@@ -168,7 +168,8 @@ env = AlpacaSLTPTorchTradingEnv(
 td = env.reset()
 
 # The bracket is placed with the entry; SL/TP then trigger on the venue.
-# Action 0 is HOLD -- 1..N are the (stoploss, takeprofit) pairs.
+# Action 0 is HOLD; then CLOSE if `include_close_action`; then the
+# ('long', stoploss, takeprofit) grid.
 td["action"] = torch.tensor(1)
 td = env.step(td)
 ```

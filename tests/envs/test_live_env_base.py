@@ -4244,6 +4244,8 @@ def test_dependency_injection_still_skips_construction_entirely():
 # `_dispatch_sltp_trade` is gone: once `_bracket_entry_price` took over the venue
 # split it was a forwarder with one caller and zero overrides, so `_step` calls
 # the executor directly now.
+from torchtrade.envs.live.alpaca.env_sltp import AlpacaSLTPTorchTradingEnv
+
 _SHARED_METHOD_OWNERSHIP = [
     # `_record_and_score` is owned by TorchTradeLiveEnv and reached by all TEN stepping
     # envs, alpaca included -- the only tail in this file that alpaca shares (#288).
@@ -4258,6 +4260,15 @@ _SHARED_METHOD_OWNERSHIP = [
     # cannot: all four venues share the close, only the price acquisition forked. It was
     # three byte-identical copies (mixin, bybit, okx) until #288 -- one more than the two
     # the fold set out to remove, and the copy the `success=False` contract first missed.
+    # alpaca joins this table for the methods it genuinely INHERITS -- not `_step` or
+    # `_execute_trade_if_needed`, which it overrides for the spot reasons above. #418 made
+    # it depend on the mixin's close machinery, and without this row a re-fork onto the
+    # one venue whose close is NOT covered by the cross-venue behavioural tests (they
+    # parametrize over SLTP_FUTURES_ENVS) would be unguarded in both places at once.
+    *((AlpacaSLTPTorchTradingEnv, SLTPMixin, m) for m in (
+        "_resolve_action_tuple", "_record_sltp_position", "_reset_sltp_state",
+        "_close_action", "_mark_flat",
+    )),
     *((c, SLTPMixin, m) for c in SLTP_FUTURES_ENVS for m in (
         "_step", "_reset", "_resolve_action_tuple", "_record_sltp_position",
         "_reset_sltp_state", "_close_action",
