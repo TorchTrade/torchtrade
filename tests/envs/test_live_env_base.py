@@ -4541,30 +4541,43 @@ def test_reset_cannot_seed_the_balance_cache_with_a_value_sizing_would_refuse():
     assert "balance" not in env._last_confirmed_read
 
 
-def test_an_unusable_balance_is_neither_cached_nor_uncounted():
-    """The two consequences, which the halt above is blind to (#416).
-
-    A fix that halts from the WRONG PLACE -- after `_halting` returns rather than inside
-    its closure -- passes the halt test and fails both of these. That is the whole point
-    of the issue, so they are asserted directly rather than inferred from the raise.
-
-    1. `_halting` stores on the way OUT of a successful read, so a verdict reached after
-       it returns has already been overtaken. `equity == 0.0` is what a venue reports
-       while liquidating you, and `_reset` reads `available_balance` from that same slot.
-    2. Nothing raised means the bar is never flagged, so the outage counter never
-       advances and a permanently broken feed refuses every open forever.
-    """
+def _refused_sizing_env():
+    """An SLTP env whose balance read produces nothing usable."""
     env, trader = _real_futures_env(budget=0, venue="binance", sltp=True)
     env.config.trade_mode = "fractional"
     trader.get_account_balance.return_value = {
         "available_balance": 0.0, "total_margin_balance": 0.0,
         "total_wallet_balance": 0.0, "total_maintenance_margin": 0.0,
     }
+    return env
+
+
+# Two functions, not one with two asserts. The halt above is blind to both consequences,
+# and #416 broke BOTH at once -- which is exactly the case a merged test hides: the first
+# assert fails, the second never runs, and fixing only the caching half looks green.
+def test_an_unusable_balance_is_not_stored_as_the_last_confirmed_read():
+    """#416(1). `_halting` stores on the way OUT of a read that SUCCEEDED, so a verdict
+    reached after it returns has already been overtaken. `equity == 0.0` is what a venue
+    reports while liquidating you, and `_reset` reads `available_balance` from that slot.
+    """
+    env = _refused_sizing_env()
 
     with pytest.raises(LiveObservationHalt):
         env._resolve_bracket_quantity(100.0)
 
     assert "balance" not in env._last_confirmed_read
+
+
+def test_an_unusable_balance_counts_as_an_outage():
+    """#416(2). Nothing raised means the bar is never flagged, so the outage counter
+    never advances and a permanently broken feed refuses every open forever without
+    truncating. This is the only assertion in the file that pins the flag for this path.
+    """
+    env = _refused_sizing_env()
+
+    with pytest.raises(LiveObservationHalt):
+        env._resolve_bracket_quantity(100.0)
+
     assert env._status_unknown_this_step is True
 
 

@@ -168,31 +168,22 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     TAKER_FEE: float
 
     def _read_sizing_balance(self) -> dict:
-        """The account read that money decisions are made from, under the halt policy.
+        """The account read that sizing decisions are made from, under the halt policy.
 
-        total_margin_balance, not total_wallet_balance or available_balance: binance's
-        wallet figure excludes unrealized PnL and would under-size, and available_balance
-        omits margin already locked in open positions (#295).
+        The verdict lives INSIDE the closure. `_halting` caches on the way out of a read
+        that SUCCEEDED and flags the bar only on one that raised, so a check made one
+        frame above it gets neither: the rejected value is served as last-confirmed state
+        and the outage counter never advances (#416). `equity == 0.0` is what a venue
+        reports while liquidating you.
 
-        The VERDICT lives INSIDE the closure. `_halting` catches ValueError precisely so
-        an impossible account becomes a halt, and it stores on the way out of a read that
-        SUCCEEDED -- so a check made one frame above it has already lost: the rejected
-        value is cached as the last CONFIRMED read a grace period will serve, and the bar
-        is never flagged, so the outage counter never advances (#416). `equity == 0.0` is
-        what a venue reports while liquidating you.
-
-        Three callers, one rule. It was written out three times and had already drifted
-        twice: the SLTP path checked after the call, and `_reset` seeded this same cache
-        slot with no check at all -- so a NaN stored at reset was served, unvalidated,
-        into sizing on the next failed read.
-
-        Returns the whole dict, not the float: `_reset` reads `available_balance` from it,
-        and the grace path replays whatever was stored.
+        Returns the dict, not the float: `_reset` threads the whole thing into
+        `_get_observation(snapshot=...)` and reads `available_balance` off it.
         """
         def read_balance():
             info = self.trader.get_account_balance()
-            # float() first: an adapter that returns strings made `math.isfinite` raise
-            # TypeError straight out of `_step`, on a perfectly good balance.
+            # Coerce before checking, not for the callers: `math.isfinite("1000.0")` is a
+            # TypeError, so an adapter reporting strings crashed on a good balance. The
+            # dict is returned untouched, so callers still convert.
             total_balance = float(info["total_margin_balance"])
             # isfinite, not `not (x > 0)`: that catches NaN but passes +inf, and an inf
             # balance sizes an inf target (#277, #347).
@@ -207,8 +198,7 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     def _calculate_fractional_position(
         self, action_value: float, current_price: float
     ) -> tuple[float, float, str]:
-        """Target position size from a fractional action, for all four futures venues.
-        """
+        """Target position size from a fractional action, for all four futures venues."""
         # Above the balance read on purpose: a flat action must not need the exchange.
         # No caller reaches this today -- all four pre-filter zero.
         if action_value == 0.0:
@@ -933,11 +923,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # rather than a bare PositionUnknownError, which is what `except
         # LiveObservationHalt` and the FLATTEN policy were always documented to cover and
         # what the reset path actually bypassed until now.
-        # Through the sizing reader, so the "balance" slot keeps one writer AND one
-        # standard. It used to pass the bare callable: the slot was shared but the verdict
-        # was not, so a NaN stored here was served straight into sizing on the next failed
-        # read (#416). `_reset_outage_state` has just cleared it, so a failure here still
-        # raises -- an episode cannot start on cache.
+        # Through the sizing reader, so the "balance" slot has one writer AND one
+        # standard (#416). `_reset_outage_state` has just cleared it, so a failure here
+        # still raises -- an episode cannot start on cache.
         balance = self._read_sizing_balance()
 
         # The CONVERSION is inside the closure, not just the call. No adapter raises from
