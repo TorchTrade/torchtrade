@@ -2111,43 +2111,78 @@ def test_a_null_venue_field_does_not_turn_a_healthy_position_into_an_outage(fiel
     assert status.qty == pytest.approx(1.0)
 
 
-@pytest.mark.parametrize("side", [None, "", "unexpected", "SHORT"])
-def test_an_unusable_side_reads_as_unknown_not_as_a_direction(side):
-    """`contracts if side == 'long' else -contracts` signed a long as a SHORT for any
-    unexpected value, and every consumer reads that sign."""
-    assert _bitget_status(side=side) is POSITION_UNKNOWN
+def _bybit_status(side="Buy"):
+    """Real bybit adapter over a stubbed pybit client."""
+    from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
+
+    client = MagicMock()
+    client.get_positions = MagicMock(return_value={"retCode": 0, "result": {"list": [
+        {"symbol": "BTCUSDT", "size": "1.0", "side": side, "avgPrice": "100",
+         "markPrice": "101", "leverage": "10", "tradeMode": 1},
+    ]}})
+    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["bybit"])
+    client.switch_margin_mode = MagicMock(return_value={"retCode": 0})
+    client.switch_position_mode = MagicMock(return_value={"retCode": 0})
+    ex = BybitFuturesOrderClass(symbol="BTCUSDT", trade_mode="quantity", demo=True,
+                                leverage=10, client=client)
+    return ex.get_status().get("position_status")
 
 
-@pytest.mark.parametrize("pos_side", [None, "", "SHORT", "unexpected"])
-def test_okx_refuses_an_unusable_posside_instead_of_signing_it_long(pos_side):
-    """OKX was the worst of the three and my first pass missed it.
-
-    It reports hedge-mode size as a POSITIVE `pos` with direction only in `posSide`, and
-    any unrecognised value fell through to the net-mode branch keeping that positive sign
-    -- so a short read as a long, with no error, straight into the trade path. bitget and
-    bybit at least degraded to POSITION_UNKNOWN.
-    """
+def _okx_status(pos_side="net"):
+    """Real okx adapter over stubbed Account/PublicData clients."""
     from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
 
-    # account_client, not client: okx splits Trade/Account/PublicData, and injecting only
-    # `client` left get_positions hitting the real API -- so the test passed on the API
-    # error rather than on the guard, with or without the fix.
     account = MagicMock()
     account.get_positions = MagicMock(return_value={"code": "0", "data": [
         {"instId": "BTC-USDT-SWAP", "pos": "1.0", "posSide": pos_side,
-         "avgPx": "100", "markPx": "101", "lever": "10", "mgnMode": "cross"}
+         "avgPx": "100", "markPx": "101", "lever": "10", "mgnMode": "cross"},
     ]})
     account.set_position_mode = MagicMock(return_value={"code": "0"})
     account.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["okx"])
     public = MagicMock()
     public.get_instruments = MagicMock(return_value={"data": []})
+    ex = OKXFuturesOrderClass(symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True,
+                              leverage=10, account_client=account, public_client=public,
+                              client=MagicMock())
+    return ex.get_status().get("position_status")
 
-    ex = OKXFuturesOrderClass(
-        symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True, leverage=10,
-        api_key="k", api_secret="s", passphrase="p",
-        client=MagicMock(), account_client=account, public_client=public,
-    )
-    assert ex.get_status().get("position_status") is POSITION_UNKNOWN
+
+# The direction readers, per venue. A venue absent from this table has NO coverage of
+# invariant 1's "never guess a direction" rule -- which is how bybit ended up with a
+# guard that no test could reach while the okx test's docstring asserted, in prose, that
+# bybit "at least degraded to POSITION_UNKNOWN" (#341, #421).
+_DIRECTION_READERS = {
+    "bitget": lambda side: _bitget_status(side=side),
+    "bybit": _bybit_status,
+    "okx": _okx_status,
+}
+assert set(_DIRECTION_READERS) == {
+    c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS
+} - {"binance"}, (
+    "a futures venue is missing from the direction-guard table; binance is exempt "
+    "because it reports a SIGNED quantity and never names a side"
+)
+
+
+@pytest.mark.parametrize("venue", sorted(_DIRECTION_READERS))
+@pytest.mark.parametrize("side", [None, "", "unexpected", "SHORT"])
+def test_an_unusable_side_reads_as_unknown_not_as_a_direction(venue, side):
+    """A direction is never GUESSED, on any venue that names one (#341).
+
+    Each venue signs its quantity off a side field -- `contracts if side == 'long' else
+    -contracts` and friends -- so an unexpected value signed a long as a SHORT, and every
+    consumer reads that sign: the account_state the policy sees, and the trade path.
+
+    okx was the worst shape and is worth naming: it reports hedge-mode size as a POSITIVE
+    `pos` with the direction only in `posSide`, so an unrecognised value fell through to
+    the net-mode branch KEEPING that positive sign -- a short read as a long, no error,
+    straight into the trade path. bitget and bybit at least degrade to POSITION_UNKNOWN.
+
+    Parametrized over the venues rather than written per venue, because that is exactly
+    how bybit was missed: bitget and okx each got their own test, bybit got a sentence in
+    okx's docstring, and neutering bybit's guard failed no test at all (#421).
+    """
+    assert _DIRECTION_READERS[venue](side) is POSITION_UNKNOWN
 
 
 def test_okx_still_signs_a_recognised_short_negative():
