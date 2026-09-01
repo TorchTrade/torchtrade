@@ -1,3 +1,4 @@
+import math
 import logging
 
 from torchtrade.envs.live.shared.executor_helpers import ExecutorHelpersMixin
@@ -684,13 +685,22 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
             # Fetch ticker using CCXT
             ticker = self.client.fetch_ticker(self.symbol)
 
-            # Try to get mark price, fall back to last price
-            mark_price = ticker.get('info', {}).get('markPrice')
-            if mark_price:
-                return float(mark_price)
-
-            # Fallback to last price if mark price not available
-            return float(ticker.get('last', 0))
+            # Fall back to `last` only when the venue OMITS a mark, and then validate
+            # the value. `if mark_price:` alone let "0" through -- a non-empty string is
+            # truthy -- and the fallback's `, 0)` default returned 0.0 when both were
+            # absent, silently, from a method whose docstring says it raises. A zero mark
+            # divides into sizing and prices both bracket legs; every other venue raises
+            # rather than reporting one (#421).
+            raw = ticker.get('info', {}).get('markPrice')
+            if raw is None or raw == '':
+                raw = ticker.get('last')
+            price = float(raw) if raw is not None and raw != '' else 0.0
+            if not math.isfinite(price) or price <= 0:
+                raise ValueError(
+                    f"bitget reported no usable mark price for {self.symbol} "
+                    f"(markPrice/last resolved to {raw!r})"
+                )
+            return price
 
         except Exception as e:
             logger.error(f"Error getting mark price: {str(e)}")

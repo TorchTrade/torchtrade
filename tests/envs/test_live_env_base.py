@@ -2147,6 +2147,48 @@ def _okx_status(pos_side="net"):
     return ex.get_status().get("position_status")
 
 
+def _bitget_mark(ticker):
+    """Real bitget adapter over a stubbed ccxt client, for one fetch_ticker payload."""
+    from torchtrade.envs.live.bitget.order_executor import BitgetFuturesOrderClass
+
+    client = MagicMock()
+    client.fetch_ticker = MagicMock(return_value=ticker)
+    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["bitget"])
+    client.load_markets = MagicMock(return_value={})
+    client.markets = {}
+    return BitgetFuturesOrderClass(symbol="BTC/USDT:USDT", trade_mode="quantity",
+                                   demo=True, leverage=10, client=client).get_mark_price()
+
+
+@pytest.mark.parametrize("ticker,expected", [
+    ({"info": {"markPrice": "102.0"}}, 102.0),           # the mark, preferred
+    ({"last": 101.0}, 101.0),                            # venue OMITS a mark -> last
+    ({"info": {"markPrice": None}, "last": 101.0}, 101.0),
+], ids=["mark", "no-mark-falls-back", "null-mark-falls-back"])
+def test_bitget_reports_the_mark_it_has(ticker, expected):
+    """The fallback itself is right: `last` is a real price when the venue omits a mark."""
+    assert _bitget_mark(ticker) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("ticker", [
+    {},                                    # both absent -> used to return 0.0 silently
+    {"info": {"markPrice": "0"}},          # "0" is TRUTHY, so it was returned as 0.0
+    {"last": 0},
+    {"info": {"markPrice": "nan"}},
+], ids=["both-absent", "zero-string-mark", "zero-last", "nan-mark"])
+def test_bitget_refuses_a_mark_price_it_does_not_have(ticker):
+    """`float(ticker.get('last', 0))` returned 0.0 from a method documented to raise.
+
+    Two ways in, and the conftest supplied both fields so neither was ever executed
+    (#421): `if mark_price:` passes the string "0" because a non-empty string is truthy,
+    and the `, 0)` default fires when both fields are absent. A zero mark divides into
+    sizing and prices both bracket legs -- binance, bybit and okx all raise rather than
+    report one, and bitget's own docstring says it does too.
+    """
+    with pytest.raises(RuntimeError, match="mark price"):
+        _bitget_mark(ticker)
+
+
 # The direction readers, per venue. A venue absent from this table has NO coverage of
 # invariant 1's "never guess a direction" rule -- which is how bybit ended up with a
 # guard that no test could reach while the okx test's docstring asserted, in prose, that
