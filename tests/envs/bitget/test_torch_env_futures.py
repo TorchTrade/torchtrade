@@ -758,77 +758,21 @@ class TestBitgetInitCleanup:
 
 
 class TestWithReplayData:
-    """Integration tests using ReplayObserver + ReplayOrderExecutor with real price data."""
+    """Real price data through ReplayObserver + ReplayOrderExecutor.
 
-    @pytest.fixture
-    def replay_df(self):
-        """Create realistic OHLCV test data."""
-        import pandas as pd
-
-        n = 200
-        rng = np.random.default_rng(42)
-        base = 50000 + np.cumsum(rng.normal(0, 50, n))
-        # Drawn in the original order so the RNG stream is unchanged, then clamped:
-        # a close drawn off base can land outside a high/low drawn off base alone (#326).
-        high_raw = base + np.abs(rng.normal(30, 20, n))
-        low_raw = base - np.abs(rng.normal(30, 20, n))
-        close = base + rng.normal(0, 20, n)
-        high_raw_clamped = np.maximum(high_raw, np.maximum(base, close))
-        low_raw_clamped = np.minimum(low_raw, np.minimum(base, close))
-        return pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": base,
-            "high": high_raw_clamped,
-            "low": low_raw_clamped,
-            "close": close,
-            "volume": rng.uniform(100, 1000, n),
-        })
+    The episode body is shared: eight venue copies differed only in the two classes and
+    the config values (#288).
+    """
 
     def test_multi_step_episode_with_replay(self, replay_df):
-        """Run a multi-step episode with realistic price data."""
-        from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
-        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
-
-        config = BitgetFuturesTradingEnvConfig(
-            symbol="BTC/USDT:USDT",
-            time_frames=["1m"],
-            window_sizes=[10],
-            execute_on="1m",
-            leverage=5,
-            demo=True,
+        from tests.envs.base_exchange_tests import assert_a_replay_episode_runs
+        from torchtrade.envs.live.bitget.env import (
+            BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig,
         )
 
-        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-        observer = ReplayObserver(
-            df=replay_df,
-            time_frames=config.time_frames,
-            window_sizes=config.window_sizes,
-            execute_on=config.execute_on,
-            executor=executor,
+        assert_a_replay_episode_runs(
+            BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig, replay_df,
+            actions=lambda i, env: i % len(env.action_levels), steps=20,
+            symbol="BTCUSDT", demo=True,
         )
 
-        with patch("time.sleep"), \
-             patch.object(BitgetFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = BitgetFuturesTorchTradingEnv(
-                config=config, observer=observer, trader=executor,
-            )
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            td = env.reset()
-
-            for i in range(20):
-                # Cycle through action levels (hold, long, hold, short, hold, close...)
-                action_idx = i % len(env.action_levels)
-                action_td = td.clone()
-                action_td["action"] = torch.tensor(action_idx)
-                result = env.step(action_td)
-                td = result["next"]
-
-                assert "reward" in td.keys()
-                assert "done" in td.keys()
-                assert td["account_state"].shape == (6,)
-
-                if td["done"].item():
-                    break
-
-            assert executor.current_price > 0

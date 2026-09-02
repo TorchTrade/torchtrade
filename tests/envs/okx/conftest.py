@@ -178,26 +178,3 @@ def mock_env_trader():
     trader.trade = MagicMock(return_value=True)
     trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
     return trader
-
-
-@pytest.fixture
-def replay_df():
-    """Create realistic OHLCV test data for replay integration tests."""
-    n = 200
-    rng = np.random.default_rng(42)
-    base = 50000 + np.cumsum(rng.normal(0, 50, n))
-    # Drawn in the original order so the RNG stream is unchanged, then clamped:
-    # a close drawn off base can land outside a high/low drawn off base alone (#326).
-    high_raw = base + np.abs(rng.normal(30, 20, n))
-    low_raw = base - np.abs(rng.normal(30, 20, n))
-    close = base + rng.normal(0, 20, n)
-    high_raw_clamped = np.maximum(high_raw, np.maximum(base, close))
-    low_raw_clamped = np.minimum(low_raw, np.minimum(base, close))
-    return pd.DataFrame({
-        "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-        "open": base,
-        "high": high_raw_clamped,
-        "low": low_raw_clamped,
-        "close": close,
-        "volume": rng.uniform(100, 1000, n),
-    })

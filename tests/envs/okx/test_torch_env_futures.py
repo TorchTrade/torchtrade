@@ -514,36 +514,21 @@ class TestOKXInitCleanup:
 
 
 class TestWithReplayData:
-    """Integration tests using ReplayObserver + ReplayOrderExecutor."""
+    """Real price data through ReplayObserver + ReplayOrderExecutor.
+
+    The episode body is shared: eight venue copies differed only in the two classes and
+    the config values (#288).
+    """
 
     def test_multi_step_episode_with_replay(self, replay_df):
-        """Run a multi-step episode with realistic price data."""
-        from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig
-        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
-
-        config = OKXFuturesTradingEnvConfig(
-            symbol="BTC-USDT-SWAP", time_frames=["1m"], window_sizes=[10],
-            execute_on="1m", leverage=5, demo=True,
-        )
-        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-        observer = ReplayObserver(
-            df=replay_df, time_frames=config.time_frames,
-            window_sizes=config.window_sizes, execute_on=config.execute_on, executor=executor,
+        from tests.envs.base_exchange_tests import assert_a_replay_episode_runs
+        from torchtrade.envs.live.okx.env import (
+            OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig,
         )
 
-        with patch("time.sleep"), \
-             patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = OKXFuturesTorchTradingEnv(config=config, observer=observer, trader=executor)
+        assert_a_replay_episode_runs(
+            OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig, replay_df,
+            actions=lambda i, env: i % len(env.action_levels), steps=20,
+            symbol="BTC-USDT-SWAP", demo=True,
+        )
 
-        with patch.object(env, "_wait_for_next_timestamp"):
-            td = env.reset()
-            for i in range(20):
-                action_idx = i % len(env.action_levels)
-                action_td = td.clone()
-                action_td["action"] = torch.tensor(action_idx)
-                result = env.step(action_td)
-                td = result["next"]
-                assert td["account_state"].shape == (6,)
-                if td["done"].item():
-                    break
-            assert executor.current_price > 0
