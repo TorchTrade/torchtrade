@@ -2,8 +2,8 @@
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict
 
-from torchrl.data import Categorical
 
+from torchtrade.envs.utils.plain_mixin import PlainFuturesLiveEnv
 from torchtrade.envs.live.okx.observation import OKXObservationClass
 from torchtrade.envs.live.okx.order_executor import (
     OKXFuturesOrderClass,
@@ -26,7 +26,7 @@ class OKXFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     _normalize_timeframes = staticmethod(normalize_okx_timeframe_config)
 
 
-class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
+class OKXFuturesTorchTradingEnv(PlainFuturesLiveEnv, OKXBaseTorchTradingEnv):
     """
     TorchRL environment for OKX Futures live trading.
 
@@ -58,11 +58,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
     ):
         super().__init__(config, api_key, api_secret, passphrase, feature_preprocessing_fn, observer, trader)
 
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        self.reward_function = reward_function or log_return_reward
-
-        self.action_levels = config.action_levels
-        self.action_spec = Categorical(len(self.action_levels))
+        self._init_plain_trading(config, reward_function)
 
 
     def _execute_fractional_action(

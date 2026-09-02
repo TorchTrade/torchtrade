@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict
 
-from torchrl.data import Categorical
 
+from torchtrade.envs.utils.plain_mixin import PlainFuturesLiveEnv
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
     BitgetFuturesOrderClass,
@@ -27,7 +27,7 @@ class BitgetFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     _normalize_timeframes = staticmethod(normalize_bitget_timeframe_config)
 
 
-class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
+class BitgetFuturesTorchTradingEnv(PlainFuturesLiveEnv, BitgetBaseTorchTradingEnv):
     """
     TorchRL environment for Bitget Futures live trading.
 
@@ -95,13 +95,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, api_passphrase, feature_preprocessing_fn, observer, trader)
 
-        # Set reward function (default to log return reward)
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        self.reward_function = reward_function or log_return_reward
-
-        # Define action space (environment-specific)
-        self.action_levels = config.action_levels
-        self.action_spec = Categorical(len(self.action_levels))
+        self._init_plain_trading(config, reward_function)
 
 
     def _execute_fractional_action(
