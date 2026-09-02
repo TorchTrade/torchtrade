@@ -8,6 +8,8 @@ from tensordict import TensorDictBase
 
 from torchrl.data import Categorical
 
+from torchtrade.envs.core.default_rewards import log_return_reward
+
 from torchtrade.envs.core.state import position_direction_from_status
 from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
@@ -252,26 +254,27 @@ class SLTPMixin:
         # because it is a candle close, not the mark.
         return self._halting(read_close, cache_key="candle_close")
 
-    def _init_bracket_action_space(self, reward_function=None):
+    def _init_bracket_action_space(self, reward_function=None, *, include_short_positions):
         """The tail all five SLTP `__init__`s repeat. Call after `super().__init__()`.
+
+        `include_short_positions` is REQUIRED, not read from the config: alpaca is spot
+        and has no such field, so every call site states its own answer rather than the
+        shared method reaching for a field that may not be there.
 
         Bigger and more drift-prone than the plain twin this landed alongside: the action
         MAP is built here, and `action_spec.n` is what a checkpoint binds to, so four
         copies of `create_sltp_action_map(...)` are four chances for the venues to disagree
         about how many actions a policy has (#288).
         """
-        from torchtrade.envs.core.default_rewards import log_return_reward
-
-        config = self.config
         self.reward_function = reward_function or log_return_reward
-        self.stoploss_levels = list(config.stoploss_levels)
-        self.takeprofit_levels = list(config.takeprofit_levels)
+        self.stoploss_levels = list(self.config.stoploss_levels)
+        self.takeprofit_levels = list(self.config.takeprofit_levels)
         self.action_map = create_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
-            include_short_positions=config.include_short_positions,
-            include_hold_action=config.include_hold_action,
-            include_close_action=config.include_close_action,
+            include_short_positions=include_short_positions,
+            include_hold_action=self.config.include_hold_action,
+            include_close_action=self.config.include_close_action,
         )
         self.action_spec = Categorical(len(self.action_map))
         self._reset_sltp_state()

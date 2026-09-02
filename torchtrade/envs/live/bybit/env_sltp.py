@@ -55,7 +55,8 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
     ):
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        self._init_bracket_action_space(reward_function)
+        self._init_bracket_action_space(
+            reward_function, include_short_positions=config.include_short_positions)
 
     # `_step` already took the mark under the halt policy; never read again (#295).
     _PRICES_OFF_THREADED_MARK = True

@@ -288,10 +288,16 @@ def test_a_flat_account_is_none_not_a_zero_quantity():
 
 PLAIN_VENUES = [c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS]
 
+# alpaca included: it inherits SLTPMixin and now calls its initialiser too.
+SLTP_ENVS = [c for c in LIVE_ENVS if c.__module__.endswith(".env_sltp")]
+assert len(SLTP_ENVS) == 5, [c.__name__ for c in SLTP_ENVS]
+
 
 @pytest.mark.parametrize("venue", PLAIN_VENUES)
-@pytest.mark.parametrize("levels", [[0.0, 1.0], [-1.0, 0.0, 1.0], [-1.0, -0.5, 0.0, 0.5, 1.0]],
-                         ids=["two", "three", "five"])
+# NOT [-1, 0, 1]: that is the default, so `Categorical(3)` hard-coded would satisfy it
+# and the row could not tell derived from constant -- the very thing this test exists for.
+@pytest.mark.parametrize("levels", [[0.0, 1.0], [-1.0, -0.5, 0.0, 0.5, 1.0]],
+                         ids=["two", "five"])
 def test_a_plain_env_sizes_its_action_spec_from_the_config_it_was_given(venue, levels):
     """`action_spec.n` is DERIVED, not a constant that happens to match today.
 
@@ -309,23 +315,23 @@ def test_a_plain_env_sizes_its_action_spec_from_the_config_it_was_given(venue, l
 
 
 @pytest.mark.parametrize("venue", PLAIN_VENUES)
-def test_a_plain_env_keeps_the_reward_function_it_was_handed(venue):
+@pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
+def test_a_live_env_keeps_the_reward_function_it_was_handed(venue, sltp):
     """`reward_function or log_return_reward` had no test on the left of the `or`.
 
-    Dropping the caller's function entirely -- `self.reward_function = log_return_reward`,
-    unconditionally -- failed 0 of 3718 tests, on main and here. A silently ignored reward
-    function trains against a different objective than the one that was asked for.
+    Dropping the caller's function entirely failed 0 of 3718 tests on the plain path and 0
+    of 4749 on the SLTP one -- both halves of this fold, neither covered. A silently ignored
+    reward function trains against a different objective than the one that was asked for.
     """
     def a_custom_reward(history):
         return 0.0
 
-    env, _ = _real_futures_env(budget=0, venue=venue, reward_function=a_custom_reward)
+    env, _ = _real_futures_env(budget=0, venue=venue, sltp=sltp,
+                               reward_function=a_custom_reward)
 
     assert env.reward_function is a_custom_reward, (
         f"{venue} replaced the caller's reward function with {env.reward_function}"
     )
-
-
 
 
 def _drive(venue, actions, prices, *, flatten_before_step=None, **config_kw):
@@ -4990,11 +4996,11 @@ _SHARED_METHOD_OWNERSHIP = [
     # All FIVE plain envs, alpaca included -- it had the same three lines and is the
     # reason this belongs on TorchTradeLiveEnv rather than the futures base.
     *((c, TorchTradeLiveEnv, "_init_action_space") for c in NON_SLTP_ENVS),
-    # The bracket twin: bigger than the plain one (it builds the action MAP) and now
-    # owned by the mixin that was already in every SLTP MRO. alpaca is absent on purpose
-    # -- it is spot, so it passes include_short_positions=False and its config has no
-    # such field, which is a venue difference and not a copy.
-    *((c, SLTPMixin, "_init_bracket_action_space") for c in SLTP_FUTURES_ENVS),
+    # The bracket twin: bigger than the plain one (it builds the action MAP) and owned by
+    # the mixin that was already in every SLTP MRO. All FIVE, alpaca included -- it is
+    # spot, so it passes `short_positions=False` at the call site, which is where a venue
+    # difference belongs.
+    *((c, SLTPMixin, "_init_bracket_action_space") for c in SLTP_ENVS),
     # binance is absent by design: it EXTENDS the sizing via super() (min-notional refusal
     # and target rounding), which its own behavioural test pins.
     *((c, TorchTradeFuturesLiveEnv, "_calculate_fractional_position")

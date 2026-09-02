@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import Optional, Callable
 
 
-
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
@@ -81,5 +80,6 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        self._init_bracket_action_space(reward_function)
+        self._init_bracket_action_space(
+            reward_function, include_short_positions=config.include_short_positions)
 
