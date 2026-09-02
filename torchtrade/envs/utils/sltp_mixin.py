@@ -33,7 +33,8 @@ class SLTPMixin:
     Required of the inheriting class -- the full list, because owning `_step` means this
     mixin now depends on the whole live-env surface, not just SLTP state:
         state   - position.current_position, active_stop_loss, active_take_profit,
-                  action_map (dense index -> (side, sl, tp)), history, reward_function
+                  history. `action_map` and `reward_function` are BUILT here now, by
+                  `_init_bracket_action_space`, so they are no longer a leaf requirement.
         venue   - trader.get_status()
         step    - _acquire_pre_trade_state(), _acquire_post_bar_state(),
                   _wait_for_next_timestamp(), _check_termination(),
@@ -254,7 +255,7 @@ class SLTPMixin:
         # because it is a candle close, not the mark.
         return self._halting(read_close, cache_key="candle_close")
 
-    def _init_bracket_action_space(self, reward_function=None, *, include_short_positions):
+    def _init_bracket_action_space(self, reward_function=None, *, include_short_positions) -> None:
         """The tail all five SLTP `__init__`s repeat. Call after `super().__init__()`.
 
         `include_short_positions` is REQUIRED, not read from the config: alpaca is spot

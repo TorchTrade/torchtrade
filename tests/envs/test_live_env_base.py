@@ -5749,7 +5749,8 @@ def test_no_futures_env_reforks_a_shared_step_or_reset(cls, owner, method):
     )
 
 
-def test_every_live_env_actually_calls_its_shared_initialiser():
+@pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
+def test_every_live_env_actually_calls_its_shared_initialiser(env_cls):
     """The ownership table cannot see a leaf that stops CALLING the shared method.
 
     `getattr(cls, m) is getattr(owner, m)` is the right check for `_step`/`_reset`, which
@@ -5759,29 +5760,21 @@ def test_every_live_env_actually_calls_its_shared_initialiser():
     tail that way passed all 4749 tests.
 
     AST, not substring, for the reason the guard below records: a comment mentioning the
-    name would satisfy a grep.
+    name would satisfy a grep. Parametrized over STEPPING_ENVS, which already asserts its
+    own length, so a leaf dropping out of discovery fails at collection rather than being
+    skipped silently.
     """
-    import ast
-
-    expected = {".env": "_init_action_space", ".env_sltp": "_init_bracket_action_space"}
-    checked = 0
-    for env_cls in LIVE_ENVS:
-        suffix = next((k for k in expected if env_cls.__module__.endswith(k)), None)
-        if suffix is None or "__init__" not in vars(env_cls):
-            continue
-        want = expected[suffix]
-        called = {
-            n.func.attr for n in ast.walk(ast.parse(textwrap.dedent(
-                inspect.getsource(env_cls.__init__))))
-            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-        }
-        assert want in called, (
-            f"{env_cls.__name__}.__init__ never calls {want}; it inherits the shared "
-            f"initialiser but builds its own action space, which is the drift the fold "
-            f"exists to remove"
-        )
-        checked += 1
-    assert checked == 10, f"expected 5 plain + 5 SLTP leaves, checked {checked}"
+    want = "_init_bracket_action_space" if env_cls in SLTP_ENVS else "_init_action_space"
+    called = {
+        n.func.attr for n in ast.walk(ast.parse(textwrap.dedent(
+            inspect.getsource(env_cls.__init__))))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
+    assert want in called, (
+        f"{env_cls.__name__}.__init__ never calls {want}; it inherits the shared "
+        f"initialiser but builds its own action space, which is the drift the fold "
+        f"exists to remove"
+    )
 
 
 def test_no_sltp_env_writes_the_dead_position_closed_field():

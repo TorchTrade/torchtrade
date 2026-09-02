@@ -13,8 +13,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import torch
 from tensordict import TensorDictBase
 from torchrl.data import Categorical, Composite, Unbounded
-from torchtrade.envs.core.default_rewards import log_return_reward
 
+from torchtrade.envs.core.default_rewards import log_return_reward
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import (
     PositionState,
@@ -224,7 +224,7 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position.target_tol = 0.0
         self.position.target_reported = False
 
-    def _init_action_space(self, reward_function=None):
+    def _init_action_space(self, reward_function=None) -> None:
         """The tail all five plain envs repeat. Call after `super().__init__()`, which is
         what sets `self.config` (`core/base.py`).
         """

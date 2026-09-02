@@ -112,7 +112,6 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         if self.config.trade_mode == "fractional":
             self.trader.trade_mode = "notional"
 
-        # spot: no short side, and the config has no such field
         self._init_bracket_action_space(reward_function, include_short_positions=False)
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
