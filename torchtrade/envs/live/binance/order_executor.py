@@ -432,7 +432,14 @@ class BinanceFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
                 # truncates while still holding the position. binance blanks
                 # `liquidationPrice` on cross-margin, so this is the ordinary case, not a
                 # malformed one (#421).
-                qty = float(pos.get("positionAmt") or 0)
+                # `positionAmt` deliberately stays a BARE subscript while the fields
+                # below get `or 0`. It is not an attribute of a position -- it is the
+                # field that decides whether one EXISTS. `or 0` reads a blank as flat, so
+                # the env would believe it holds nothing while the venue holds a live
+                # position, and the next long would open a second one on top. Raising
+                # here reports POSITION_UNKNOWN, which freezes rather than doubles.
+                # bybit, okx and bitget all keep their own existence field fail-closed.
+                qty = float(pos["positionAmt"])
                 if qty != 0:
                     entry_price = float(pos.get("entryPrice") or 0)
                     mark_price = float(pos.get("markPrice") or entry_price)

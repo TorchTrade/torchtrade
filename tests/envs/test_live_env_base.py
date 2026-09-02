@@ -2179,6 +2179,12 @@ _NULLABLE_POSITION_FIELDS = {
 assert set(_NULLABLE_POSITION_FIELDS) == {
     c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS
 }, "a futures venue is missing from the nullable-field table"
+# ...and one axis further down, because the venue assert cannot see a venue whose FIELD
+# list is emptied: the keys stay intact and ten rows vanish silently. A shrinkage guard
+# has to sit on the axis that can actually shrink.
+assert all(len(fields) == 5 for _b, fields, _lev in _NULLABLE_POSITION_FIELDS.values()), (
+    "a venue's nullable-field list shrank; every venue reads the same five attributes"
+)
 
 _NULLABLE_CASES = [(v, f) for v, (_, fields, _lev) in
                    sorted(_NULLABLE_POSITION_FIELDS.items()) for f in fields]
@@ -2209,6 +2215,35 @@ def test_a_blank_venue_field_does_not_turn_a_healthy_position_into_an_outage(
 
     assert status is not POSITION_UNKNOWN, f"{venue}: a blank {field} read as an outage"
     assert status.qty == pytest.approx(1.0)
+
+
+# The field that decides a position EXISTS, per venue. Unlike the nullable attributes
+# above, a blank here must NOT read as flat.
+_EXISTENCE_FIELDS = {"binance": (_binance_status, "positionAmt"),
+                     "bitget": (_bitget_status, "contracts"),
+                     "bybit": (_bybit_status, "size"),
+                     "okx": (_okx_status, "pos")}
+assert set(_EXISTENCE_FIELDS) == set(_NULLABLE_POSITION_FIELDS)
+
+
+@pytest.mark.parametrize("venue", sorted(_EXISTENCE_FIELDS))
+@pytest.mark.parametrize("blank", [None, ""], ids=["null", "empty-string"])
+def test_a_blank_size_field_reads_as_UNKNOWN_and_never_as_flat(venue, blank):
+    """The one position field that must stay fail-CLOSED.
+
+    Giving it the `or 0` treatment the attribute fields get reads a blank as flat: the env
+    then believes it holds nothing while the venue holds a live position, `_sync` clears
+    the action level and the hold counter, and the policy's next long opens a SECOND
+    position on top. POSITION_UNKNOWN freezes instead, which is the safe failure.
+
+    I introduced exactly that regression while fixing the attribute fields, and no test
+    caught it -- reverting the line alone left the whole suite green (#421).
+    """
+    build, field = _EXISTENCE_FIELDS[venue]
+
+    assert build(**{field: blank}) is POSITION_UNKNOWN, (
+        f"{venue}: a blank {field} read as flat while a position was open"
+    )
 
 
 @pytest.mark.parametrize("venue", sorted(_NULLABLE_POSITION_FIELDS))
