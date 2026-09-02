@@ -124,8 +124,8 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         self.action_map = create_sltp_action_map(
             self.stoploss_levels,
             self.takeprofit_levels,
-            include_short_positions=False,
-            include_hold_action=config.include_hold_action,
+            include_short_positions=False,   # spot: alpaca has no short side, and its
+            include_hold_action=config.include_hold_action,   # config has no such field
             include_close_action=config.include_close_action,
         )
 

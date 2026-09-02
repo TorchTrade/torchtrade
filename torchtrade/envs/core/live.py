@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import torch
 from tensordict import TensorDictBase
-from torchrl.data import Composite, Unbounded
+from torchrl.data import Categorical, Composite, Unbounded
 
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.core.state import (
@@ -222,6 +222,18 @@ class TorchTradeLiveEnv(TorchTradeBaseEnv):
         self.position.target_qty = None
         self.position.target_tol = 0.0
         self.position.target_reported = False
+
+    def _init_action_space(self, reward_function=None):
+        """The tail all five plain envs repeat. Call after `super().__init__()`, which is
+        what sets `self.config` (`core/base.py`). A shared `__init__` would also work --
+        `*args/**kwargs` absorbs bitget's and okx's extra credential -- but it would erase
+        four documented constructor signatures and make correctness depend on base order.
+        """
+        from torchtrade.envs.core.default_rewards import log_return_reward
+
+        self.reward_function = reward_function or log_return_reward
+        self.action_levels = self.config.action_levels
+        self.action_spec = Categorical(len(self.action_levels))
 
     def _sync_position_from_exchange(self, position_status) -> None:
         """Overwrite the cached position with what the exchange actually holds.

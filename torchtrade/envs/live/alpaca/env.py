@@ -10,7 +10,6 @@ from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDictBase
-from torchrl.data import Categorical
 from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
 from torchtrade.envs.core.state import position_qty_from_status
 
@@ -105,13 +104,7 @@ class AlpacaTorchTradingEnv(AlpacaBaseTorchTradingEnv):
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        # Set reward function
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        self.reward_function = reward_function or log_return_reward
-
-        # Define action space (environment-specific)
-        self.action_levels = config.action_levels
-        self.action_spec = Categorical(len(self.action_levels))
+        self._init_action_space(reward_function)
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""

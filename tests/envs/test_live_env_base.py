@@ -38,7 +38,6 @@ from torchtrade.envs.core.live import (
     TorchTradeLiveEnv,
 )
 from torchtrade.envs.live.shared.futures_live_base import TorchTradeFuturesLiveEnv
-from torchtrade.envs.utils.plain_mixin import PlainFuturesLiveEnv
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 from torchtrade.envs.utils.liquidation import (
@@ -249,27 +248,6 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     assert getattr(env_cls, method) is getattr(TorchTradeFuturesLiveEnv, method), (
         f"{env_cls.__name__} re-forks {method} instead of sharing TorchTradeFuturesLiveEnv's. "
         f"Drop the override, or the unification no longer covers it."
-    )
-
-
-@pytest.mark.parametrize("env_cls", PLAIN_FUTURES_ENVS, ids=lambda c: c.__name__)
-def test_no_plain_venue_builds_its_own_action_space(env_cls):
-    """The mixin is only shared if the leaves actually CALL it.
-
-    `_SHARED_METHOD_OWNERSHIP` cannot see this: a leaf that inlines the four lines still
-    RESOLVES `_init_plain_trading` to the mixin, so the identity check passes while the
-    method goes uncalled. Inlining a five-level list back into bybit fails exactly one
-    test today -- that venue's own `test_action_spec` -- which is how #425 happened in the
-    first place: the drift was only visible to whichever venue happened to assert on it.
-    """
-    src = inspect.getsource(inspect.getmodule(env_cls))
-    assert "self.action_spec = " not in src, (
-        f"{env_cls.__name__}'s module assigns action_spec directly; the plain action "
-        f"space is built once, in PlainFuturesLiveEnv._init_plain_trading (#288)"
-    )
-    assert "_init_plain_trading(" in inspect.getsource(env_cls.__init__), (
-        f"{env_cls.__name__}.__init__ never calls _init_plain_trading, so inheriting the "
-        f"mixin buys nothing"
     )
 
 
@@ -4795,7 +4773,7 @@ def test_each_venue_builds_its_observer_with_the_arguments_it_needs(venue, expec
     two roles and the other three must not, which is the actual contract.
     """
 
-    # The concrete plain env, not the exchange base: only the leaves assign `action_spec`,
+    # The concrete plain env, not the exchange base: only a leaf runs `_init_action_space`,
     # so a base builds into a half-env that fails later instead of at construction (#288).
     module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
     cls = _sole(module, "TorchTradingEnv")
@@ -4970,10 +4948,14 @@ _SHARED_METHOD_OWNERSHIP = [
     *((c, TorchTradeLiveEnv, "_record_and_score") for c in STEPPING_ENVS),
     *((c, TorchTradeFuturesLiveEnv, m)
       for c in PLAIN_FUTURES_ENVS for m in ("_step", "_reset", "_execute_trade_if_needed")),
-    # The plain half of the pair: PlainFuturesLiveEnv is to the four plain envs what
-    # SLTPMixin is to the four SLTP ones. A venue re-forking this rebuilds its own action
-    # space, which is the #425 drift (3 actions on one venue, 5 on three) coming back.
-    *((c, PlainFuturesLiveEnv, "_init_plain_trading") for c in PLAIN_FUTURES_ENVS),
+    # All FIVE plain envs, alpaca included -- it had the same three lines and is the
+    # reason this belongs on TorchTradeLiveEnv rather than the futures base.
+    *((c, TorchTradeLiveEnv, "_init_action_space") for c in NON_SLTP_ENVS),
+    # The bracket twin: bigger than the plain one (it builds the action MAP) and now
+    # owned by the mixin that was already in every SLTP MRO. alpaca is absent on purpose
+    # -- it is spot, so it passes include_short_positions=False and its config has no
+    # such field, which is a venue difference and not a copy.
+    *((c, SLTPMixin, "_init_bracket_action_space") for c in SLTP_FUTURES_ENVS),
     # binance is absent by design: it EXTENDS the sizing via super() (min-notional refusal
     # and target rounding), which its own behavioural test pins.
     *((c, TorchTradeFuturesLiveEnv, "_calculate_fractional_position")
@@ -5021,7 +5003,8 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("TorchTradeFuturesLiveEnv", "_reset"),
     ("TorchTradeFuturesLiveEnv", "_calculate_fractional_position"),
     ("TorchTradeFuturesLiveEnv", "_execute_trade_if_needed"),
-    ("PlainFuturesLiveEnv", "_init_plain_trading"),
+    ("TorchTradeLiveEnv", "_init_action_space"),
+    ("SLTPMixin", "_init_bracket_action_space"),
     ("SLTPMixin", "_step"),
     ("SLTPMixin", "_reset"),
     ("SLTPMixin", "_resolve_action_tuple"),

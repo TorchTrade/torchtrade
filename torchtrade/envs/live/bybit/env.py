@@ -1,6 +1,5 @@
 """Bybit Futures TorchRL trading environment with fractional position sizing."""
 
-from torchtrade.envs.utils.plain_mixin import PlainFuturesLiveEnv
 from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict
@@ -27,7 +26,7 @@ class BybitFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     _normalize_timeframes = staticmethod(normalize_bybit_timeframe_config)
 
 
-class BybitFuturesTorchTradingEnv(PlainFuturesLiveEnv, BybitBaseTorchTradingEnv):
+class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     """
     TorchRL environment for Bybit Futures live trading.
 
@@ -58,7 +57,7 @@ class BybitFuturesTorchTradingEnv(PlainFuturesLiveEnv, BybitBaseTorchTradingEnv)
     ):
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        self._init_plain_trading(config, reward_function)
+        self._init_action_space(reward_function)
 
 
     def _execute_fractional_action(

@@ -5,7 +5,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from torchtrade.envs.utils.plain_mixin import PlainFuturesLiveEnv
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
@@ -25,7 +24,7 @@ class BinanceFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     _normalize_timeframes = staticmethod(normalize_binance_timeframe_config)
 
 
-class BinanceFuturesTorchTradingEnv(PlainFuturesLiveEnv, BinanceBaseTorchTradingEnv):
+class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
     """
     TorchRL environment for Binance Futures live trading.
 
@@ -92,7 +91,7 @@ class BinanceFuturesTorchTradingEnv(PlainFuturesLiveEnv, BinanceBaseTorchTrading
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        self._init_plain_trading(config, reward_function)
+        self._init_action_space(reward_function)
 
 
     def _get_min_notional(self) -> float | None:
