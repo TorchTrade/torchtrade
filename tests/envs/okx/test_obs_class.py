@@ -93,13 +93,12 @@ class TestOKXObservationClass(BaseObservationClassTests):
         """Custom preprocessing that adds OHLC-derived + a custom feature -> 5 cols."""
         from torchtrade.envs.live.okx.observation import OKXObservationClass
 
-        custom_preprocess = add_custom_features
 
         observer = OKXObservationClass(
             symbol="BTC-USDT-SWAP",
             time_frames=TimeFrame(1, TimeFrameUnit.Minute),
             window_sizes=10,
-            feature_preprocessing_fn=custom_preprocess,
+            feature_preprocessing_fn=add_custom_features,
             client=_make_okx_market_client(),
         )
         observations = observer.get_observations()

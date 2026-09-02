@@ -88,11 +88,10 @@ class TestBybitObservationClass(BaseObservationClassTests):
         """Custom preprocessing adding OHLC-derived + custom feature -> 5 cols."""
         from torchtrade.envs.live.bybit.observation import BybitObservationClass
 
-        custom_preprocess = add_custom_features
 
         observer = BybitObservationClass(
             symbol="BTCUSDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10, feature_preprocessing_fn=custom_preprocess,
+            window_sizes=10, feature_preprocessing_fn=add_custom_features,
             client=_make_pybit_client())
         assert observer.get_observations()["1Minute_10"].shape[1] == 5
 
