@@ -4,6 +4,7 @@ import logging
 import pytest
 
 from tests.envs.base_exchange_tests import (
+    a_mock_futures_trader,
     a_mock_observer,
     a_position_status,
     INVALID_ACTIONS,
@@ -26,35 +27,14 @@ class TestBinanceFuturesTorchTradingEnv:
 
     @pytest.fixture
     def mock_trader(self):
-        """Create a mock trader."""
-        trader = MagicMock()
-
-        # Mock methods
+        trader = a_mock_futures_trader()
         # Models the executor's lot-size rounding, which the env now delegates to rather
         # than re-querying futures_exchange_info() per sizing decision (#271). A bare
         # MagicMock returns a MagicMock and every comparison downstream raises.
         trader.round_quantity = MagicMock(
             side_effect=lambda q, symbol=None: math.floor(q / 0.001 + 1e-9) * 0.001
         )
-        trader.cancel_open_orders = MagicMock(return_value=True)
-        trader.close_position = MagicMock(return_value=True)
         trader.close_all_positions = MagicMock(return_value={})
-
-        trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0,
-            "available_balance": 900.0,
-            "total_unrealized_profit": 0.0,
-            "total_margin_balance": 1000.0,
-        })
-
-        trader.get_mark_price = MagicMock(return_value=50000.0)
-
-        trader.get_status = MagicMock(return_value={
-            "position_status": None,
-        })
-
-        trader.trade = MagicMock(return_value=True)
-
         return trader
 
     @pytest.fixture
@@ -422,25 +402,23 @@ class TestBinanceFuturesTorchTradingEnv:
         disagreement every step, so it could never age.
         """
 
-        status = a_position_status
-
         with patch.object(env, "_wait_for_next_timestamp"):
             long = TensorDict({"action": torch.tensor(env.action_levels.index(1))},
                               batch_size=())
             flat = TensorDict({"action": torch.tensor(env.action_levels.index(0))},
                               batch_size=())
 
-            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))
             env.reset()
             for _ in range(5):
                 env._step(long)
             assert env.position.hold_counter == 5           # genuinely aged
 
-            mock_trader.get_status = MagicMock(return_value=status(None))   # closed
+            mock_trader.get_status = MagicMock(return_value=a_position_status(None))   # closed
             env._step(flat)
             assert env.position.hold_counter == 0           # the age goes with it
 
-            mock_trader.get_status = MagicMock(return_value=status(0.01))   # a BRAND NEW one
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))   # a BRAND NEW one
             env._step(long)
 
         assert env.position.hold_counter == 1, "a new position starts older than 1 bar"
@@ -451,20 +429,18 @@ class TestBinanceFuturesTorchTradingEnv:
         hold_counter, the policy is handed a brand-new position as N+1 bars old.
         """
 
-        status = a_position_status
-
         with patch.object(env, "_wait_for_next_timestamp"):
             long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
 
-            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))
             env.reset()
             for _ in range(5):
                 env.step(long)
             aged = env.position.hold_counter
             assert aged > 1
 
-            mock_trader.get_status = MagicMock(return_value=status(None))   # liquidated
+            mock_trader.get_status = MagicMock(return_value=a_position_status(None))   # liquidated
             td = env.step(long)                                          # same-step re-entry
 
         assert td["next"]["account_state"][3].item() <= 1.0, (

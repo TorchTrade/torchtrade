@@ -22,33 +22,46 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 # stops testing four venues and starts testing one.
 
 
+WINDOW = 10   # every fixture below emits a 10-bar window
+
+
 def some_observations(keys, *, base=None):
     """One window per key. `base` is the OHLC bar `return_base_ohlc=True` should yield --
     a 4-tuple for a fixed bar, or None for noise. `base_timestamps` rides along with it,
     as the real observer does (`shared/base_obs.py:287-293` emits both or neither)."""
     def observations(return_base_ohlc=False):
-        obs = {k: np.random.randn(10, 4).astype(np.float32) for k in keys}
+        obs = {k: np.random.randn(WINDOW, 4).astype(np.float32) for k in keys}
         if return_base_ohlc:
+            # Each row is `base` faded 0.1% per bar into the past, so the LAST row is
+            # exactly `base`. Ten identical rows made "the last candle" unobservable:
+            # reading `base_features[0]` instead of `[-1]` passed the whole suite (#288).
+            fade = 1 - 0.001 * np.arange(WINDOW)[::-1]          # [0.991 ... 1.0]
             obs["base_features"] = (
-                np.random.randn(10, 4).astype(np.float32) if base is None
-                # A RAMP into the past, with the last row exactly `base`. Ten identical
-                # rows made "the last candle" unobservable: reading `base_features[0]`
-                # instead of `[-1]` for bracket pricing passed the whole suite (#288).
-                else np.array([[v * (1 - 0.001 * (9 - i)) for v in base]
-                               for i in range(10)], dtype=np.float32)
+                np.random.randn(WINDOW, 4).astype(np.float32) if base is None
+                else np.outer(fade, base).astype(np.float32)
             )
-            obs["base_timestamps"] = np.arange(10)
+            obs["base_timestamps"] = np.arange(WINDOW)
         return obs
     return observations
 
 
 def a_mock_observer(keys, *, base=None):
-    """The observer mock. Features are MIRRORED off the data rather than declared, so the
-    fixture cannot claim a width its own observations contradict (#288)."""
+    """The observer mock, with its feature list MIRRORED off the data it actually emits.
+
+    The envs build observation_spec from get_features() (#288), so a fixture that stubs
+    only get_observations declares width 0 against emitted 4 -- which is exactly what the
+    binance and bitget check_env_specs tests caught when the switch landed. Deriving means
+    a fixture cannot declare a width its own data contradicts.
+    """
+    observations = some_observations(keys, base=base)
+    width = next(iter(observations().values())).shape[1]
     observer = MagicMock()
     observer.get_keys = MagicMock(return_value=list(keys))
-    observer.get_observations = MagicMock(side_effect=some_observations(keys, base=base))
-    mirror_features_on(observer)
+    observer.get_observations = MagicMock(side_effect=observations)
+    observer.get_features = MagicMock(return_value={
+        "observation_features": [f"feature_{i}" for i in range(width)],
+        "original_features": [],
+    })
     return observer
 
 
@@ -95,21 +108,6 @@ def a_position_status(qty, *, notional=500.0, mark=50000.0, liquidation=45000.0)
         unrealized_pnl_pct=0.0, mark_price=mark, leverage=5,
         margin_mode="isolated", liquidation_price=liquidation,
     )}
-
-
-def mirror_features_on(observer):
-    """Derive a mock observer's get_features from the observations it actually emits.
-
-    The envs build observation_spec from get_features() (#288), so a fixture that stubs
-    only get_observations declares width 0 against emitted 4 -- which is exactly what the
-    binance and bitget check_env_specs tests caught when the switch landed. Deriving
-    means a fixture cannot declare a width its own data contradicts.
-    """
-    width = next(iter(observer.get_observations().values())).shape[1]
-    observer.get_features = MagicMock(return_value={
-        "observation_features": [f"feature_{i}" for i in range(width)],
-        "original_features": [],
-    })
 
 
 class BaseObservationClassTests(ABC):

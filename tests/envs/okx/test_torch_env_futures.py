@@ -204,10 +204,8 @@ class TestOKXFuturesTorchTradingEnv:
         """A residual left between two positions must not carry the old age into the new one.
         """
 
-        status = a_position_status
-
         with patch.object(env, "_wait_for_next_timestamp"):
-            mock_env_trader.get_status = MagicMock(return_value=status(0.01))
+            mock_env_trader.get_status = MagicMock(return_value=a_position_status(0.01))
             env.reset()
             long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
@@ -215,10 +213,10 @@ class TestOKXFuturesTorchTradingEnv:
             for _ in range(5):                       # age a real position
                 env.step(long)
 
-            mock_env_trader.get_status = MagicMock(return_value=status(1e-12))   # closed -> dust
+            mock_env_trader.get_status = MagicMock(return_value=a_position_status(1e-12))   # closed -> dust
             env.step(long)
 
-            mock_env_trader.get_status = MagicMock(return_value=status(0.01))    # a NEW position
+            mock_env_trader.get_status = MagicMock(return_value=a_position_status(0.01))    # a NEW position
             td = env.step(long)
 
         holding_time = td["next"]["account_state"][3].item()
@@ -278,20 +276,18 @@ class TestOKXFuturesTorchTradingEnv:
         hold_counter, the policy is handed a brand-new position as N+1 bars old.
         """
 
-        status = a_position_status
-
         with patch.object(env, "_wait_for_next_timestamp"):
             long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
 
-            mock_env_trader.get_status = MagicMock(return_value=status(0.01))
+            mock_env_trader.get_status = MagicMock(return_value=a_position_status(0.01))
             env.reset()
             for _ in range(5):
                 env.step(long)
             aged = env.position.hold_counter
             assert aged > 1
 
-            mock_env_trader.get_status = MagicMock(return_value=status(None))   # liquidated
+            mock_env_trader.get_status = MagicMock(return_value=a_position_status(None))   # liquidated
             td = env.step(long)                                          # same-step re-entry
 
         assert td["next"]["account_state"][3].item() <= 1.0, (
@@ -327,21 +323,21 @@ class TestOKXFuturesTorchTradingEnv:
                 config=cfg, observer=mock_observer, trader=mock_env_trader,
             )
 
-        def status(qty):
+        def a_long_of(qty):
             return a_position_status(qty, notional=qty * 50000.0, liquidation=40000.0)
 
         long_idx = len(env.action_levels) - 1
         half_idx = env.action_levels.index(0.5)
 
         with patch.object(env, "_wait_for_next_timestamp"):
-            mock_env_trader.get_status = MagicMock(return_value=status(1.0))
+            mock_env_trader.get_status = MagicMock(return_value=a_long_of(1.0))
             env.reset()
             env.step(TensorDict({"action": torch.tensor(long_idx)}, []))
             aged = 20
             env.position.hold_counter = aged
 
             # the venue reports the RESULTING half-size long, as it would after the trim
-            mock_env_trader.get_status = MagicMock(return_value=status(0.5))
+            mock_env_trader.get_status = MagicMock(return_value=a_long_of(0.5))
             env.step(TensorDict({"action": torch.tensor(half_idx)}, []))
 
             assert env.position.current_position == 1, "a trimmed long is still a long"
@@ -372,16 +368,16 @@ class TestOKXFuturesTorchTradingEnv:
         from two blank venue fields, not only a wire fault -- and {harm}.
         """
 
-        def status(price):
+        def a_position_marked_at(price):
             return a_position_status(
                 0.1, notional=5000.0, mark=price, liquidation=40000.0)
 
         # Reset on a healthy price, then poison: the venue tick that goes bad mid-episode
         # is the one that reaches sizing, and it isolates _step from the reset-time guard.
-        mock_env_trader.get_status = MagicMock(return_value=status(50000.0))
+        mock_env_trader.get_status = MagicMock(return_value=a_position_marked_at(50000.0))
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            mock_env_trader.get_status = MagicMock(return_value=status(mark_price))
+            mock_env_trader.get_status = MagicMock(return_value=a_position_marked_at(mark_price))
             td = TensorDict({"action": torch.tensor(len(env.action_levels) - 1)}, [])
             # LiveObservationHalt now, not a bare ValueError: the pre-trade read runs
             # under the halt policy (#355), so an unusable mark surfaces the same way an

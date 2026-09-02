@@ -2,16 +2,15 @@
 
 import pytest
 
-from tests.envs.base_exchange_tests import a_mock_observer, mirror_features_on
 import torch
 from torchrl.envs.utils import check_env_specs
-import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
 from torchtrade.envs.core.live import LiveObservationHalt
 from tests.envs.base_exchange_tests import (
     a_mock_futures_trader,
+    a_mock_observer,
     some_observations,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
@@ -28,10 +27,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
 
     @pytest.fixture
     def mock_trader(self):
-        """Create a mock trader."""
-        trader = a_mock_futures_trader()
-
-        return trader
+        return a_mock_futures_trader()
 
     @pytest.fixture
     def env_config(self):
@@ -511,10 +507,6 @@ class TestCriticalEdgeCases:
             BinanceFuturesSLTPTorchTradingEnv,
             BinanceFuturesSLTPTradingEnvConfig,
         )
-        from torchtrade.envs.live.binance.observation import BinanceObservationClass
-        from torchtrade.envs.live.binance.order_executor import (
-            BinanceFuturesOrderClass,
-        )
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -524,29 +516,8 @@ class TestCriticalEdgeCases:
             demo=True,
         )
 
-        mock_observer = MagicMock(spec=BinanceObservationClass)
-        mock_trader = MagicMock(spec=BinanceFuturesOrderClass)
-        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
-        mock_trader.get_lot_size = MagicMock(
-            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-
-        mock_get_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
-
-        mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
-        mirror_features_on(mock_observer)
-        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
-
-        mock_trader.get_account_balance = MagicMock(
-            return_value={
-                "total_wallet_balance": 1000.0,
-                "available_balance": 1000.0,
-                "total_margin_balance": 1000.0,
-            }
-        )
-        mock_trader.get_status = MagicMock(return_value={"position_status": None})
-        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
-        mock_trader.cancel_open_orders = MagicMock()
-        mock_trader.close_position = MagicMock()
+        mock_observer = a_mock_observer(["1m_10"], base=(50000, 50100, 49900, 50050))
+        mock_trader = a_mock_futures_trader()
 
         env = BinanceFuturesSLTPTorchTradingEnv(
             config, observer=mock_observer, trader=mock_trader
@@ -645,17 +616,8 @@ class TestCriticalEdgeCases:
         """Test bracket order calculation when current price is zero (Critical: 5/10)."""
         env, mock_trader, mock_observer = env_with_mocks
 
-        def mock_obs_zero_price(return_base_ohlc=False):
-            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
-            if return_base_ohlc:
-                # Zero price edge case
-                obs["base_features"] = np.array(
-                    [[0, 0, 0, 0]] * 10, dtype=np.float32
-                )
-            return obs
-
-        mock_observer.get_observations = MagicMock(side_effect=mock_obs_zero_price)
-        mirror_features_on(mock_observer)
+        mock_observer.get_observations = MagicMock(
+            side_effect=some_observations(["1m_10"], base=(0, 0, 0, 0)))
 
         env.reset()
         action_tuple = ("long", -0.02, 0.03)

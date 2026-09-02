@@ -27,10 +27,8 @@ class TestBitgetFuturesTorchTradingEnv:
 
     @pytest.fixture
     def mock_trader(self):
-        """Create a mock trader."""
         trader = a_mock_futures_trader()
         trader._round_amount = MagicMock(side_effect=lambda amount: amount)
-
         return trader
 
     @pytest.fixture
@@ -395,10 +393,8 @@ class TestBitgetFuturesTorchTradingEnv:
         """A residual left between two positions must not carry the old age into the new one.
         """
 
-        status = a_position_status
-
         with patch.object(env, "_wait_for_next_timestamp"):
-            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))
             env.reset()
             long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
@@ -406,10 +402,10 @@ class TestBitgetFuturesTorchTradingEnv:
             for _ in range(5):                       # age a real position
                 env.step(long)
 
-            mock_trader.get_status = MagicMock(return_value=status(1e-12))   # closed -> dust
+            mock_trader.get_status = MagicMock(return_value=a_position_status(1e-12))   # closed -> dust
             env.step(long)
 
-            mock_trader.get_status = MagicMock(return_value=status(0.01))    # a NEW position
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))    # a NEW position
             td = env.step(long)
 
         holding_time = td["next"]["account_state"][3].item()
@@ -469,20 +465,18 @@ class TestBitgetFuturesTorchTradingEnv:
         hold_counter, the policy is handed a brand-new position as N+1 bars old.
         """
 
-        status = a_position_status
-
         with patch.object(env, "_wait_for_next_timestamp"):
             long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
 
-            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))
             env.reset()
             for _ in range(5):
                 env.step(long)
             aged = env.position.hold_counter
             assert aged > 1
 
-            mock_trader.get_status = MagicMock(return_value=status(None))   # liquidated
+            mock_trader.get_status = MagicMock(return_value=a_position_status(None))   # liquidated
             td = env.step(long)                                          # same-step re-entry
 
         assert td["next"]["account_state"][3].item() <= 1.0, (

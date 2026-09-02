@@ -2,7 +2,6 @@
 
 import pytest
 
-from tests.envs.base_exchange_tests import a_mock_observer
 import torch
 from torchrl.envs.utils import check_env_specs
 from unittest.mock import MagicMock, patch
@@ -10,6 +9,7 @@ from tensordict import TensorDict
 
 from tests.envs.base_exchange_tests import (
     a_mock_futures_trader,
+    a_mock_observer,
     some_observations,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
@@ -29,10 +29,8 @@ class TestBitgetFuturesSLTPTorchTradingEnv:
 
     @pytest.fixture
     def mock_trader(self):
-        """Create a mock trader."""
         trader = a_mock_futures_trader()
         trader._round_amount = MagicMock(side_effect=lambda amount: amount)
-
         return trader
 
     @pytest.fixture
