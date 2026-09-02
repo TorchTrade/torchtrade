@@ -499,13 +499,11 @@ class BybitFuturesOrderClass(ExecutorHelpersMixin, TickSizeMixin):
 
         tickers = response.get("result", {}).get("list", [])
         if tickers:
-            mark_price = tickers[0].get("markPrice")
-            if mark_price:
-                return float(mark_price)
-
-            last_price = tickers[0].get("lastPrice")
-            if last_price:
-                return float(last_price)
+            # `lastPrice` only when the venue OMITS a mark, not when it reports "0".
+            raw = tickers[0].get("markPrice")
+            if raw is None or raw == "":
+                raw = tickers[0].get("lastPrice")
+            return self._validated_mark(raw, field="markPrice/lastPrice")
 
         raise RuntimeError(f"No ticker data for {self.symbol}")
 

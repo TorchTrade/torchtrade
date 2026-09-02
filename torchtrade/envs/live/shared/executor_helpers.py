@@ -7,10 +7,39 @@ modes, and folding them together to make the file shorter would be the same mist
 leaving four copies of something that is one rule.
 """
 
+import math
 from torchtrade.envs.core.state import POSITION_DUST_EPS
 
 class ExecutorHelpersMixin:
     """Shared executor helpers. Mixed in ahead of the exchange class."""
+
+    def _validated_mark(self, raw, *, field: str) -> float:
+        """A mark price the venue actually reported, or a refusal (#421).
+
+        Every venue wrote `if mark_price: return float(mark_price)`, which passes the
+        STRING "0" -- a non-empty string is truthy -- so a venue reporting a zero mark
+        returned 0.0 from a method each of their docstrings says raises.
+
+        Defence in depth, not a live sizing bug: `_current_mark_price` already rejects a
+        non-positive mark before anything is sized (#347), so a 0.0 could not reach an
+        order. What was broken is this method's own contract, on four venues at once.
+
+        RuntimeError, which is what all four `get_mark_price` docstrings promise and what
+        the venue suites already assert -- but that type only holds for a DIRECT caller.
+        Every reachable rollout reads this through `_current_mark_price`, whose broad
+        `except Exception` re-wraps it into a ValueError on purpose, so that `_halting`
+        takes the halt/FLATTEN branch rather than the raw-RuntimeError bypass (#394).
+        """
+        try:
+            price = float(raw)
+        except (TypeError, ValueError):
+            price = 0.0
+        if not math.isfinite(price) or price <= 0:
+            raise RuntimeError(
+                f"{self.symbol}: venue reported no usable mark price "
+                f"({field}={raw!r})"
+            )
+        return price
 
     def _calculate_unrealized_pnl_pct(
         self, qty: float, entry_price: float, mark_price: float

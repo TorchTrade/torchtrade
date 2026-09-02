@@ -110,6 +110,29 @@ class TestAlpacaOrderClass:
         assert oc.trade(side="buy", amount=3.7, order_type="market") is True
         assert client.requests[-1].qty == 3.0
 
+    @pytest.mark.parametrize("qty,expected", [
+        # abs=, not the default rel=1e-6: a 9dp truncation moves the value by <1e-9, which
+        # `approx`'s default tolerance cannot see -- deleting the ROUND_DOWN quantize
+        # entirely still passed this row.
+        (1.2345678901, 1.234567890),
+        (0.5, 0.5),
+        (2.0, 2.0),
+    ], ids=["truncates-to-9dp", "half-share", "whole"])
+    def test_fractionable_equity_rounds_to_nine_decimals(self, client, qty, expected):
+        """The US-equities leg of `_round_qty`, which no test could reach.
+
+        `MockAsset` defaults to BTC/USD's crypto values, so `min_order_size` and
+        `min_trade_increment` are always populated and the crypto lattice branch always won.
+        Equities publish neither -- that absence IS the signal to fall back to the
+        `fractionable` rule -- and `MAX_EQUITY_QTY_DECIMALS = 9` was asserted nowhere, so
+        returning a constant from this leg passed the whole suite (#421).
+        """
+        client.asset = MockAsset(fractionable=True, min_order_size=None,
+                                 min_trade_increment=None, price_increment=0.01)
+        oc = AlpacaOrderClass(symbol="AAPL", trade_mode="quantity", client=client)
+
+        assert oc._round_qty(qty) == pytest.approx(expected, abs=1e-12)
+
     def test_asset_lookup_failure_fails_closed(self, client):
         """If the asset's rules cannot be read, refuse the order -- do not guess a precision.
 

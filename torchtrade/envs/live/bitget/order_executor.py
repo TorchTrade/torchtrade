@@ -680,21 +680,21 @@ class BitgetFuturesOrderClass(ExecutorHelpersMixin):
         Raises:
             RuntimeError: If mark price cannot be retrieved
         """
+        # Only the FETCH is wrapped. Wrapping the verdict too logged an expected refusal
+        # at ERROR and re-wrapped it into "Failed to get mark price: <the refusal>" -- and
+        # it is what turned a missing `math` import into a message that read like a venue
+        # failure.
         try:
-            # Fetch ticker using CCXT
             ticker = self.client.fetch_ticker(self.symbol)
-
-            # Try to get mark price, fall back to last price
-            mark_price = ticker.get('info', {}).get('markPrice')
-            if mark_price:
-                return float(mark_price)
-
-            # Fallback to last price if mark price not available
-            return float(ticker.get('last', 0))
-
         except Exception as e:
             logger.error(f"Error getting mark price: {str(e)}")
             raise RuntimeError(f"Failed to get mark price: {e}") from e
+
+        # `last` only when the venue OMITS a mark; the value is validated either way.
+        raw = ticker.get('info', {}).get('markPrice')
+        if raw is None or raw == '':
+            raw = ticker.get('last')
+        return self._validated_mark(raw, field="markPrice/last")
 
     def get_open_orders(self) -> List[Dict]:
         """Get all open orders for the symbol using CCXT."""
