@@ -299,44 +299,6 @@ class TestBinanceFuturesTorchTradingEnv:
     # close()/reset() cleanup-failure coverage lives in bybit's copy and in
     # test_live_env_base.py: all four venues resolve both to the SAME shared function.
     # Deleting okx's copy was justified by that; keeping binance's would not be.
-    def test_reenters_after_external_position_close(self, env, mock_trader):
-        """A position closed on the exchange must not leave the guard refusing to re-enter.
-
-        Both halves matter: the guard must still suppress a genuinely redundant re-command,
-        or a fix that resynced on every step would pass too.
-        """
-        from torchtrade.envs.live.binance.order_executor import PositionStatus
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            long_idx = len(env.action_levels) - 1
-
-            # 1. Agent opens a long.
-            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
-            mock_trader.trade.assert_called()
-
-            # 2. Exchange confirms the position AT THE SIZE THAT WAS ORDERED. Re-commanding
-            # the SAME level is then redundant. Read from the call rather than hardcoded: a
-            # fixture reporting a different size is a partial fill, which the sync now
-            # detects and deliberately releases the guard for (#276 follow-up).
-            filled = mock_trader.trade.call_args.kwargs["quantity"]
-            mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
-                qty=filled, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_mode="isolated", liquidation_price=45000.0,
-            )})
-            mock_trader.trade.reset_mock()
-            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
-            mock_trader.trade.assert_not_called()   # guard still works
-
-            # 3. The exchange liquidates it out from under us.
-            mock_trader.get_status = MagicMock(return_value={"position_status": None})
-            mock_trader.trade.reset_mock()
-            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
-
-            # The agent still wants to be long -> the env must actually re-enter.
-            mock_trader.trade.assert_called()
-
     def test_reset_reads_dust_as_flat(self, env, mock_trader):
         """A dust residual (1e-12) left behind a close must read as FLAT, not as a position.
 

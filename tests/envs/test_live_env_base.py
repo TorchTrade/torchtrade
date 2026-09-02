@@ -296,45 +296,66 @@ def _drive(venue, actions, prices, *, flatten_before_step=None, **config_kw):
     trader.get_status.side_effect = on_status
 
     td = env.reset()
-    traded = []
+    shapes = []
     for step, (value, price) in enumerate(zip(actions, prices)):
         if step == flatten_before_step:
             held = 0.0                      # liquidated / closed from outside the env
         trader.get_mark_price.return_value = price
-        before = trader.trade.call_count
+        sent, closed = trader.trade.call_count, trader.close_position.call_count
         td = env.step(td.exclude("done", "terminated", "truncated", "reward")
                       .set("action", torch.tensor(env.action_levels.index(value))))["next"]
-        traded.append(trader.trade.call_count > before)
-    return traded
+        # A close IS an order. Counting only `trade` left a close-to-flat invisible, and a
+        # gate that swallowed every one of them passed all 20 rows.
+        shape = "close" if trader.close_position.call_count > closed else ""
+        if trader.trade.call_count > sent:
+            shape = f"{shape}+{trader.trade.call_args.kwargs['side']}".lstrip("+")
+        shapes.append(shape)
+    return shapes
 
 
-_FULL = [-1.0, 0.0, 1.0]                     # the shared default (#288)
+ANY_ORDER = "<any order>"                    # rows where the shape is venue business
+
+# Set explicitly on every row, never read from the config default: these rows pin the
+# levels they test, and `test_every_plain_config_defaults_to_the_same_action_space` is what
+# makes a change to the default itself loud.
+_FULL = [-1.0, 0.0, 1.0]
 _HALF_STEPS = [-1.0, -0.5, 0.0, 0.5, 1.0]    # ...where a same-direction resize is possible
 
 
 @pytest.mark.parametrize("venue", PLAIN_VENUES)
 @pytest.mark.parametrize("levels,actions,prices,expected", [
-    # A repeat is a hold. Without the guard the target is recomputed at each new mark, so
-    # bybit and okx traded 5 times to binance and bitget's 1 while price walked 100 -> 110:
-    # ~$947 of unrequested resize notional on a ~$9,795 position, at fees the offline env
-    # (which holds) never charged the policy.
-    (_FULL, [1.0] * 5, [100., 101., 103., 106., 110.], [True, False, False, False, False]),
+    # Without the guard the target is recomputed at each new mark, so bybit and okx traded
+    # five times to binance and bitget's one while the price walked 100 -> 110.
+    (_FULL, [1.0] * 5, [100., 101., 103., 106., 110.], ["buy", "", "", "", ""]),
     # The other half, and the half that fails silently: a guard keyed on a cached level is
-    # one stale write away from refusing every trade.
-    (_FULL, [1.0, 1.0, -1.0, -1.0], [100., 101., 102., 103.], [True, False, True, False]),
-    # A different level in the SAME direction is a trade -- what a direction-based guard
-    # would get wrong. Covered on binance alone before, by a test that mocked
-    # `_execute_fractional_action` and asserted the call rather than the outcome.
-    # The third bar MOVES: at a constant price the resize delta is zero and the final
-    # `False` passes with the guard deleted, which is an assertion that tests arithmetic.
-    (_HALF_STEPS, [1.0, 0.5, 0.5], [100., 100., 103.], [True, True, False]),
-    # The short side of the same branch: trimming a short is a BUY with switching=False,
-    # and the only tests that named it were the mock-level ones this PR deletes.
-    (_HALF_STEPS, [-1.0, -0.5, -0.5], [100., 100., 97.], [True, True, False]),
-], ids=["repeat-holds", "reversal-trades", "resize-long", "resize-short"])
+    # one stale write away from refusing every trade. The reversal's SHAPE is venue
+    # business -- binance closes then opens, bybit sends one order spanning both -- so this
+    # row asserts only that it traded.
+    (_FULL, [1.0, 1.0, -1.0, -1.0], [100., 101., 102., 103.], [ANY_ORDER, "", ANY_ORDER, ""]),
+    # A close IS an order, and the gate must not swallow it: mutating it to skip every
+    # close-to-flat passed every row here while the position stayed open (#288 round 2).
+    (_FULL, [1.0, 0.0, 0.0], [100., 101., 102.], ["buy", "close", ""]),
+    # A different level in the SAME direction is a trade, and it must be ONE order on the
+    # same side -- not a close-and-reopen. The third bar MOVES: at a constant price the
+    # resize delta is zero and the final "" passes with the guard deleted.
+    (_HALF_STEPS, [1.0, 0.5, 0.5], [100., 100., 103.], ["buy", "sell", ""]),
+    (_HALF_STEPS, [-1.0, -0.5, -0.5], [100., 100., 97.], ["sell", "buy", ""]),
+    # Growing, where the delta sign and binance's `switching` predicate fall the other way.
+    (_HALF_STEPS, [0.5, 1.0, 1.0], [100., 100., 103.], ["buy", "buy", ""]),
+    (_HALF_STEPS, [-0.5, -1.0, -1.0], [100., 100., 97.], ["sell", "sell", ""]),
+], ids=["repeat-holds", "reversal-trades", "close-to-flat",
+        "trim-long", "trim-short", "grow-long", "grow-short"])
 def test_the_trade_gate(venue, levels, actions, prices, expected):
-    """One gate, one implementation, three things it has to get right."""
-    assert _drive(venue, actions, prices, action_levels=levels) == expected, venue
+    """One gate, one implementation, and the shapes it has to get right.
+
+    Asserting the ORDER SHAPE rather than a trade count: a mutant that reclassified a
+    same-direction trim as a direction switch -- closing the whole position and reopening,
+    ~3x the taker notional plus a flat window mid-step -- passed the entire suite while
+    this row's comment claimed to cover it.
+    """
+    got = _drive(venue, actions, prices, action_levels=levels)
+    got = [ANY_ORDER if e is ANY_ORDER and g else g for g, e in zip(got, expected)]
+    assert got == expected, venue
 
 
 @pytest.mark.parametrize("venue", PLAIN_VENUES)
@@ -342,18 +363,17 @@ def test_a_repeat_after_an_external_close_still_trades(venue):
     """Exchange truth beats the cache, end to end (invariant 2).
 
     `_sync_position_from_exchange` NaNs `current_action_level` on a divergence so this guard
-    releases -- pinned in isolation, but nothing drove it through `_step` per venue, and the
-    per-venue `test_reentry_after_external_close_*` tests assert only that holding_time
-    resets, which is equally true when the guard stays stuck and the account stays flat.
-    bybit and okx had no guard to release before this fold, so the path is newly load-bearing
-    on half the venues.
+    releases. That is pinned in isolation -- but a sync call that is PRESENT IN SOURCE and
+    dead at runtime passes the AST ordering guard, and only stepping the env catches it.
+    binance and bitget each had a venue-local test for this; bybit and okx had none, and
+    they are the two that had no guard to release until this fold.
     """
-    traded = _drive(venue, [1.0, 1.0, 1.0], [100., 101., 102.],
-                    action_levels=_FULL, flatten_before_step=2)
+    got = _drive(venue, [1.0, 1.0, 1.0], [100., 101., 102.],
+                 action_levels=_FULL, flatten_before_step=2)
 
-    assert traded == [True, False, True], (
-        f"{venue} traded {traded}; the venue went flat under the position, so the third "
-        f"action is a re-entry the guard must not swallow"
+    assert got == ["buy", "", "buy"], (
+        f"{venue} sent {got}; the venue went flat under the position, so the third action "
+        f"is a re-entry the guard must not swallow"
     )
 
 
@@ -416,9 +436,9 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
 # unimplemented abstractmethods", which stopped discriminating when #288 gave the base's
 # last @abstractmethod a body: the five intermediate bases became concrete and this list
 # grew 10 -> 15. Where a class LIVES is stable under a refactor; which method happens to be
-# abstract is not. The isabstract term is NOT redundant: an abstract class added inside a
-# venue env.py makes the module filter alone return 11, and this one 10 (verified by
-# injecting one, not by reasoning about it).
+# abstract is not. The isabstract half states intent rather than catching anything: an
+# abstract class added inside a venue env.py trips `len(PLAIN_FUTURES_ENVS) == 4` first,
+# with or without it.
 STEPPING_ENVS = [c for c in LIVE_ENVS
                  if c.__module__.endswith((".env", ".env_sltp"))
                  and not inspect.isabstract(c)]

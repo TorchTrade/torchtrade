@@ -365,44 +365,6 @@ class TestBitgetFuturesTorchTradingEnv:
         assert all(isinstance(tf, TimeFrame) for tf in config.time_frames)
         assert config.window_sizes == [10]
 
-    def test_reenters_after_external_position_close(self, env, mock_trader):
-        """A position closed on the exchange must not leave the guard refusing to re-enter.
-
-        Both halves matter: the guard must still suppress a genuinely redundant re-command,
-        or a fix that resynced on every step would pass too.
-        """
-        from torchtrade.envs.live.bitget.order_executor import PositionStatus
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            env.reset()
-            long_idx = len(env.action_levels) - 1
-
-            # 1. Agent opens a long.
-            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
-            mock_trader.trade.assert_called()
-
-            # 2. Exchange confirms the position AT THE SIZE THAT WAS ORDERED. Re-commanding
-            # the SAME level is then redundant. Read from the call rather than hardcoded:
-            # a fixture reporting a different size is a partial fill, which the sync now
-            # detects and deliberately releases the guard for (#276 follow-up).
-            filled = mock_trader.trade.call_args.kwargs["quantity"]
-            mock_trader.get_status = MagicMock(return_value={"position_status": PositionStatus(
-                qty=filled, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_mode="isolated", liquidation_price=45000.0,
-            )})
-            mock_trader.trade.reset_mock()
-            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
-            mock_trader.trade.assert_not_called()   # guard still works
-
-            # 3. The exchange liquidates it out from under us.
-            mock_trader.get_status = MagicMock(return_value={"position_status": None})
-            mock_trader.trade.reset_mock()
-            env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
-
-            # The agent still wants to be long -> the env must actually re-enter.
-            mock_trader.trade.assert_called()
-
     @pytest.mark.parametrize("qty,liq_price,expected_dtl", [
         (0.001, 45000.0, pytest.approx(0.1018, rel=1e-2)),   # long normal: (50100-45000)/50100
         (0.001, 0.0, pytest.approx(0.0978, rel=1e-3)),   # long, venue omits liq: 50000*(1-1/10+0.004)=45200

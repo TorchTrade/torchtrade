@@ -186,8 +186,7 @@ class _StubObserver:
 
 
 
-# The same 10 concrete envs test_live_env_base discovers, and length-asserts.
-LIVE_ENVS = STEPPING_ENVS
+LIVE_ENVS = STEPPING_ENVS   # the same 10; test_live_env_base length-asserts them
 
 
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=[c.__name__ for c in LIVE_ENVS])
@@ -213,14 +212,6 @@ def test_live_env_specs_sample_finite(env_cls):
         if value.is_floating_point():
             assert torch.isfinite(value).all(), f"{env_cls.__name__}.{key} sampled non-finite"
     assert env.observation_spec.is_in(sample)
-
-
-def test_live_env_discovery_covers_every_exchange():
-    """The parametrize above is only unskippable if discovery actually finds everything:
-    an exchange dropping out would silently shrink it and stay green."""
-    exchanges = {c.__module__.split(".")[3] for c in LIVE_ENVS}
-    assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}, exchanges
-    assert len(LIVE_ENVS) == 10, [c.__name__ for c in LIVE_ENVS]
 
 
 def test_transform_observation_spec_samples_finite():
