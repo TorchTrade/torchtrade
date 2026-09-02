@@ -203,7 +203,10 @@ class TestBybitFuturesTorchTradingEnv:
         (True, True),    # portfolio collapses below the threshold -> episode terminates
         (False, False),  # same collapse, check disabled -> keep trading
     ], ids=["enabled-terminates", "disabled-keeps-trading"])
-    def test_bankruptcy_termination(self, env, mock_trader, done_on_bankruptcy, expected_done):
+    @pytest.mark.parametrize("level", [0, 1], ids=["flat", "long"])
+    def test_bankruptcy_termination(
+        self, env, mock_trader, done_on_bankruptcy, expected_done, level
+    ):
         """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
         Threshold arithmetic is covered in tests/envs/test_live_env_base.py; the disabled
@@ -220,7 +223,12 @@ class TestBybitFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+            # By VALUE, and BOTH routes. `torch.tensor(2)` used to mean "flat" on
+            # three venues and "full long" on binance, because their default action
+            # levels differed -- the same bytes testing two different behaviours (#288).
+            # Now the defaults agree, so the axis has to be explicit or one route is lost.
+            idx = env.action_levels.index(level)
+            next_td = env.step(TensorDict({"action": torch.tensor(idx)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done
 
     def test_config_post_init(self):
