@@ -251,6 +251,161 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
+# --- the trade gate: one implementation, and the behaviour it exists for (#288) ----------
+
+PLAIN_VENUES = [c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS]
+
+
+def _drive(venue, actions, prices, *, flatten_before_step=None, **config_kw):
+    """Step `actions` at `prices`, mirroring each fill back so venue and env agree.
+
+    The mirror is load-bearing, not scaffolding: `_sync_position_from_exchange` releases the
+    duplicate-action guard whenever the venue's qty disagrees with the target (invariant 2,
+    #243). A harness that reports a stale position therefore makes ALL FOUR venues re-trade,
+    and the difference this test exists to measure disappears.
+
+    Mirroring inside the mocks covers both submission paths for free: binance calls
+    `close_position()` then `trade(...)`, bybit sends one `trade(...)` spanning
+    close-and-open. Counting only `trade` left binance's mirrored position long, and the
+    guard then released on the divergence -- correctly.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue, **config_kw)
+    held = 0.0
+
+    def on_trade(side, quantity, **_):
+        nonlocal held
+        held = round(held + quantity * (1 if side == "buy" else -1), 6)
+        return True
+
+    def on_close(*_a, **_k):
+        nonlocal held
+        held = 0.0
+        return True
+
+    def on_status(**_):
+        price = trader.get_mark_price.return_value
+        return {"position_status": None if held == 0 else PositionStatus(
+            qty=held, notional_value=abs(held) * price, entry_price=100.0,
+            unrealized_pnl=0.0, unrealized_pnl_pct=0.0, mark_price=price,
+            leverage=1.0, margin_mode="isolated", liquidation_price=0.0)}
+
+    trader.trade.side_effect = on_trade
+    trader.close_position.side_effect = on_close
+    trader.get_status.side_effect = on_status
+
+    td = env.reset()
+    shapes = []
+    for step, (value, price) in enumerate(zip(actions, prices)):
+        if step == flatten_before_step:
+            held = 0.0                      # liquidated / closed from outside the env
+        trader.get_mark_price.return_value = price
+        sent, closed = trader.trade.call_count, trader.close_position.call_count
+        td = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                      .set("action", torch.tensor(env.action_levels.index(value))))["next"]
+        # A close IS an order: counting only `trade` left a close-to-flat invisible.
+        parts = []
+        if trader.close_position.call_count > closed:
+            parts.append("close")
+        if trader.trade.call_count > sent:
+            parts.append(trader.trade.call_args.kwargs["side"])
+        shapes.append("+".join(parts))
+    return shapes
+
+
+ANY_ORDER = "<any order>"                    # rows where the shape is venue business
+
+# Set explicitly on every row, never read from the config default: these rows pin the
+# levels they test, and `test_every_plain_config_defaults_to_the_same_action_space` is what
+# makes a change to the default itself loud.
+_FULL = [-1.0, 0.0, 1.0]
+_HALF_STEPS = [-1.0, -0.5, 0.0, 0.5, 1.0]    # ...where a same-direction resize is possible
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+@pytest.mark.parametrize("levels,actions,prices,expected", [
+    # Without the guard the target is recomputed at each new mark, so bybit and okx traded
+    # five times to binance and bitget's one while the price walked 100 -> 110.
+    (_FULL, [1.0] * 5, [100., 101., 103., 106., 110.], ["buy", "", "", "", ""]),
+    # The other half, and the half that fails silently: a guard keyed on a cached level is
+    # one stale write away from refusing every trade. The reversal's SHAPE is venue
+    # business -- binance closes then opens, bybit sends one order spanning both -- so this
+    # row asserts only that it traded.
+    (_FULL, [1.0, 1.0, -1.0, -1.0], [100., 101., 102., 103.], ["buy", "", ANY_ORDER, ""]),
+    # A close IS an order, and the gate must not swallow it: mutating it to skip every
+    # close-to-flat passed every row here while the position stayed open (#288 round 2).
+    (_FULL, [1.0, 0.0], [100., 101.], ["buy", "close"]),
+    # A different level in the SAME direction is a trade, and it must be ONE order on the
+    # same side -- not a close-and-reopen. The third bar MOVES: at a constant price the
+    # resize delta is zero and the final "" passes with the guard deleted.
+    (_HALF_STEPS, [1.0, 0.5, 0.5], [100., 100., 103.], ["buy", "sell", ""]),
+    (_HALF_STEPS, [-1.0, -0.5, -0.5], [100., 100., 97.], ["sell", "buy", ""]),
+    # Growing, where the delta sign and binance's `switching` predicate fall the other way.
+    (_HALF_STEPS, [0.5, 1.0, 1.0], [100., 100., 103.], ["buy", "buy", ""]),
+    (_HALF_STEPS, [-0.5, -1.0, -1.0], [100., 100., 97.], ["sell", "sell", ""]),
+], ids=["repeat-holds", "reversal-trades", "close-to-flat",
+        "trim-long", "trim-short", "grow-long", "grow-short"])
+def test_the_trade_gate(venue, levels, actions, prices, expected):
+    """One gate, one implementation, and the shapes it has to get right.
+
+    Asserting the ORDER SHAPE rather than a trade count: a mutant that reclassified a
+    same-direction trim as a direction switch -- closing the whole position and reopening,
+    ~3x the taker notional plus a flat window mid-step -- passed the entire suite while
+    this row's comment claimed to cover it.
+    """
+    got = _drive(venue, actions, prices, action_levels=levels)
+    # `zip` truncates, so a short `expected` would skip the tail silently. ANY_ORDER means
+    # "it traded, the shape is venue business"; it does NOT check the side -- a wrong-side
+    # reversal surfaces at the NEXT step, when cache and venue diverge.
+    assert len(got) == len(expected), f"{venue}: {len(got)} steps, {len(expected)} expected"
+    got = [ANY_ORDER if want is ANY_ORDER and shape else shape
+           for shape, want in zip(got, expected)]
+    assert got == expected, venue
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+def test_the_gate_forwards_the_price_it_was_handed(venue):
+    """Shape is not size, and the gate rows only assert shape.
+
+    Corrupting the price `_execute_trade_if_needed` forwards doubles the quantity every
+    venue sends and passes the whole suite: the target stays self-consistent with what the
+    venue then reports, so the sync never diverges and no shape changes. (Pre-existing --
+    the same corruption survives on main's four separate forwarders; the fold makes it one
+    forwarder to get wrong instead of four.)
+
+    A band, not a golden number: the four venues net their own taker fee off the notional,
+    so they legitimately differ in the third decimal.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue)
+    trader.get_mark_price.return_value = 100.0
+    td = env.reset()
+    env.step(td.set("action", torch.tensor(env.action_levels.index(1.0))))
+
+    qty = trader.trade.call_args.kwargs["quantity"]
+    assert 95.0 < qty < 100.0, (
+        f"{venue} sent {qty} for a full-long on a $10,000 account at $100; a mark that "
+        f"reached sizing halved or doubled would land outside this band"
+    )
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+def test_a_repeat_after_an_external_close_still_trades(venue):
+    """Exchange truth beats the cache, end to end (invariant 2).
+
+    `_sync_position_from_exchange` NaNs `current_action_level` on a divergence so this guard
+    releases. That is pinned in isolation -- but a sync call that is PRESENT IN SOURCE and
+    dead at runtime passes the AST ordering guard, and only stepping the env catches it.
+    binance and bitget each had a venue-local test for this; bybit and okx had none, and
+    they are the two that had no guard to release until this fold.
+    """
+    got = _drive(venue, [1.0, 1.0, 1.0], [100., 101., 102.],
+                 action_levels=_FULL, flatten_before_step=2)
+
+    assert got == ["buy", "", "buy"], (
+        f"{venue} sent {got}; the venue went flat under the position, so the third action "
+        f"is a re-entry the guard must not swallow"
+    )
+
+
 def _first_call_position(func, names):
     """Source position of the earliest call to any of `names`, or None.
 
@@ -306,7 +461,12 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
 #
 # The length assertions are the other half: without them an emptied list SKIPS rather
 # than fails, which is how this would have shipped.
-STEPPING_ENVS = [c for c in LIVE_ENVS if not inspect.isabstract(c)]
+# A concrete env is one in a venue's env.py/env_sltp.py. That used to be spelled "has no
+# unimplemented abstractmethods", which stopped discriminating when #288 gave the base's
+# last @abstractmethod a body: the five intermediate bases became concrete and this list
+# grew 10 -> 15. Where a class LIVES is stable under a refactor; which method happens to be
+# abstract is not.
+STEPPING_ENVS = [c for c in LIVE_ENVS if c.__module__.endswith((".env", ".env_sltp"))]
 assert len(STEPPING_ENVS) == 10, (
     f"expected the 10 concrete live envs (5 venues x plain/SLTP), got "
     f"{[c.__name__ for c in STEPPING_ENVS]}"
@@ -4117,10 +4277,6 @@ class _CloseHarness(TorchTradeFuturesLiveEnv):
     -- close() reads nothing but `self.trader`. See _ResetStub on why not a MagicMock.
     """
 
-    def _init_trading_clients(self, *a, **k): raise NotImplementedError
-    def _step(self, tensordict): raise NotImplementedError
-    def _execute_trade_if_needed(self, action): raise NotImplementedError
-
     @classmethod
     def build(cls, direction=0, cancel_raises=False, status_raises=False):
         self = object.__new__(cls)
@@ -4584,8 +4740,8 @@ def test_each_venue_builds_its_observer_with_the_arguments_it_needs(venue, expec
     two roles and the other three must not, which is the actual contract.
     """
 
-    # The concrete plain env, not the abstract exchange base: the base still declares
-    # `_step`/`_execute_trade_if_needed` abstract, so it cannot be instantiated at all.
+    # The concrete plain env, not the exchange base: only the leaves assign `action_spec`,
+    # so a base builds into a half-env that fails later instead of at construction (#288).
     module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
     cls = _sole(module, "TorchTradingEnv")
 
@@ -4758,7 +4914,7 @@ _SHARED_METHOD_OWNERSHIP = [
     # envs, alpaca included -- the only tail in this file that alpaca shares (#288).
     *((c, TorchTradeLiveEnv, "_record_and_score") for c in STEPPING_ENVS),
     *((c, TorchTradeFuturesLiveEnv, m)
-      for c in PLAIN_FUTURES_ENVS for m in ("_step", "_reset")),
+      for c in PLAIN_FUTURES_ENVS for m in ("_step", "_reset", "_execute_trade_if_needed")),
     # binance is absent by design: it EXTENDS the sizing via super() (min-notional refusal
     # and target rounding), which its own behavioural test pins.
     *((c, TorchTradeFuturesLiveEnv, "_calculate_fractional_position")
@@ -4805,6 +4961,7 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("TorchTradeFuturesLiveEnv", "_step"),
     ("TorchTradeFuturesLiveEnv", "_reset"),
     ("TorchTradeFuturesLiveEnv", "_calculate_fractional_position"),
+    ("TorchTradeFuturesLiveEnv", "_execute_trade_if_needed"),
     ("SLTPMixin", "_step"),
     ("SLTPMixin", "_reset"),
     ("SLTPMixin", "_resolve_action_tuple"),

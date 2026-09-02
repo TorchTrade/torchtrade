@@ -9,7 +9,6 @@ Alpaca (spot) is NOT a futures env: it hardcodes leverage=1 and distance_to_liqu
 and reads cash rather than total_wallet_balance. It keeps its own `_get_observation` and
 inherits `TorchTradeLiveEnv` directly.
 """
-from abc import abstractmethod
 from typing import Dict
 import logging
 import math
@@ -71,9 +70,8 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
     [exposure_pct, position_direction, unrealized_pnl_pct,
      holding_time, leverage, distance_to_liquidation]
 
-    Subclasses (per-exchange base envs) must still implement:
-    - _init_trading_clients(): provider-specific client construction
-    - _execute_trade_if_needed(): trade execution, whose action space differs by env
+    Subclasses (the plain per-exchange envs) must implement:
+    - _execute_fractional_action(): venue sizing/rounding, called by the shared trade gate
     """
 
     #: The venue's observation and order classes. Set by each exchange's base (#288).
@@ -954,11 +952,9 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         self.position.hold_counter = 0
         self.position.current_position = direction
 
-        # Load-bearing for binance and bitget, whose _execute_trade_if_needed compares
-        # `desired_action == self.position.current_action_level` and returns executed=False
-        # on a match: without this, a position that predates the episode leaves a stale
-        # level behind which the guard refuses the very trade that would close it (#243).
-        # Inert for bybit and okx, which take the threaded qty and never read the field.
+        # Load-bearing: `_execute_trade_if_needed` returns executed=False when the action
+        # matches `current_action_level`, so a position predating the episode would leave a
+        # stale level behind and the guard would refuse the trade that closes it (#243).
         self._sync_action_level_after_reset()
 
         # advance_hold=False: hold_counter was just zeroed above; a reset must never
@@ -974,10 +970,24 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # Built from the reads already confirmed above, not a second raw pair.
         return self._get_observation(advance_hold=False, snapshot=(status, balance))
 
-    @abstractmethod
-    def _execute_trade_if_needed(self, action) -> dict:
-        """Execute trade if position change is needed. Action format varies by subclass."""
-        raise NotImplementedError
+    def _execute_trade_if_needed(
+        self, desired_action: float, *, current_qty: float, current_price: float,
+    ) -> dict:
+        """Skip the venue round-trip when the agent asks for the level it already holds.
+
+        Without this the target is recomputed at each new mark, so one repeated action
+        resizes on every price move -- fees the offline env, which holds, never charged the
+        policy for. Safe against state drift (rejected orders, partial fills, manual
+        intervention): `_sync_position_from_exchange` NaNs `current_action_level` whenever
+        the venue's qty disagrees with the target, and NaN never compares equal, so the
+        guard releases and the agent can correct (#243).
+        """
+        if desired_action == self.position.current_action_level:
+            return self._create_trade_info(executed=False)
+
+        return self._execute_fractional_action(
+            desired_action, current_qty=current_qty, current_price=current_price,
+        )
 
     def close(self, *, raise_if_closed: bool = True):
         """Cancel open orders. Deliberately does NOT close positions.

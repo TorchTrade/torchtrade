@@ -158,23 +158,3 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         info["target_qty"] = target_qty
         info["target_tol"] = min_qty
         return info
-
-    def _execute_trade_if_needed(
-        self, desired_action: float, *, current_qty: float, current_price: float,
-    ) -> Dict:
-        """Execute trade based on desired action value.
-
-        Skips execution if already in the requested position direction.
-
-        Args:
-            desired_action: Fractional action value in [-1.0, 1.0]
-
-        Returns:
-            trade_info: Dict with execution details
-        """
-        if desired_action == self.position.current_action_level:
-            return self._create_trade_info(executed=False)
-
-        return self._execute_fractional_action(
-            desired_action, current_qty=current_qty, current_price=current_price,
-        )

@@ -5,7 +5,7 @@ import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
 from tests.envs.base_exchange_tests import (
@@ -641,27 +641,6 @@ class TestBybitFractionalPositionResizing:
              patch("torchtrade.envs.live.bybit.env.BybitFuturesTorchTradingEnv._wait_for_next_timestamp"):
             return BybitFuturesTorchTradingEnv(
                 config=config, observer=mock_env_observer, trader=mock_env_trader,
-            )
-
-    @pytest.mark.parametrize("first_action,second_action", [
-        (0.5, 1.0),    # Scale up long
-        (-0.5, -1.0),  # Scale up short
-        (1.0, 0.5),    # Scale down long
-        (1.0, 1.0),    # Same level: delegates to fractional (exchange-based)
-        (0.0, 0.0),    # Both flat: delegates to fractional (exchange-based)
-    ])
-    def test_fractional_resizing_always_delegates(self, env, first_action, second_action):
-        """_execute_trade_if_needed always delegates to exchange-based fractional sizing."""
-        trade_result = {"executed": True, "amount": 0.01, "side": "buy",
-                        "success": True, "closed_position": False}
-
-        with patch.object(env, '_execute_fractional_action', return_value=trade_result) as mock_exec:
-            env.position.current_action_level = first_action
-            env._execute_trade_if_needed(second_action, current_qty=position_qty_from_status(
-                env.trader.get_status().get("position_status")),
-            current_price=env._current_mark_price())
-            mock_exec.assert_called_once_with(
-                second_action, current_qty=ANY, current_price=ANY
             )
 
     def test_qty_step_rounding_no_float_artifacts(self, env, mock_env_trader):

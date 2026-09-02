@@ -37,9 +37,9 @@ from tensordict import TensorDictBase
 
 import torchtrade
 import torchtrade.envs  # noqa: F401 -- registers every live env as a subclass
-from tests.envs.test_live_env_base import _subclasses
+# The same 10 concrete envs; test_live_env_base length-asserts them at import.
+from tests.envs.test_live_env_base import STEPPING_ENVS as LIVE_ENVS
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.offline import (
     OneStepTradingEnv,
     OneStepTradingEnvConfig,
@@ -187,24 +187,6 @@ class _StubObserver:
 
 
 
-def _concrete_live_envs():
-    """Discovered, not hand-listed, so exchange #6 cannot skip this by being forgotten.
-
-    Abstract bases are dropped -- EnvBase.__new__ rejects them -- and so is anything
-    defined outside the package: a test harness that subclasses a live base to drive one
-    method would otherwise be discovered as an eleventh exchange and asked for specs it
-    was never built to have.
-    """
-    return sorted(
-        (c for c in set(_subclasses(TorchTradeLiveEnv))
-         if not getattr(c, "__abstractmethods__", None)
-         and c.__module__.startswith("torchtrade.")),
-        key=lambda c: c.__name__,
-    )
-
-
-LIVE_ENVS = _concrete_live_envs()
-
 
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=[c.__name__ for c in LIVE_ENVS])
 def test_live_env_specs_sample_finite(env_cls):
@@ -231,14 +213,6 @@ def test_live_env_specs_sample_finite(env_cls):
     assert env.observation_spec.is_in(sample)
 
 
-def test_live_env_discovery_covers_every_exchange():
-    """The parametrize above is only unskippable if discovery actually finds everything:
-    an exchange dropping out would silently shrink it and stay green."""
-    exchanges = {c.__module__.split(".")[3] for c in LIVE_ENVS}
-    assert exchanges == {"alpaca", "binance", "bitget", "bybit", "okx"}, exchanges
-    assert len(LIVE_ENVS) == 10, [c.__name__ for c in LIVE_ENVS]
-
-
 def test_transform_observation_spec_samples_finite():
     """The transform is not an env, so the live parametrize cannot reach it -- without
     this its spec is guarded only by the source scan."""
@@ -262,7 +236,7 @@ def test_transform_observation_spec_samples_finite():
 
 def test_polymarket_env_specs_sample_finite():
     """PolymarketBetEnv subclasses EnvBase directly, not TorchTradeLiveEnv, so it is
-    invisible to the __subclasses__ discovery above."""
+    invisible to the __subclasses__ discovery in test_live_env_base."""
     from unittest.mock import MagicMock
 
     from torchtrade.envs.live.polymarket import PolymarketBetEnv, PolymarketBetEnvConfig
