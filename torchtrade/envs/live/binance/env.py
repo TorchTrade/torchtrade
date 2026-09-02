@@ -240,23 +240,3 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         info["target_tol"] = float(self.trader.get_lot_size()["min_qty"])
         return info
 
-    def _execute_trade_if_needed(
-        self, desired_action: float, *, current_qty: float, current_price: float,
-    ) -> Dict:
-        """
-        Execute trade if position change is needed.
-
-        Skips execution if already in the requested position direction.
-
-        Args:
-            desired_action: Action level
-
-        Returns:
-            Dict with trade execution info
-        """
-        if desired_action == self.position.current_action_level:
-            return self._create_trade_info(executed=False)
-
-        return self._execute_fractional_action(
-            desired_action, current_qty=current_qty, current_price=current_price,
-        )

@@ -88,10 +88,3 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
         info["target_tol"] = lot_size["min_qty"]
         return info
 
-    def _execute_trade_if_needed(
-        self, desired_action: float, *, current_qty: float, current_price: float,
-    ) -> Dict:
-        """Execute trade based on desired action value."""
-        return self._execute_fractional_action(
-            desired_action, current_qty=current_qty, current_price=current_price,
-        )

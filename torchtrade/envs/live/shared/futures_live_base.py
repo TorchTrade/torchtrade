@@ -9,7 +9,6 @@ Alpaca (spot) is NOT a futures env: it hardcodes leverage=1 and distance_to_liqu
 and reads cash rather than total_wallet_balance. It keeps its own `_get_observation` and
 inherits `TorchTradeLiveEnv` directly.
 """
-from abc import abstractmethod
 from typing import Dict
 import logging
 import math
@@ -954,11 +953,11 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         self.position.hold_counter = 0
         self.position.current_position = direction
 
-        # Load-bearing for binance and bitget, whose _execute_trade_if_needed compares
-        # `desired_action == self.position.current_action_level` and returns executed=False
-        # on a match: without this, a position that predates the episode leaves a stale
-        # level behind which the guard refuses the very trade that would close it (#243).
-        # Inert for bybit and okx, which take the threaded qty and never read the field.
+        # Load-bearing for all four now that `_execute_trade_if_needed` is shared: it
+        # compares `desired_action == self.position.current_action_level` and returns
+        # executed=False on a match, so without this a position that predates the episode
+        # leaves a stale level behind which the guard refuses the very trade that would
+        # close it (#243). It was inert for bybit and okx until they gained the guard.
         self._sync_action_level_after_reset()
 
         # advance_hold=False: hold_counter was just zeroed above; a reset must never
@@ -974,10 +973,35 @@ class TorchTradeFuturesLiveEnv(TorchTradeLiveEnv):
         # Built from the reads already confirmed above, not a second raw pair.
         return self._get_observation(advance_hold=False, snapshot=(status, balance))
 
-    @abstractmethod
-    def _execute_trade_if_needed(self, action) -> dict:
-        """Execute trade if position change is needed. Action format varies by subclass."""
-        raise NotImplementedError
+    def _execute_trade_if_needed(
+        self, desired_action: float, *, current_qty: float, current_price: float,
+    ) -> dict:
+        """Skip the venue round-trip when the agent asks for the level it already holds.
+
+        The four venues had forked on this. binance and bitget guarded; bybit dropped the
+        guard in 80bdd892 to be "robust to state drift from rejected orders, partial fills,
+        or external intervention", and okx was written from bybit two months later. Without
+        it, the target is recomputed at the new mark every bar, so a policy repeating one
+        action RESIZES on every price move: walking 100 -> 110 with the action held at full
+        long, binance and bitget trade once and bybit and okx trade five times, adding ~$947
+        of resize notional against a ~$9,795 position.
+
+        `offline/sequential.py` -- which is what the policy actually trains in, and which
+        CLAUDE.md names the highest priority -- holds. So the guard is not a tidiness
+        preference; without it the learned "hold" means "rebalance" on two of four venues,
+        at fees the training reward never modelled.
+
+        80bdd892's concern was real and is now handled a layer up, by machinery that did not
+        exist in 2026-02: `_sync_position_from_exchange` compares the venue's qty against
+        the target and sets `current_action_level` to NaN on a divergence, which releases
+        this guard so the agent can correct. Drift unblocks the trade; agreement skips it.
+        """
+        if desired_action == self.position.current_action_level:
+            return self._create_trade_info(executed=False)
+
+        return self._execute_fractional_action(
+            desired_action, current_qty=current_qty, current_price=current_price,
+        )
 
     def close(self, *, raise_if_closed: bool = True):
         """Cancel open orders. Deliberately does NOT close positions.

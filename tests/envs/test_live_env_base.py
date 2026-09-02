@@ -251,6 +251,130 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
     )
 
 
+# --- the trade gate: one implementation, and the behaviour it exists for (#288) ----------
+
+PLAIN_VENUES = [c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS]
+
+
+@pytest.mark.parametrize("env_cls", PLAIN_FUTURES_ENVS, ids=lambda c: c.__name__)
+def test_no_plain_futures_env_reforks_the_trade_gate(env_cls):
+    """`_execute_trade_if_needed` is shared, which is what lets the test below run once.
+
+    Not folded into `test_no_futures_env_reforks_the_shared_observation`: that one is
+    parametrized over all eight futures envs, and the four SLTP ones correctly resolve this
+    method to SLTPMixin's bracket version instead.
+    """
+    assert env_cls._execute_trade_if_needed is TorchTradeFuturesLiveEnv._execute_trade_if_needed, (
+        f"{env_cls.__name__} re-forks _execute_trade_if_needed. bybit and okx each carried "
+        f"their own copy WITHOUT the duplicate-action guard, which is how they came to "
+        f"re-trade on every price move while binance and bitget held."
+    )
+
+
+def _drive(venue, actions, prices, **config_kw):
+    """Step `actions` at `prices`, mirroring each fill back so venue and env agree.
+
+    The mirror is load-bearing, not scaffolding: `_sync_position_from_exchange` releases the
+    duplicate-action guard whenever the venue's qty disagrees with the target (invariant 2,
+    #243). A harness that reports a stale position therefore makes ALL FOUR venues re-trade,
+    and the difference this test exists to measure disappears -- which is exactly what my
+    first two attempts at it showed.
+
+    Both submission paths have to be mirrored, because the venues reverse differently:
+    binance calls `close_position()` and then `trade(sell, ...)` for the new side, while
+    bybit sends ONE `trade(sell, ...)` spanning close-and-open. Counting only `trade` leaves
+    binance's mirrored position at +1.9 -- still long -- and the guard then releases on the
+    divergence, exactly as designed. `trader.trade` takes `quantity=`, not `amount=`.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue, **config_kw)
+    held = 0.0
+
+    def status(**_):
+        price = trader.get_mark_price.return_value
+        return {"position_status": None if held == 0 else PositionStatus(
+            qty=held, notional_value=abs(held) * price, entry_price=100.0,
+            unrealized_pnl=0.0, unrealized_pnl_pct=0.0, mark_price=price,
+            leverage=1.0, margin_mode="isolated", liquidation_price=0.0)}
+
+    trader.get_status.side_effect = status
+    td = env.reset()
+    traded = []
+    for action, price in zip(actions, prices):
+        trader.get_mark_price.return_value = price
+        before, closed_before = trader.trade.call_count, trader.close_position.call_count
+        td = env.step(td.exclude("done", "terminated", "truncated", "reward")
+                      .set("action", torch.tensor(action)))["next"]
+        traded.append(trader.trade.call_count > before)
+        if trader.close_position.call_count > closed_before:
+            held = 0.0                       # binance flattens first, then opens the new side
+        if traded[-1]:
+            call = trader.trade.call_args
+            signed = call.kwargs["quantity"] * (1 if call.kwargs["side"] == "buy" else -1)
+            held = round(held + signed, 6)
+    return traded
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+def test_repeating_an_action_does_not_retrade(venue):
+    """The agent asked for the level it already holds. That is a hold, on every venue.
+
+    Without the guard the target is recomputed at each new mark, so one repeated action
+    RESIZES on every price move: walking 100 -> 110 at full long, bybit and okx traded five
+    times to binance and bitget's one, adding ~$947 of resize notional against a ~$9,795
+    position -- fees the offline env (`offline/sequential.py`, which holds, and which is
+    what the policy trains in) never charged the policy for.
+    """
+    env, _ = _real_futures_env(budget=0, venue=venue)
+    long_idx = len(env.action_levels) - 1        # by value: index 2 is not "long" everywhere
+    traded = _drive(venue, [long_idx] * 5, [100.0, 101.0, 103.0, 106.0, 110.0])
+
+    assert traded[0], "setup: the first full-long action must open the position"
+    assert not any(traded[1:]), (
+        f"{venue} re-traded on {sum(traded[1:])} of 4 repeats of one action while the price "
+        f"moved; the level was already held, so each is an unrequested resize"
+    )
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+def test_a_changed_action_still_trades_immediately(venue):
+    """The other half: the guard must skip repeats without ever swallowing a real change.
+
+    A guard keyed on a cached level is one stale write away from refusing every trade, so
+    "it holds" is only half the contract and the half that fails silently.
+    """
+    env, _ = _real_futures_env(budget=0, venue=venue)
+    long_idx, short_idx = len(env.action_levels) - 1, 0
+    traded = _drive(venue, [long_idx, long_idx, short_idx, short_idx],
+                    [100.0, 101.0, 102.0, 103.0])
+
+    assert traded == [True, False, True, False], (
+        f"{venue} traded {traded}; expected open, hold, reverse, hold"
+    )
+
+
+# Half steps need a config that HAS them: the shared default is [-1, 0, 1] (#288), where
+# every non-flat level is already a full position and a same-direction resize cannot happen.
+_HALF_STEPS = [-1.0, -0.5, 0.0, 0.5, 1.0]
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+def test_resizing_within_one_direction_still_trades(venue):
+    """A different level in the SAME direction is a trade, not a repeat.
+
+    The third case the guard has to get right, and the one a direction-based guard would
+    fail: 1.0 -> 0.5 keeps the sign and must still halve the position. It was covered on
+    binance alone, by a test that mocked `_execute_fractional_action` and asserted the call
+    rather than the outcome -- the same "fixed on one venue" shape this fold exists to end.
+    """
+    full_long, half_long = 4, 3          # indices into _HALF_STEPS
+    traded = _drive(venue, [full_long, half_long, half_long], [100.0, 100.0, 100.0],
+                    action_levels=_HALF_STEPS)
+
+    assert traded == [True, True, False], (
+        f"{venue} traded {traded}; expected open at 1.0, resize to 0.5, then hold"
+    )
+
+
 def _first_call_position(func, names):
     """Source position of the earliest call to any of `names`, or None.
 
@@ -306,7 +430,18 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
 #
 # The length assertions are the other half: without them an emptied list SKIPS rather
 # than fails, which is how this would have shipped.
-STEPPING_ENVS = [c for c in LIVE_ENVS if not inspect.isabstract(c)]
+# `not inspect.isabstract(c)` alone is no longer the discriminator. It worked only while
+# `_execute_trade_if_needed` was the sole @abstractmethod on TorchTradeFuturesLiveEnv;
+# giving that method a shared implementation (#288) left the intermediate bases with
+# nothing unimplemented, promoting all five to "concrete" and growing this list 10 -> 15.
+# A concrete env is one that lives in a venue's env.py/env_sltp.py -- which is stable under
+# a refactor in a way that "which method happens to be abstract" is not. isabstract stays
+# as the second half: a genuinely abstract class in one of those modules is still not a
+# subject.
+STEPPING_ENVS = [
+    c for c in LIVE_ENVS
+    if c.__module__.endswith((".env", ".env_sltp")) and not inspect.isabstract(c)
+]
 assert len(STEPPING_ENVS) == 10, (
     f"expected the 10 concrete live envs (5 venues x plain/SLTP), got "
     f"{[c.__name__ for c in STEPPING_ENVS]}"
