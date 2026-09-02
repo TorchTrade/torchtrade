@@ -259,8 +259,7 @@ class TestBybitFuturesTorchTradingEnv:
         """A residual left between two positions must not carry the old age into the new one.
         """
 
-        def status(qty):
-            return a_position_status(qty)
+        status = a_position_status
 
         with patch.object(env, "_wait_for_next_timestamp"):
             mock_trader.get_status = MagicMock(return_value=status(0.01))
@@ -342,8 +341,7 @@ class TestBybitFuturesTorchTradingEnv:
         hold_counter, the policy is handed a brand-new position as N+1 bars old.
         """
 
-        def status(qty):
-            return a_position_status(qty)
+        status = a_position_status
 
         with patch.object(env, "_wait_for_next_timestamp"):
             long_idx = len(env.action_levels) - 1

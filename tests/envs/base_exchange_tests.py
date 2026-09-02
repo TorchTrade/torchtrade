@@ -22,7 +22,7 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 # stops testing four venues and starts testing one.
 
 
-def some_observations(keys, base=None):
+def some_observations(keys, *, base=None):
     """One window per key. `base` is the OHLC bar `return_base_ohlc=True` should yield --
     a 4-tuple for a fixed bar, or None for noise. `base_timestamps` rides along with it,
     as the real observer does (`shared/base_obs.py:287-293` emits both or neither)."""
@@ -31,7 +31,11 @@ def some_observations(keys, base=None):
         if return_base_ohlc:
             obs["base_features"] = (
                 np.random.randn(10, 4).astype(np.float32) if base is None
-                else np.array([list(base)] * 10, dtype=np.float32)
+                # A RAMP into the past, with the last row exactly `base`. Ten identical
+                # rows made "the last candle" unobservable: reading `base_features[0]`
+                # instead of `[-1]` for bracket pricing passed the whole suite (#288).
+                else np.array([[v * (1 - 0.001 * (9 - i)) for v in base]
+                               for i in range(10)], dtype=np.float32)
             )
             obs["base_timestamps"] = np.arange(10)
         return obs
@@ -43,7 +47,7 @@ def a_mock_observer(keys, *, base=None):
     fixture cannot claim a width its own observations contradict (#288)."""
     observer = MagicMock()
     observer.get_keys = MagicMock(return_value=list(keys))
-    observer.get_observations = MagicMock(side_effect=some_observations(keys, base))
+    observer.get_observations = MagicMock(side_effect=some_observations(keys, base=base))
     mirror_features_on(observer)
     return observer
 
@@ -82,7 +86,8 @@ def add_custom_features(df):
 def a_position_status(qty, *, notional=500.0, mark=50000.0, liquidation=45000.0):
     """What `trader.get_status()` returns. `PositionStatus` is ONE class for all four
     venues (`core.common_types`), so the per-venue import these copies carried was itself
-    the duplication. `qty=None` is a flat account, which is what the venues report."""
+    the duplication. `qty=None` is a flat account, which is what the venues report --
+    NOT `qty=0`, which is an open position of size zero and reaches the dust rule."""
     if qty is None:
         return {"position_status": None}
     return {"position_status": PositionStatus(

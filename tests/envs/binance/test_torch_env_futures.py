@@ -422,8 +422,7 @@ class TestBinanceFuturesTorchTradingEnv:
         disagreement every step, so it could never age.
         """
 
-        def status(qty):
-            return a_position_status(qty)
+        status = a_position_status
 
         with patch.object(env, "_wait_for_next_timestamp"):
             long = TensorDict({"action": torch.tensor(env.action_levels.index(1))},
@@ -452,8 +451,7 @@ class TestBinanceFuturesTorchTradingEnv:
         hold_counter, the policy is handed a brand-new position as N+1 bars old.
         """
 
-        def status(qty):
-            return a_position_status(qty)
+        status = a_position_status
 
         with patch.object(env, "_wait_for_next_timestamp"):
             long_idx = len(env.action_levels) - 1
