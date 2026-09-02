@@ -654,7 +654,9 @@ def _replay_env(env_cls, config_cls, replay_df, **config_kw):
         **{"time_frames": ["1m"], "window_sizes": [10], "execute_on": "1m",
            "leverage": 5, **config_kw}   # merged, so a caller may override any of them
     )
-    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
+    # From the config, not a second literal: overriding `leverage` used to leave the
+    # env and the executor silently disagreeing.
+    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=config.leverage)
     observer = ReplayObserver(
         df=replay_df,
         time_frames=config.time_frames,

@@ -115,18 +115,17 @@ class TestOKXFuturesTorchTradingEnv:
         """Test step with hold action produces valid output."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            # Flat, BY VALUE. Hardcoding index 2 meant 0.0 under the old 5-level
-            # default and means a full LONG under [-1, 0, 1] -- so this stopped
-            # testing a hold the moment the defaults were unified (#288).
+            # Flat BY VALUE: index 2 was 0.0 under the old 5-level default (#288).
             flat = env.action_levels.index(0)
             action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
             next_td = env.step(action_td)
             assert "reward" in next_td["next"].keys()
             assert "done" in next_td["next"].keys()
 
-            # The assertion this test's NAME promised and never made: it only checked
-            # that keys existed, so a flat action that TRADED passed it. Disabling
-            # the flat branch in the env used to fail nothing (#288).
+
+            # The assertion the name always promised: it only checked keys existed.
+            # Defence in depth, not a discriminating pin -- the flat route has FOUR
+            # independent zero-guards, so no single-branch mutation reaches a trade.
             mock_env_trader.trade.assert_not_called()
 
     @pytest.mark.parametrize("level,label", [
@@ -145,9 +144,7 @@ class TestOKXFuturesTorchTradingEnv:
         """The done family is asserted by assert_the_step_emits_the_whole_done_family."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            # Flat, BY VALUE. Hardcoding index 2 meant 0.0 under the old 5-level
-            # default and means a full LONG under [-1, 0, 1] -- so this stopped
-            # testing a hold the moment the defaults were unified (#288).
+            # Flat BY VALUE: index 2 was 0.0 under the old 5-level default (#288).
             flat = env.action_levels.index(0)
             next_td = env.step(TensorDict({"action": torch.tensor(flat)}, batch_size=()))
             assert next_td["next"]["reward"].shape == (1,)
@@ -176,10 +173,8 @@ class TestOKXFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            # By VALUE, and BOTH routes. `torch.tensor(2)` used to mean "flat" on
-            # three venues and "full long" on binance, because their default action
-            # levels differed -- the same bytes testing two different behaviours
-            # (#288). Now the defaults agree, so the axis has to be explicit.
+            # By VALUE, and both routes: index 2 meant flat on three venues and long on
+            # binance, so the same bytes tested two behaviours (#288).
             idx = env.action_levels.index(level)
             next_td = env.step(TensorDict({"action": torch.tensor(idx)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done

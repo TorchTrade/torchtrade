@@ -303,10 +303,8 @@ class TestBinanceFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            # By VALUE, and BOTH routes. `torch.tensor(2)` used to mean "flat" on
-            # three venues and "full long" on binance, because their default action
-            # levels differed -- the same bytes testing two different behaviours (#288).
-            # Now the defaults agree, so the axis has to be explicit or one route is lost.
+            # By VALUE, and both routes: index 2 meant flat on three venues and long on
+            # binance, so the same bytes tested two behaviours (#288).
             idx = env.action_levels.index(level)
             next_td = env.step(TensorDict({"action": torch.tensor(idx)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done

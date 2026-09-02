@@ -59,9 +59,7 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         position_size = (balance × |action| × leverage) / price
         (rounded to exchange step size)
 
-    Default action_levels: [-1, 0, 1] (short / flat / long). It is a DEFAULT, not a
-    constraint -- pass any monotonic list in [-1.0, 1.0] and its length becomes the
-    Categorical's n, e.g. [-1.0, -0.5, 0.0, 0.5, 1.0] for half-size steps.
+    Default action_levels: [-1, 0, 1]; see BaseFuturesTradingConfig.action_levels.
     Custom levels supported: e.g., [-1, -0.3, -0.1, 0, 0.1, 0.3, 1]
 
     Leverage Design:

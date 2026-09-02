@@ -3780,9 +3780,7 @@ from torchtrade.envs.utils.fractional_sizing import build_default_action_levels
 # The PLAIN configs, discovered from the env classes so a fifth venue cannot opt out.
 PLAIN_CONFIGS = [
     pytest.param(
-        next(o for o in vars(importlib.import_module(c.__module__)).values()
-             if dataclasses.is_dataclass(o)
-             and getattr(o, "__name__", "").endswith("TradingEnvConfig")),
+        _sole(importlib.import_module(c.__module__), "TradingEnvConfig"),
         id=c.__module__.split(".")[-2],
     )
     for c in PLAIN_FUTURES_ENVS
@@ -3817,7 +3815,9 @@ def test_every_plain_config_runs_the_shared_post_init(config_cls):
     )
 
 
-def test_no_venue_defaults_to_cross_margin():
+@pytest.mark.parametrize("config_cls", [p.values[0] for p in PLAIN_CONFIGS + SLTP_CONFIGS],
+                         ids=lambda c: c.__name__)
+def test_no_venue_defaults_to_cross_margin(config_cls):
     """The default margin mode is a MONEY decision, and nothing pinned its VALUE.
 
     Folding the four configs, I changed okx's default from ISOLATED to CROSS by mistake
@@ -3827,19 +3827,17 @@ def test_no_venue_defaults_to_cross_margin():
     rather than the position's own margin, so it is not a default anything should acquire
     silently -- least of all from a deduplication (#288).
 
-    Both config families, because okx's plain and SLTP twins had already disagreed for
-    the length of one commit.
+    Parametrized, not looped: a loop stops at the first venue and a second regression of
+    the same shape would stay hidden behind it. Both families, because okx's plain and
+    SLTP twins had already disagreed for the length of one commit.
     """
     from torchtrade.envs.core.common_types import MarginMode as SharedMarginMode
 
-    for family in (PLAIN_CONFIGS, SLTP_CONFIGS):
-        for param in family:
-            cfg = param.values[0]
-            mode = cfg().margin_mode
-            assert mode.name == SharedMarginMode.ISOLATED.name, (
-                f"{cfg.__name__} defaults to {mode.name}; isolated margin is the default "
-                f"every venue ships, and cross exposes the whole balance"
-            )
+    mode = config_cls().margin_mode
+    assert mode.name == SharedMarginMode.ISOLATED.name, (
+        f"{config_cls.__name__} defaults to {mode.name}; isolated margin is the default "
+        f"every venue ships, and cross exposes the whole balance"
+    )
 
 
 def test_every_plain_config_defaults_to_the_same_action_space():
@@ -3870,11 +3868,33 @@ def test_every_sltp_config_inherits_the_shared_fields(config_cls):
     )
 
 
-@pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
-def test_hoisting_a_default_did_not_change_it(config_cls):
-    """Values the four venues agreed on before the hoist, and must still agree on."""
+# The plain base carries 12 of the same keys. Deriving the set rather than retyping it
+# means a field leaving either base is a loud failure here, not a silently smaller pin.
+_PLAIN_SHARED_DEFAULTS = {
+    f.name: SHARED_DEFAULTS[f.name]
+    for f in dataclasses.fields(BaseFuturesTradingConfig) if f.name in SHARED_DEFAULTS
+}
+assert len(_PLAIN_SHARED_DEFAULTS) == 12, sorted(_PLAIN_SHARED_DEFAULTS)
+
+
+@pytest.mark.parametrize("config_cls,pinned", (
+    [pytest.param(c.values[0], SHARED_DEFAULTS, id=f"sltp-{c.id or c.values[0].__name__}")
+     for c in SLTP_CONFIGS]
+    + [pytest.param(c.values[0], _PLAIN_SHARED_DEFAULTS,
+                    id=f"plain-{c.id or c.values[0].__name__}")
+       for c in PLAIN_CONFIGS]
+))
+def test_hoisting_a_default_did_not_change_it(config_cls, pinned):
+    """Values the four venues agreed on before the hoist, and must still agree on.
+
+    BOTH families. The plain fold put twelve money-bearing defaults behind a single
+    literal and pinned none of them: flipping `demo` to False -- every venue then
+    defaulting to the LIVE exchange rather than testnet -- passed 2044 tests, and so did
+    moving `bankrupt_threshold` 0.1 -> 0.5, a 5x change in every venue's force-close
+    point. That is the hoisted-but-unpinned state this test was written for (#288).
+    """
     config = config_cls()
-    assert {f: getattr(config, f) for f in SHARED_DEFAULTS} == SHARED_DEFAULTS
+    assert {f: getattr(config, f) for f in pinned} == pinned
 
 
 # Both variants per venue: the SLTP-only list let a base config drift unseen. Imported

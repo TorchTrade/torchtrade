@@ -50,9 +50,7 @@ class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):
     - action = 0.0: Market neutral (close all positions)
     - action = 1.0: 100% long (all-in long)
 
-    Default action_levels: [-1, 0, 1] (short / flat / long). It is a DEFAULT, not a
-    constraint -- pass any monotonic list in [-1.0, 1.0] and its length becomes the
-    Categorical's n, e.g. [-1.0, -0.5, 0.0, 0.5, 1.0] for half-size steps.
+    Default action_levels: [-1, 0, 1]; see BaseFuturesTradingConfig.action_levels.
     """
 
     def __init__(
