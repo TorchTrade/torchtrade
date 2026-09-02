@@ -12,7 +12,102 @@ import torch
 from tensordict import TensorDict
 from unittest.mock import MagicMock, patch
 from abc import ABC, abstractmethod
+from torchtrade.envs.core.common_types import PositionStatus
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
+
+
+# --- the mocks every venue builds, with the venue's own data at the CALL SITE (#288) -----
+#
+# These were 8 copies of `mock_observer`, 10 of a nested `status`, and a scatter of
+# `mock_observations`/`mock_get_observations`/`mock_obs_zero`. What differed between them
+# was data, not shape: binance and bitget name their timeframes "1m_10" where bybit and okx
+# say "1Minute_10", and a couple of tests need a fixed OHLC bar rather than noise. Passing
+# that in keeps the venue axis these tests exist to cover -- folding it into the helper is
+# how a shared fixture stops testing four venues and starts testing one.
+
+_OBS_FEATURES = {
+    "observation_features": ["feature_close", "feature_open", "feature_high", "feature_low"],
+    "original_features": ["open", "high", "low", "close", "volume"],
+}
+
+
+def some_observations(keys, base=None, timestamps=False):
+    """One window per key. `base` is the OHLC bar `return_base_ohlc=True` should yield --
+    a 4-tuple for a fixed bar, or None for noise."""
+    def observations(return_base_ohlc=False):
+        obs = {k: np.random.randn(10, 4).astype(np.float32) for k in keys}
+        if return_base_ohlc:
+            obs["base_features"] = (
+                np.random.randn(10, 4).astype(np.float32) if base is None
+                else np.array([list(base)] * 10, dtype=np.float32)
+            )
+            if timestamps:
+                obs["base_timestamps"] = np.arange(10)
+        return obs
+    return observations
+
+
+def a_mock_observer(keys, *, base=None, timestamps=False, features=False,
+                    intervals=None, window_sizes=None):
+    """The observer mock, parametrised by what actually differs between the venues."""
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=list(keys))
+    observer.get_observations = MagicMock(
+        side_effect=some_observations(keys, base, timestamps))
+    if features:
+        observer.get_features = MagicMock(return_value=dict(_OBS_FEATURES))
+    else:
+        mirror_features_on(observer)
+    if intervals is not None:
+        observer.intervals = intervals
+    if window_sizes is not None:
+        observer.window_sizes = window_sizes
+    return observer
+
+
+def a_mock_futures_trader():
+    """The flat, healthy trader every futures env test starts from."""
+    trader = MagicMock()
+    trader.cancel_open_orders = MagicMock(return_value=True)
+    trader.close_position = MagicMock(return_value=True)
+    trader.get_account_balance = MagicMock(return_value={
+        "total_wallet_balance": 1000.0, "available_balance": 900.0,
+        "total_unrealized_profit": 0.0, "total_margin_balance": 1000.0,
+    })
+    trader.get_mark_price = MagicMock(return_value=50000.0)
+    trader.get_status = MagicMock(return_value={"position_status": None})
+    trader.trade = MagicMock(return_value=True)
+    trader.get_lot_size = MagicMock(
+        return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
+    return trader
+
+
+def add_custom_features(df):
+    """The `feature_*` preprocessing three venues' observation tests each defined."""
+    df = df.copy()
+    df.dropna(inplace=True)
+    df.drop_duplicates(inplace=True)
+    df["feature_close"] = df["close"].pct_change().fillna(0)
+    df["feature_open"] = df["open"] / df["close"]
+    df["feature_high"] = df["high"] / df["close"]
+    df["feature_low"] = df["low"] / df["close"]
+    df["feature_custom"] = df["close"] * 2
+    df.dropna(inplace=True)
+    return df
+
+
+def a_position_status(qty, *, notional=500.0, entry=50000.0, mark=50000.0, leverage=5,
+                      liquidation=45000.0, flat_is_none=False):
+    """What `trader.get_status()` returns. `PositionStatus` is ONE class for all four
+    venues (`core.common_types`), so the per-venue import these copies each carried was
+    itself the duplication."""
+    if flat_is_none and not qty:
+        return {"position_status": None}
+    return {"position_status": PositionStatus(
+        qty=qty, notional_value=notional, entry_price=entry, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=mark, leverage=leverage,
+        margin_mode="isolated", liquidation_price=liquidation,
+    )}
 
 
 def mirror_features_on(observer):

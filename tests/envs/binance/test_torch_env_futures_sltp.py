@@ -2,7 +2,7 @@
 
 import pytest
 
-from tests.envs.base_exchange_tests import mirror_features_on
+from tests.envs.base_exchange_tests import a_mock_observer, mirror_features_on
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
@@ -11,6 +11,7 @@ from tensordict import TensorDict
 
 from torchtrade.envs.core.live import LiveObservationHalt
 from tests.envs.base_exchange_tests import (
+    some_observations,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
     assert_an_invalid_action_raises_before_trading,
@@ -22,30 +23,12 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
 
     @pytest.fixture
     def mock_observer(self):
-        """Create a mock observer."""
-        observer = MagicMock()
-
-        # Mock get_keys
-        observer.get_keys = MagicMock(return_value=["1m_10"])
-
-        # Mock get_observations
-        def mock_observations(return_base_ohlc=False):
-            obs = {
-                "1m_10": np.random.randn(10, 4).astype(np.float32),
-            }
-            if return_base_ohlc:
-                # OHLC features: [open, high, low, close]
-                obs["base_features"] = np.array([
-                    [50000, 50100, 49900, 50050]  # Current price ~50050
-                ] * 10, dtype=np.float32)
-            return obs
-
-        observer.get_observations = MagicMock(side_effect=mock_observations)
-        mirror_features_on(observer)
-        observer.intervals = ["1m"]
-        observer.window_sizes = [10]
-
-        return observer
+        return a_mock_observer(
+            ["1m_10"],
+            base=(50000, 50100, 49900, 50050),
+            intervals=["1m"],
+            window_sizes=[10],
+        )
 
     @pytest.fixture
     def mock_trader(self):
@@ -595,13 +578,7 @@ class TestCriticalEdgeCases:
         mock_trader.get_lot_size = MagicMock(
             return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
 
-        def mock_get_observations(return_base_ohlc=False):
-            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
-            if return_base_ohlc:
-                obs["base_features"] = np.array(
-                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
-                )
-            return obs
+        mock_get_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
 
         mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
         mirror_features_on(mock_observer)
@@ -790,13 +767,7 @@ class TestDuplicateActionPrevention:
         mock_observer = MagicMock()
         mock_observer.get_keys = MagicMock(return_value=["1m_10"])
 
-        def mock_get_observations(return_base_ohlc=False):
-            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
-            if return_base_ohlc:
-                obs["base_features"] = np.array(
-                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
-                )
-            return obs
+        mock_get_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
 
         mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
         mirror_features_on(mock_observer)
@@ -966,13 +937,7 @@ class TestBinanceSLTPNotionalTradeMode:
         mock_observer = MagicMock()
         mock_observer.get_keys = MagicMock(return_value=["1m_10"])
 
-        def mock_observations(return_base_ohlc=False):
-            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
-            if return_base_ohlc:
-                obs["base_features"] = np.array(
-                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
-                )
-            return obs
+        mock_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
 
         mock_observer.get_observations = MagicMock(side_effect=mock_observations)
         mirror_features_on(mock_observer)
@@ -1035,11 +1000,7 @@ class TestBinanceSLTPNotionalTradeMode:
         env, mock_trader = notional_env
 
         # Override observer to return zero-price candles
-        def mock_obs_zero(return_base_ohlc=False):
-            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
-            if return_base_ohlc:
-                obs["base_features"] = np.array([[0, 0, 0, 0]] * 10, dtype=np.float32)
-            return obs
+        mock_obs_zero = some_observations(['1m_10'], base=(0, 0, 0, 0))
 
         env.observer.get_observations = MagicMock(side_effect=mock_obs_zero)
         env.reset()
@@ -1126,13 +1087,7 @@ class TestBinanceSLTPNotionalTradeMode:
         mock_observer = MagicMock()
         mock_observer.get_keys = MagicMock(return_value=["1m_10"])
 
-        def mock_observations(return_base_ohlc=False):
-            obs = {"1m_10": np.random.randn(10, 4).astype(np.float32)}
-            if return_base_ohlc:
-                obs["base_features"] = np.array(
-                    [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
-                )
-            return obs
+        mock_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
 
         mock_observer.get_observations = MagicMock(side_effect=mock_observations)
         mirror_features_on(mock_observer)

@@ -4,6 +4,8 @@ import logging
 import pytest
 
 from tests.envs.base_exchange_tests import (
+    a_position_status,
+    a_mock_observer,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
     assert_an_invalid_action_raises_before_trading,
@@ -22,29 +24,12 @@ class TestBinanceFuturesTorchTradingEnv:
 
     @pytest.fixture
     def mock_observer(self):
-        """Create a mock observer."""
-        observer = MagicMock()
-
-        # Mock get_keys
-        observer.get_keys = MagicMock(return_value=["1m_10", "5m_10"])
-
-        # Mock get_observations
-        def mock_observations(return_base_ohlc=False):
-            obs = {
-                "1m_10": np.random.randn(10, 4).astype(np.float32),
-                "5m_10": np.random.randn(10, 4).astype(np.float32),
-            }
-            if return_base_ohlc:
-                obs["base_features"] = np.random.randn(10, 4).astype(np.float32)
-                obs["base_timestamps"] = np.arange(10)
-            return obs
-
-        observer.get_observations = MagicMock(side_effect=mock_observations)
-        mirror_features_on(observer)
-        observer.intervals = ["1m", "5m"]
-        observer.window_sizes = [10, 10]
-
-        return observer
+        return a_mock_observer(
+            ["1m_10", "5m_10"],
+            timestamps=True,
+            intervals=["1m", "5m"],
+            window_sizes=[10, 10],
+        )
 
     @pytest.fixture
     def mock_trader(self):
@@ -443,14 +428,9 @@ class TestBinanceFuturesTorchTradingEnv:
         while the env believes it is long, and the sync (correctly) resets the counter on that
         disagreement every step, so it could never age.
         """
-        from torchtrade.envs.live.binance.order_executor import PositionStatus
 
         def status(qty):
-            return {"position_status": PositionStatus(
-                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_mode="isolated", liquidation_price=45000.0,
-            )} if qty else {"position_status": None}
+            return a_position_status(qty, flat_is_none=True)
 
         with patch.object(env, "_wait_for_next_timestamp"):
             long = TensorDict({"action": torch.tensor(env.action_levels.index(1))},
@@ -478,14 +458,9 @@ class TestBinanceFuturesTorchTradingEnv:
         The sync detects the close and lets the guard re-enter -- but if it does not discard
         hold_counter, the policy is handed a brand-new position as N+1 bars old.
         """
-        from torchtrade.envs.live.binance.order_executor import PositionStatus
 
         def status(qty):
-            return {"position_status": PositionStatus(
-                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_mode="isolated", liquidation_price=45000.0,
-            )} if qty else {"position_status": None}
+            return a_position_status(qty, flat_is_none=True)
 
         with patch.object(env, "_wait_for_next_timestamp"):
             long_idx = len(env.action_levels) - 1
@@ -613,13 +588,7 @@ class TestBinanceInitCleanup:
 
     @pytest.fixture
     def mock_observer(self):
-        observer = MagicMock()
-        observer.get_keys = MagicMock(return_value=["1m_10"])
-        observer.get_observations = MagicMock(return_value={
-            "1m_10": np.random.randn(10, 4).astype(np.float32),
-        })
-        mirror_features_on(observer)
-        return observer
+        return a_mock_observer(["1m_10"])
 
     @pytest.fixture
     def mock_trader(self):
