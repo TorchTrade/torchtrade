@@ -135,11 +135,13 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_action_spec(self, env):
         """Test action spec is correctly defined."""
-        assert env.action_spec.n == 5  # fractional: -1.0, -0.5, 0.0, 0.5, 1.0
+        assert env.action_spec.n == 3  # the default: short / flat / long
 
     def test_action_levels(self, env):
         """Test action levels are correctly set."""
-        assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
+        # The DEFAULT, shared by all four venues since #288. Any monotonic list in
+        # [-1, 1] is valid -- see BaseFuturesTradingConfig.action_levels.
+        assert env.action_levels == [-1, 0, 1]
 
     def test_base_features_declared_in_observation_spec(self, env_config, mock_observer, mock_trader):
         """include_base_features=True must DECLARE base_features in observation_spec, not just
@@ -195,7 +197,9 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Hold/Close (0.0)
+            # Flat BY VALUE: index 2 was 0.0 under the old 5-level default (#288).
+            flat = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
             next_td = env.step(action_td)
 
             # TorchRL step returns results under "next" key
@@ -203,12 +207,19 @@ class TestBitgetFuturesTorchTradingEnv:
             assert "done" in next_td["next"].keys()
             assert "account_state" in next_td["next"].keys()
 
+
+            # The assertion the name always promised: it only checked keys existed.
+            # Defence in depth, not a discriminating pin -- the flat route has FOUR
+            # independent zero-guards, so no single-branch mutation reaches a trade.
+            mock_trader.trade.assert_not_called()
+
     def test_step_long_action(self, env, mock_trader):
         """Test step with long action."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
+            long_idx = env.action_levels.index(1)  # by VALUE: the list length may change
+            action_td = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
             next_td = env.step(action_td)
 
             # Trade should have been attempted
@@ -229,7 +240,9 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
+            # Flat BY VALUE: index 2 was 0.0 under the old 5-level default (#288).
+            flat = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
             next_td = env.step(action_td)
 
             reward = next_td["next"]["reward"]
@@ -240,7 +253,10 @@ class TestBitgetFuturesTorchTradingEnv:
         (True, True),    # portfolio collapses below the threshold -> episode terminates
         (False, False),  # same collapse, check disabled -> keep trading
     ], ids=["enabled-terminates", "disabled-keeps-trading"])
-    def test_bankruptcy_termination(self, env, mock_trader, done_on_bankruptcy, expected_done):
+    @pytest.mark.parametrize("level", [0, 1], ids=["flat", "long"])
+    def test_bankruptcy_termination(
+        self, env, mock_trader, done_on_bankruptcy, expected_done, level
+    ):
         """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
         Threshold arithmetic is covered in tests/envs/test_live_env_base.py; the disabled
@@ -257,7 +273,10 @@ class TestBitgetFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+            # By VALUE, and both routes: index 2 meant flat on three venues and long on
+            # binance, so the same bytes tested two behaviours (#288).
+            idx = env.action_levels.index(level)
+            next_td = env.step(TensorDict({"action": torch.tensor(idx)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done
 
     def test_close_position_action(self, env, mock_trader):
@@ -289,9 +308,10 @@ class TestBitgetFuturesTorchTradingEnv:
             # so assert_called_once() counts only what _step does.
             mock_trader.close_position.reset_mock()
 
-            # Fractional action levels: [0=-1.0, 1=-0.5, 2=0.0, 3=0.5, 4=1.0]
-            # Action index 2 -> level 0.0 -> close the open position.
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
+            # Action levels default to [-1, 0, 1]; index by value, not position.
+            # Level 0.0 -> close the open position.
+            flat_idx = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat_idx)}, batch_size=())
             env._step(action_td)
 
         mock_trader.close_position.assert_called_once()
@@ -319,7 +339,8 @@ class TestBitgetFuturesTorchTradingEnv:
             env.reset()
 
             # Go long (should buy to flip from short to long)
-            action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
+            long_idx = env.action_levels.index(1)  # by VALUE: the list length may change
+            action_td = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
             env._step(action_td)
 
             # With fractional sizing, it should call trade() with the delta amount to flip position
@@ -465,7 +486,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             mock_trader.get_status = MagicMock(return_value=status(0.01))
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
 
             for _ in range(5):                       # age a real position
@@ -499,7 +520,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            long_idx = len(env.action_levels) - 1
             for _ in range(5):
                 env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
             assert env.position.hold_counter > 0      # genuinely aged
@@ -677,7 +698,9 @@ class TestBitgetFuturesTorchTradingEnvIntegration:
         td = env.reset()
         assert "account_state" in td.keys()
 
-        action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
+        # Flat BY VALUE: index 2 was 0.0 under the old 5-level default (#288).
+        flat = env.action_levels.index(0)
+        action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
         next_td = env.step(action_td)
         assert "reward" in next_td["next"].keys()
 
@@ -745,77 +768,20 @@ class TestBitgetInitCleanup:
 
 
 class TestWithReplayData:
-    """Integration tests using ReplayObserver + ReplayOrderExecutor with real price data."""
+    """Real price data through ReplayObserver + ReplayOrderExecutor.
 
-    @pytest.fixture
-    def replay_df(self):
-        """Create realistic OHLCV test data."""
-        import pandas as pd
-
-        n = 200
-        rng = np.random.default_rng(42)
-        base = 50000 + np.cumsum(rng.normal(0, 50, n))
-        # Drawn in the original order so the RNG stream is unchanged, then clamped:
-        # a close drawn off base can land outside a high/low drawn off base alone (#326).
-        high_raw = base + np.abs(rng.normal(30, 20, n))
-        low_raw = base - np.abs(rng.normal(30, 20, n))
-        close = base + rng.normal(0, 20, n)
-        high_raw_clamped = np.maximum(high_raw, np.maximum(base, close))
-        low_raw_clamped = np.minimum(low_raw, np.minimum(base, close))
-        return pd.DataFrame({
-            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min"),
-            "open": base,
-            "high": high_raw_clamped,
-            "low": low_raw_clamped,
-            "close": close,
-            "volume": rng.uniform(100, 1000, n),
-        })
+    The episode body is shared: eight venue copies differed only in the two classes and
+    the config values (#288).
+    """
 
     def test_multi_step_episode_with_replay(self, replay_df):
-        """Run a multi-step episode with realistic price data."""
-        from torchtrade.envs.live.bitget.env import BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig
-        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
-
-        config = BitgetFuturesTradingEnvConfig(
-            symbol="BTC/USDT:USDT",
-            time_frames=["1m"],
-            window_sizes=[10],
-            execute_on="1m",
-            leverage=5,
-            demo=True,
+        from tests.envs.base_exchange_tests import assert_a_replay_episode_runs
+        from torchtrade.envs.live.bitget.env import (
+            BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig,
         )
 
-        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-        observer = ReplayObserver(
-            df=replay_df,
-            time_frames=config.time_frames,
-            window_sizes=config.window_sizes,
-            execute_on=config.execute_on,
-            executor=executor,
+        assert_a_replay_episode_runs(
+            BitgetFuturesTorchTradingEnv, BitgetFuturesTradingEnvConfig, replay_df,
+            actions=lambda i, env: i % len(env.action_levels), steps=20,
         )
 
-        with patch("time.sleep"), \
-             patch.object(BitgetFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = BitgetFuturesTorchTradingEnv(
-                config=config, observer=observer, trader=executor,
-            )
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            td = env.reset()
-
-            for i in range(20):
-                # Cycle through action levels (hold, long, hold, short, hold, close...)
-                action_idx = i % len(env.action_levels)
-                action_td = td.clone()
-                action_td["action"] = torch.tensor(action_idx)
-                result = env.step(action_td)
-                td = result["next"]
-
-                assert "reward" in td.keys()
-                assert "done" in td.keys()
-                assert td["account_state"].shape == (6,)
-
-                if td["done"].item():
-                    break
-
-            assert executor.current_price > 0

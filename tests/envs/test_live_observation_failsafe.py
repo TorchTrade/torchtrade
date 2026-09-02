@@ -516,10 +516,9 @@ def test_a_grace_bar_can_still_SIZE_a_trade_with_the_venue_down(venue):
     import torch
 
     env, trader = _real_futures_env(budget=3, venue=venue)
-    # Index-by-VALUE, not by position: binance ships [-1, 0, 1] and the others
-    # [-1, -0.5, 0, 0.5, 1], so a hardcoded index 2 is "flat" on three of the four and
-    # takes the close path instead of the sizing path. That is exactly how this fix went
-    # untested on three venues in the first place.
+    # Index-by-VALUE, not by position: the four venues now share [-1, 0, 1], but they
+    # did not when this fix landed, and a hardcoded index took the close path instead of
+    # the sizing path on three of them. By value it cannot go stale again (#288).
     flat = env.action_levels.index(0.0)
     full_long = len(env.action_levels) - 1
 
@@ -631,7 +630,10 @@ def test_grace_covers_the_exception_the_adapters_actually_raise(venue, sltp):
                                     **({"trade_mode": "fractional",
                                         "position_fraction": 0.5} if sltp else {}))
     td = env.reset()
-    td = env.step(td.set("action", torch.tensor(0 if sltp else 1)))["next"]
+    # Setup step, flat: plain index 1 was a half-short on three venues before the shared
+    # default, so say what it means rather than where it sits.
+    flat = 0 if sltp else env.action_levels.index(0.0)
+    td = env.step(td.set("action", torch.tensor(flat)))["next"]
 
     trader.get_account_balance.side_effect = RuntimeError(
         "Failed to get account balance: connection reset"

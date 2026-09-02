@@ -157,10 +157,11 @@ env = BitgetFuturesTorchTradingEnv(
 td = env.reset()
 
 # Actions are CATEGORICAL indices into action_levels, which on Bitget
-# defaults to [-1.0, -0.5, 0.0, 0.5, 1.0]:
-# 0 = full short, 2 = flat, 4 = full long. Leverage and size come from the config,
-# not from the action.
-td["action"] = torch.tensor(4)  # go full long
+# defaults to [-1, 0, 1]:
+# 0 = full short, 1 = flat, 2 = full long. Leverage and size come from the config,
+# not from the action. Pass `action_levels` for a finer space, e.g.
+# [-1.0, -0.5, 0.0, 0.5, 1.0], and the index meanings shift with it.
+td["action"] = torch.tensor(2)  # go full long
 td = env.step(td)
 ```
 

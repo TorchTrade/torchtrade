@@ -73,8 +73,9 @@ class TestOKXFuturesTorchTradingEnv:
 
     def test_action_spec(self, env):
         """Test action spec and levels are correctly defined."""
-        assert env.action_spec.n == 5
-        assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
+        assert env.action_spec.n == 3  # the default: short / flat / long
+        # Any monotonic list in [-1, 1] is valid; see BaseFuturesTradingConfig.action_levels.
+        assert env.action_levels == [-1, 0, 1]
 
     def test_base_features_declared_in_observation_spec(self, env_config, mock_observer, mock_env_trader):
         """include_base_features=True must DECLARE base_features in observation_spec, not just
@@ -110,37 +111,52 @@ class TestOKXFuturesTorchTradingEnv:
         assert td["market_data_1Minute_10"].shape == (10, 4)
         mock_env_trader.cancel_open_orders.assert_called()
 
-    def test_step_hold_action(self, env):
+    def test_step_hold_action(self, env, mock_env_trader):
         """Test step with hold action produces valid output."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
+            # Flat BY VALUE: index 2 was 0.0 under the old 5-level default (#288).
+            flat = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
             next_td = env.step(action_td)
             assert "reward" in next_td["next"].keys()
             assert "done" in next_td["next"].keys()
 
-    @pytest.mark.parametrize("action_idx,label", [
-        (4, "long"), (0, "short"),
+
+            # The assertion the name always promised: it only checked keys existed.
+            # Defence in depth, not a discriminating pin -- the flat route has FOUR
+            # independent zero-guards, so no single-branch mutation reaches a trade.
+            mock_env_trader.trade.assert_not_called()
+
+    @pytest.mark.parametrize("level,label", [
+        (1, "long"), (-1, "short"),
     ], ids=["long", "short"])
-    def test_step_trade_action(self, env, mock_env_trader, action_idx, label):
+    def test_step_trade_action(self, env, mock_env_trader, level, label):
         """Test step with long/short action calls trade."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            env.step(TensorDict({"action": torch.tensor(action_idx)}, batch_size=()))
+            # By VALUE, so the test does not encode the length of action_levels.
+            idx = env.action_levels.index(level)
+            env.step(TensorDict({"action": torch.tensor(idx)}, batch_size=()))
             mock_env_trader.trade.assert_called()
 
     def test_reward_tensor_shape(self, env):
         """The done family is asserted by assert_the_step_emits_the_whole_done_family."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+            # Flat BY VALUE: index 2 was 0.0 under the old 5-level default (#288).
+            flat = env.action_levels.index(0)
+            next_td = env.step(TensorDict({"action": torch.tensor(flat)}, batch_size=()))
             assert next_td["next"]["reward"].shape == (1,)
 
     @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [
         (True, True),    # portfolio collapses below the threshold -> episode terminates
         (False, False),  # same collapse, check disabled -> keep trading
     ], ids=["enabled-terminates", "disabled-keeps-trading"])
-    def test_bankruptcy_termination(self, env, mock_env_trader, done_on_bankruptcy, expected_done):
+    @pytest.mark.parametrize("level", [0, 1], ids=["flat", "long"])
+    def test_bankruptcy_termination(
+        self, env, mock_env_trader, done_on_bankruptcy, expected_done, level
+    ):
         """A collapsed portfolio ends the episode through _step iff done_on_bankruptcy.
 
         Threshold arithmetic is covered in tests/envs/test_live_env_base.py; the disabled
@@ -157,7 +173,10 @@ class TestOKXFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+            # By VALUE, and both routes: index 2 meant flat on three venues and long on
+            # binance, so the same bytes tested two behaviours (#288).
+            idx = env.action_levels.index(level)
+            next_td = env.step(TensorDict({"action": torch.tensor(idx)}, batch_size=()))
             assert next_td["next"]["done"].item() is expected_done
 
     def test_reset_reads_dust_as_flat(self, env, mock_env_trader):
@@ -214,7 +233,7 @@ class TestOKXFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             mock_env_trader.get_status = MagicMock(return_value=status(0.01))
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
 
             for _ in range(5):                       # age a real position
@@ -248,7 +267,7 @@ class TestOKXFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            long_idx = len(env.action_levels) - 1
             for _ in range(5):
                 env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
             assert env.position.hold_counter > 0      # genuinely aged
@@ -309,7 +328,9 @@ class TestOKXFuturesTorchTradingEnv:
             f"a position opened after a liquidation inherited the dead position's age ({aged})"
         )
 
-    def test_a_partial_reduction_does_not_age_or_flip_the_position(self, env, mock_env_trader):
+    def test_a_partial_reduction_does_not_age_or_flip_the_position(
+        self, env_config, mock_observer, mock_env_trader
+    ):
         """#276 end to end: the harm was never the direction field, it was the chain.
 
         Trimming a long 1.0 -> 0.5 sends a SELL, which was recorded as current_position
@@ -317,8 +338,25 @@ class TestOKXFuturesTorchTradingEnv:
         a mismatch the env had inflicted on itself, discarded hold_counter and NaN'd
         current_action_level -- so a 20-bar-old position reported holding_time=1 and the
         duplicate-action guard never fired again.
+
+        Builds its own env with a five-level action space: a PARTIAL reduction needs
+        a fractional level, and the default is short/flat/long, where the only
+        "reduction" available is a full close. Asking for the levels is the point --
+        `action_levels` is a default, not a constraint (#288).
         """
         from torchtrade.envs.live.okx.order_executor import PositionStatus
+
+        import dataclasses
+
+        from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv
+
+        cfg = dataclasses.replace(env_config,
+                                  action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0])
+        with patch("time.sleep"), \
+             patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
+            env = OKXFuturesTorchTradingEnv(
+                config=cfg, observer=mock_observer, trader=mock_env_trader,
+            )
 
         def status(qty):
             return {"position_status": PositionStatus(
@@ -484,36 +522,20 @@ class TestOKXInitCleanup:
 
 
 class TestWithReplayData:
-    """Integration tests using ReplayObserver + ReplayOrderExecutor."""
+    """Real price data through ReplayObserver + ReplayOrderExecutor.
+
+    The episode body is shared: eight venue copies differed only in the two classes and
+    the config values (#288).
+    """
 
     def test_multi_step_episode_with_replay(self, replay_df):
-        """Run a multi-step episode with realistic price data."""
-        from torchtrade.envs.live.okx.env import OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig
-        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
-
-        config = OKXFuturesTradingEnvConfig(
-            symbol="BTC-USDT-SWAP", time_frames=["1m"], window_sizes=[10],
-            execute_on="1m", leverage=5, demo=True,
-        )
-        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-        observer = ReplayObserver(
-            df=replay_df, time_frames=config.time_frames,
-            window_sizes=config.window_sizes, execute_on=config.execute_on, executor=executor,
+        from tests.envs.base_exchange_tests import assert_a_replay_episode_runs
+        from torchtrade.envs.live.okx.env import (
+            OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig,
         )
 
-        with patch("time.sleep"), \
-             patch.object(OKXFuturesTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = OKXFuturesTorchTradingEnv(config=config, observer=observer, trader=executor)
+        assert_a_replay_episode_runs(
+            OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig, replay_df,
+            actions=lambda i, env: i % len(env.action_levels), steps=20,
+        )
 
-        with patch.object(env, "_wait_for_next_timestamp"):
-            td = env.reset()
-            for i in range(20):
-                action_idx = i % len(env.action_levels)
-                action_td = td.clone()
-                action_td["action"] = torch.tensor(action_idx)
-                result = env.step(action_td)
-                td = result["next"]
-                assert td["account_state"].shape == (6,)
-                if td["done"].item():
-                    break
-            assert executor.current_price > 0

@@ -457,36 +457,36 @@ class TestOKXSLTPInvalidAction:
 
 
 class TestWithReplayData:
-    """Integration tests using ReplayObserver + ReplayOrderExecutor."""
+    """Real price data through ReplayObserver + ReplayOrderExecutor (#288)."""
 
     def test_multi_step_episode_with_replay(self, replay_df):
-        """Run a full multi-step episode with realistic price data."""
-        from torchtrade.envs.live.okx.env_sltp import OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig
-        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
-
-        config = OKXFuturesSLTPTradingEnvConfig(
-            symbol="BTC-USDT-SWAP", time_frames=["1m"], window_sizes=[10],
-            execute_on="1m", stoploss_levels=(-0.02,), takeprofit_levels=(0.03,),
-            leverage=5, trade_mode="quantity", quantity_per_trade=0.01,
-        )
-        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-        observer = ReplayObserver(
-            df=replay_df, time_frames=config.time_frames,
-            window_sizes=config.window_sizes, execute_on=config.execute_on, executor=executor,
+        from tests.envs.base_exchange_tests import assert_a_replay_episode_runs
+        from torchtrade.envs.live.okx.env_sltp import (
+            OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig,
         )
 
-        with patch("time.sleep"), \
-             patch.object(OKXFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = OKXFuturesSLTPTorchTradingEnv(config=config, observer=observer, trader=executor)
+        assert_a_replay_episode_runs(
+            OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig, replay_df,
+            actions=lambda i, env: [0, 1, 0, 0, len(env.action_map) - 1, 0][i % 6],
+            steps=50,
+            stoploss_levels=(-0.02,), takeprofit_levels=(0.03,),
+            trade_mode="quantity", quantity_per_trade=0.01,
+        )
 
-        with patch.object(env, "_wait_for_next_timestamp"):
-            td = env.reset()
-            for i in range(50):
-                action = [0, 1, 0, 0, len(env.action_map) - 1, 0][i % 6]
-                action_td = td.clone()
-                action_td["action"] = torch.tensor(action)
-                result = env.step(action_td)
-                td = result["next"]
-                assert td["account_state"].shape == (6,)
-                if td["done"].item():
-                    break
+    def test_replay_portfolio_tracks_price_movement(self, replay_df):
+        from tests.envs.base_exchange_tests import (
+            assert_the_replay_portfolio_tracks_price,
+        )
+        from torchtrade.envs.live.okx.env_sltp import (
+            OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig,
+        )
+
+        assert_the_replay_portfolio_tracks_price(
+            OKXFuturesSLTPTorchTradingEnv, OKXFuturesSLTPTradingEnvConfig, replay_df,
+            # SLTP action map: 0 is HOLD, 1 the first bracket. Stated, not assumed --
+            # the helper used to hardcode these and was silently wrong off-SLTP.
+            open_action=1, hold_action=0,
+            stoploss_levels=(-0.05,), takeprofit_levels=(0.05,),
+            trade_mode="quantity", quantity_per_trade=0.01,
+        )
+

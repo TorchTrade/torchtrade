@@ -963,129 +963,36 @@ class TestBitgetSLTPLockPosition:
 
 
 class TestWithReplayData:
-    """Integration tests using ReplayObserver + ReplayOrderExecutor with real price data."""
-
-    @pytest.fixture
-    def replay_df(self):
-        """Create realistic OHLCV test data with price movement."""
-        import pandas as pd
-
-        n = 200
-        timestamps = pd.date_range("2024-01-01", periods=n, freq="1min")
-        base = 50000 + np.cumsum(np.random.default_rng(42).normal(0, 50, n))
-        # close drawn off base can land outside a high/low drawn off base alone (#326).
-        close = base + np.random.default_rng(45).normal(0, 20, n)
-        return pd.DataFrame({
-            "timestamp": timestamps,
-            "open": base,
-            "high": np.maximum(base + np.abs(np.random.default_rng(43).normal(30, 20, n)), np.maximum(base, close)),
-            "low": np.minimum(base - np.abs(np.random.default_rng(44).normal(30, 20, n)), np.minimum(base, close)),
-            "close": close,
-            "volume": np.random.default_rng(46).uniform(100, 1000, n),
-        })
+    """Real price data through ReplayObserver + ReplayOrderExecutor (#288)."""
 
     def test_multi_step_episode_with_replay(self, replay_df):
-        """Run a full multi-step episode with realistic price data."""
+        from tests.envs.base_exchange_tests import assert_a_replay_episode_runs
         from torchtrade.envs.live.bitget.env_sltp import (
-            BitgetFuturesSLTPTorchTradingEnv,
-            BitgetFuturesSLTPTradingEnvConfig,
-        )
-        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
-
-        config = BitgetFuturesSLTPTradingEnvConfig(
-            symbol="BTC/USDT:USDT",
-            time_frames=["1m"],
-            window_sizes=[10],
-            execute_on="1m",
-            stoploss_levels=(-0.02,),
-            takeprofit_levels=(0.03,),
-            leverage=5,
-            trade_mode="quantity",
-            quantity_per_trade=0.01,
+            BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig,
         )
 
-        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-        observer = ReplayObserver(
-            df=replay_df,
-            time_frames=config.time_frames,
-            window_sizes=config.window_sizes,
-            execute_on=config.execute_on,
-            executor=executor,
+        assert_a_replay_episode_runs(
+            BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig, replay_df,
+            actions=lambda i, env: [0, 1, 0, 0, len(env.action_map) - 1, 0][i % 6],
+            steps=50,
+            stoploss_levels=(-0.02,), takeprofit_levels=(0.03,),
+            trade_mode="quantity", quantity_per_trade=0.01,
         )
-
-        with patch("time.sleep"), \
-             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = BitgetFuturesSLTPTorchTradingEnv(
-                config=config, observer=observer, trader=executor,
-            )
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            td = env.reset()
-
-            for i in range(50):
-                action = [0, 1, 0, 0, len(env.action_map) - 1, 0][i % 6]
-                action_td = td.clone()
-                action_td["action"] = torch.tensor(action)
-                result = env.step(action_td)
-                td = result["next"]
-
-                assert "reward" in td.keys()
-                assert "done" in td.keys()
-                assert td["account_state"].shape == (6,)
-
-                if td["done"].item():
-                    break
 
     def test_replay_portfolio_tracks_price_movement(self, replay_df):
-        """Portfolio value should change with price movement, not stay static."""
+        from tests.envs.base_exchange_tests import (
+            assert_the_replay_portfolio_tracks_price,
+        )
         from torchtrade.envs.live.bitget.env_sltp import (
-            BitgetFuturesSLTPTorchTradingEnv,
-            BitgetFuturesSLTPTradingEnvConfig,
-        )
-        from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
-
-        config = BitgetFuturesSLTPTradingEnvConfig(
-            symbol="BTC/USDT:USDT",
-            time_frames=["1m"],
-            window_sizes=[10],
-            execute_on="1m",
-            stoploss_levels=(-0.05,),
-            takeprofit_levels=(0.05,),
-            leverage=5,
-            trade_mode="quantity",
-            quantity_per_trade=0.01,
+            BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig,
         )
 
-        executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
-        observer = ReplayObserver(
-            df=replay_df,
-            time_frames=config.time_frames,
-            window_sizes=config.window_sizes,
-            execute_on=config.execute_on,
-            executor=executor,
+        assert_the_replay_portfolio_tracks_price(
+            BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig, replay_df,
+            # SLTP action map: 0 is HOLD, 1 the first bracket. Stated, not assumed --
+            # the helper used to hardcode these and was silently wrong off-SLTP.
+            open_action=1, hold_action=0,
+            stoploss_levels=(-0.05,), takeprofit_levels=(0.05,),
+            trade_mode="quantity", quantity_per_trade=0.01,
         )
 
-        with patch("time.sleep"), \
-             patch.object(BitgetFuturesSLTPTorchTradingEnv, "_wait_for_next_timestamp"):
-            env = BitgetFuturesSLTPTorchTradingEnv(
-                config=config, observer=observer, trader=executor,
-            )
-
-        with patch.object(env, "_wait_for_next_timestamp"):
-            td = env.reset()
-
-            # Open a long position
-            action_td = td.clone()
-            action_td["action"] = torch.tensor(1)
-            td = env.step(action_td)["next"]
-
-            # Hold for several steps -- price should move, changing portfolio value
-            balances = []
-            for _ in range(10):
-                action_td = td.clone()
-                action_td["action"] = torch.tensor(0)  # HOLD
-                td = env.step(action_td)["next"]
-                balances.append(executor.get_account_balance()["total_wallet_balance"])
-
-            # With real price movement, portfolio value should not stay static
-            assert max(balances) != min(balances), "Portfolio value should vary with price movement"

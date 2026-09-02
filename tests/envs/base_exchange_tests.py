@@ -640,3 +640,91 @@ def _sole(module, suffix):
         f"({[c.__name__ for c in found]}); the guard would have silently picked the first"
     )
     return found[0]
+
+
+def _replay_env(env_cls, config_cls, replay_df, **config_kw):
+    """A real venue env driven by ReplayObserver + ReplayOrderExecutor (#288).
+
+    Eight venue test classes built this identically, differing only in the two classes
+    and the config values -- which are exactly the two things this takes as arguments.
+    """
+    from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
+
+    config = config_cls(
+        **{"time_frames": ["1m"], "window_sizes": [10], "execute_on": "1m",
+           "leverage": 5, **config_kw}   # merged, so a caller may override any of them
+    )
+    # From the config, not a second literal: overriding `leverage` used to leave the
+    # env and the executor silently disagreeing.
+    executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=config.leverage)
+    observer = ReplayObserver(
+        df=replay_df,
+        time_frames=config.time_frames,
+        window_sizes=config.window_sizes,
+        execute_on=config.execute_on,
+        executor=executor,
+    )
+    with patch("time.sleep"), patch.object(env_cls, "_wait_for_next_timestamp"):
+        env = env_cls(config=config, observer=observer, trader=executor)
+    return env, executor
+
+
+def assert_a_replay_episode_runs(env_cls, config_cls, replay_df, *, actions, steps,
+                                 **config_kw):
+    """Step a real episode over real price data and check the tensordict each bar.
+
+    `actions` is a callable taking the bar index and the env, so the plain envs can cycle
+    action LEVELS and the SLTP ones can cycle bracket indices -- the one thing that
+    genuinely differed between the eight copies.
+    """
+    env, executor = _replay_env(env_cls, config_cls, replay_df, **config_kw)
+    with patch.object(env, "_wait_for_next_timestamp"):
+        td = env.reset()
+        for i in range(steps):
+            action_td = td.clone()
+            action_td["action"] = torch.tensor(actions(i, env))
+            td = env.step(action_td)["next"]
+
+            assert "reward" in td.keys()
+            assert "done" in td.keys()
+            assert td["account_state"].shape == (6,)
+            if td["done"].item():
+                break
+
+    assert executor.current_price > 0
+
+
+def assert_the_replay_portfolio_tracks_price(env_cls, config_cls, replay_df, *,
+                                             open_action, hold_action, **config_kw):
+    """Open a position, hold, and require the portfolio value to MOVE.
+
+    A static value is the failure this catches: an env that never re-reads the mark
+    reports the same equity every bar, which looks like a working episode.
+
+    The two actions are ARGUMENTS, not literals. Hardcoding 1=open / 0=hold was correct
+    for the four SLTP callers and silently wrong for anything else: driven with a plain
+    env under [-1, 0, 1], action 1 is FLAT (so nothing opens) and action 0 is a full
+    SHORT held ten times -- the balance moves, the assertion passes, and the helper
+    reports success having measured a maximum short it never meant to open (#288).
+    """
+    env, executor = _replay_env(env_cls, config_cls, replay_df, **config_kw)
+    with patch.object(env, "_wait_for_next_timestamp"):
+        td = env.reset()
+        action_td = td.clone()
+        action_td["action"] = torch.tensor(open_action)
+        td = env.step(action_td)["next"]
+        assert executor.get_status()["position_status"] is not None, (
+            "the 'open' action opened nothing; the rest of this test would measure a "
+            "position it never took"
+        )
+
+        balances = []
+        for _ in range(10):
+            action_td = td.clone()
+            action_td["action"] = torch.tensor(hold_action)
+            td = env.step(action_td)["next"]
+            balances.append(executor.get_account_balance()["total_wallet_balance"])
+
+    assert max(balances) != min(balances), (
+        "portfolio value stayed static across ten bars of moving price"
+    )

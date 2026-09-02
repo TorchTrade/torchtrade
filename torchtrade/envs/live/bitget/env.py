@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional, Union, Callable, Dict
+from typing import Optional, Callable, Dict
 
 from torchrl.data import Categorical
 
@@ -10,63 +10,21 @@ from torchtrade.envs.live.bitget.order_executor import (
     PositionMode,
 )
 from torchtrade.envs.live.bitget.base import BitgetBaseTorchTradingEnv
-from torchtrade.envs.core.common import validate_unknown_status_budget
-from torchtrade.envs.core.live import (
-    ObservationFailurePolicy,
-)
-from torchtrade.envs.utils.fractional_sizing import (
-    validate_action_levels,
-)
+from torchtrade.envs.live.shared.futures_config import BaseFuturesTradingConfig
+from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
 
 
 @dataclass
-class BitgetFuturesTradingEnvConfig:
+class BitgetFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     """Configuration for Bitget Futures Trading Environment."""
 
-    symbol: str = "BTCUSDT"
-
-    # Timeframes and windows
-    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Hour"
-    window_sizes: Union[List[int], int] = 10
-    execute_on: Union[str, "TimeFrame"] = "1Hour"  # Timeframe for trade execution timing
-
-    # Trading parameters
-    product_type: str = "USDT-FUTURES"  # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES
-    leverage: int = 1  # Leverage (1-125)
     margin_mode: MarginMode = MarginMode.ISOLATED
-    position_mode: PositionMode = PositionMode.ONE_WAY  # ONE_WAY or HEDGE
+    position_mode: PositionMode = PositionMode.ONE_WAY
+    # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES. A bare str with no
+    # validator, so this comment is where the legal values live.
+    product_type: str = "USDT-FUTURES"
 
-    # Action space configuration
-    action_levels: List[float] = None  # Custom action levels, or None for defaults
-
-    # Termination settings
-    done_on_bankruptcy: bool = True
-    bankrupt_threshold: float = 0.1  # 10% of initial balance
-
-    # Environment settings
-    demo: bool = True  # Use testnet for demo
-    seed: Optional[int] = 42
-    include_base_features: bool = False
-    close_position_on_init: bool = True
-    close_position_on_reset: bool = False
-    observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
-    # Bars to ride out an unreadable venue before truncating; 0 disables (#295).
-    max_unknown_status_steps: int = 0
-
-    def __post_init__(self):
-        self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
-        validate_unknown_status_budget(self.max_unknown_status_steps)
-        # Normalize timeframes using utility function
-        from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
-        self.execute_on, self.time_frames, self.window_sizes = normalize_bitget_timeframe_config(
-            self.execute_on, self.time_frames, self.window_sizes
-        )
-
-        # Build default action levels for fractional mode
-        if self.action_levels is None:
-            self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]  # Standard fractional with long/short
-
-        validate_action_levels(self.action_levels)
+    _normalize_timeframes = staticmethod(normalize_bitget_timeframe_config)
 
 
 class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
@@ -86,15 +44,13 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
     Action values in range [-1.0, 1.0]:
 
     - action = -1.0: 100% short (all-in short)
-    - action = -0.5: 50% short
     - action = 0.0: Market neutral (close all positions, stay in cash)
-    - action = 0.5: 50% long
     - action = 1.0: 100% long (all-in long)
 
     Position sizing formula:
         position_size = (balance × |action| × leverage) / price
 
-    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Default action_levels: [-1, 0, 1]; see BaseFuturesTradingConfig.action_levels.
     Custom levels supported: e.g., [-1, -0.3, -0.1, 0, 0.1, 0.3, 1]
 
     Leverage Design:
