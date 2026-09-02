@@ -1,6 +1,6 @@
 """OKX Futures TorchRL trading environment with fractional position sizing."""
 from dataclasses import dataclass
-from typing import List, Optional, Union, Callable, Dict
+from typing import Optional, Callable, Dict
 
 from torchrl.data import Categorical
 
@@ -11,13 +11,6 @@ from torchtrade.envs.live.okx.order_executor import (
     PositionMode,
 )
 from torchtrade.envs.live.okx.base import OKXBaseTorchTradingEnv
-from torchtrade.envs.core.common import validate_unknown_status_budget
-from torchtrade.envs.core.live import (
-    ObservationFailurePolicy,
-)
-from torchtrade.envs.utils.fractional_sizing import (
-    validate_action_levels,
-)
 from torchtrade.envs.live.shared.futures_config import BaseFuturesTradingConfig
 from torchtrade.envs.live.okx.utils import normalize_okx_timeframe_config
 
@@ -31,7 +24,6 @@ class OKXFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     position_mode: PositionMode = PositionMode.NET
 
     _normalize_timeframes = staticmethod(normalize_okx_timeframe_config)
-
 
 
 class OKXFuturesTorchTradingEnv(OKXBaseTorchTradingEnv):

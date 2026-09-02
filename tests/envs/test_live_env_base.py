@@ -3775,7 +3775,6 @@ SHARED_DEFAULTS = {
 
 
 from torchtrade.envs.live.shared.futures_config import BaseFuturesTradingConfig
-from torchtrade.envs.utils.fractional_sizing import build_default_action_levels
 
 # The PLAIN configs, discovered from the env classes so a fifth venue cannot opt out.
 PLAIN_CONFIGS = [

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Optional, Union, Callable, Dict
+from typing import Optional, Callable, Dict
 
 from torchrl.data import Categorical
 
@@ -10,13 +10,6 @@ from torchtrade.envs.live.bitget.order_executor import (
     PositionMode,
 )
 from torchtrade.envs.live.bitget.base import BitgetBaseTorchTradingEnv
-from torchtrade.envs.core.common import validate_unknown_status_budget
-from torchtrade.envs.core.live import (
-    ObservationFailurePolicy,
-)
-from torchtrade.envs.utils.fractional_sizing import (
-    validate_action_levels,
-)
 from torchtrade.envs.live.shared.futures_config import BaseFuturesTradingConfig
 from torchtrade.envs.live.bitget.utils import normalize_bitget_timeframe_config
 
@@ -32,7 +25,6 @@ class BitgetFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     product_type: str = "USDT-FUTURES"
 
     _normalize_timeframes = staticmethod(normalize_bitget_timeframe_config)
-
 
 
 class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):

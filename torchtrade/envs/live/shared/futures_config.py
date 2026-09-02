@@ -20,9 +20,10 @@ from torchtrade.envs.utils.timeframe import TimeFrame
 class BaseFuturesTradingConfig:
     """Fields the four venue configs declared identically, name, type and default.
 
-    Each venue keeps only its margin surface -- `margin_mode` is a DIFFERENT enum per
-    venue (okx spells its member `CROSS` where the others say `CROSSED`), so it cannot
-    live here without flattening a real vocabulary difference into `Any`. `symbol` does
+    Each venue keeps only its margin surface -- `margin_mode` is a different Enum
+    class per venue -- binance uses the shared `core.common_types.MarginMode`, the other
+    three declare their own carrying the venue's wire value -- so there is no single type
+    to hoist. `symbol` does
     live here so it stays parameter #1; okx overrides its default.
     """
 
@@ -32,15 +33,10 @@ class BaseFuturesTradingConfig:
     execute_on: Union[str, TimeFrame] = "1Hour"  # timeframe that gates trade execution
     leverage: int = 1  # 1-125
 
-    # The action space. `None` means "use the default below" -- it is a DEFAULT, not a
-    # constraint, and it is the first thing to change for a different trading style.
-    # Any monotonic list in [-1.0, 1.0] works, and its length is the Categorical's n:
-    #
-    #     action_levels=[-1, 0, 1]                    short / flat / long   (the default)
-    #     action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0]   half-size steps too
-    #     action_levels=[0, 0.25, 0.5, 0.75, 1.0]     long-only, four sizes
-    #
-    # A checkpoint is tied to the length it trained on, so changing this needs a retrain.
+    # `None` means the default below. The list's LENGTH is the Categorical's n, and a
+    # checkpoint is bound to the length it trained on, so changing this needs a retrain.
+    # `validate_action_levels` checks range [-1, 1], distinctness and len >= 2 -- NOT
+    # ordering. e.g. [-1.0, -0.5, 0.0, 0.5, 1.0] for half-size steps.
     action_levels: Optional[List[float]] = None
 
     done_on_bankruptcy: bool = True

@@ -537,6 +537,5 @@ class TestWithReplayData:
         assert_a_replay_episode_runs(
             OKXFuturesTorchTradingEnv, OKXFuturesTradingEnvConfig, replay_df,
             actions=lambda i, env: i % len(env.action_levels), steps=20,
-            symbol="BTC-USDT-SWAP", demo=True,
         )
 

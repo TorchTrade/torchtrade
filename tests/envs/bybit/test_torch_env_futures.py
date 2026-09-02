@@ -711,6 +711,5 @@ class TestWithReplayData:
         assert_a_replay_episode_runs(
             BybitFuturesTorchTradingEnv, BybitFuturesTradingEnvConfig, replay_df,
             actions=lambda i, env: i % len(env.action_levels), steps=20,
-            symbol="BTCUSDT", demo=True,
         )
 
