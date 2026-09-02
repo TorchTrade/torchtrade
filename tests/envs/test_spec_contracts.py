@@ -37,9 +37,8 @@ from tensordict import TensorDictBase
 
 import torchtrade
 import torchtrade.envs  # noqa: F401 -- registers every live env as a subclass
-from tests.envs.test_live_env_base import _subclasses
+from tests.envs.test_live_env_base import STEPPING_ENVS
 from torchtrade.envs.core.base import TorchTradeBaseEnv
-from torchtrade.envs.core.live import TorchTradeLiveEnv
 from torchtrade.envs.offline import (
     OneStepTradingEnv,
     OneStepTradingEnvConfig,
@@ -187,31 +186,8 @@ class _StubObserver:
 
 
 
-def _concrete_live_envs():
-    """Discovered, not hand-listed, so exchange #6 cannot skip this by being forgotten.
-
-    A concrete env is one defined in a venue's env.py/env_sltp.py. That used to be spelled
-    "has no unimplemented abstractmethods", which was a proxy: it held only while
-    `_execute_trade_if_needed` was the sole @abstractmethod on TorchTradeFuturesLiveEnv.
-    Giving that method a shared implementation (#288) left the five intermediate bases with
-    nothing unimplemented, and this list grew 10 -> 15 -- picking up `TorchTradeFuturesLiveEnv`
-    itself, which is how the exchange-coverage assert caught it as a sixth "exchange" named
-    `shared`. The abstractmethods filter stays as the second half.
-
-    Anything defined outside the package is dropped too: a test harness that subclasses a
-    live base to drive one method would otherwise be discovered as an eleventh exchange and
-    asked for specs it was never built to have.
-    """
-    return sorted(
-        (c for c in set(_subclasses(TorchTradeLiveEnv))
-         if not getattr(c, "__abstractmethods__", None)
-         and c.__module__.startswith("torchtrade.")
-         and c.__module__.endswith((".env", ".env_sltp"))),
-        key=lambda c: c.__name__,
-    )
-
-
-LIVE_ENVS = _concrete_live_envs()
+# The same 10 concrete envs test_live_env_base discovers, and length-asserts.
+LIVE_ENVS = STEPPING_ENVS
 
 
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=[c.__name__ for c in LIVE_ENVS])

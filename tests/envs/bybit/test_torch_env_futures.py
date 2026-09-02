@@ -5,7 +5,7 @@ import pytest
 import torch
 from torchrl.envs.utils import check_env_specs
 import numpy as np
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
 from tests.envs.base_exchange_tests import (
