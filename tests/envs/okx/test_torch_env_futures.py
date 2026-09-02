@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
 from tests.envs.base_exchange_tests import (
+    a_mock_observer,
     a_position_status,
     a_mock_observer,
     INVALID_ACTIONS,

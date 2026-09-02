@@ -4,16 +4,15 @@ import logging
 import pytest
 
 from tests.envs.base_exchange_tests import (
+    a_mock_observer,
     a_position_status,
     a_mock_observer,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
     assert_an_invalid_action_raises_before_trading,
-    mirror_features_on,
 )
 import torch
 from torchrl.envs.utils import check_env_specs
-import numpy as np
 import math
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
@@ -508,14 +507,7 @@ class TestMultipleSteps:
             BinanceFuturesTradingEnvConfig,
         )
 
-        mock_observer = MagicMock()
-        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
-        mock_observer.get_observations = MagicMock(return_value={
-            "1m_10": np.random.randn(10, 4).astype(np.float32),
-        })
-        mirror_features_on(mock_observer)
-        mock_observer.intervals = ["1m"]
-        mock_observer.window_sizes = [10]
+        mock_observer = a_mock_observer(["1m_10"])
 
         mock_trader = MagicMock()
         # Models the executor's lot-size rounding (#271); a bare MagicMock

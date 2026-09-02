@@ -11,6 +11,7 @@ from tensordict import TensorDict
 
 from torchtrade.envs.core.live import LiveObservationHalt
 from tests.envs.base_exchange_tests import (
+    a_mock_futures_trader,
     some_observations,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
@@ -28,30 +29,7 @@ class TestBinanceFuturesSLTPTorchTradingEnv:
     @pytest.fixture
     def mock_trader(self):
         """Create a mock trader."""
-        trader = MagicMock()
-        # A realistic lot step: `float(MagicMock())` is 1.0, which reads as a 1.0-BTC
-        # lot and floors every real quantity to zero in the shared sizing guard.
-        trader.get_lot_size = MagicMock(
-            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-
-        # Mock methods
-        trader.cancel_open_orders = MagicMock(return_value=True)
-        trader.close_position = MagicMock(return_value=True)
-
-        trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0,
-            "available_balance": 900.0,
-            "total_unrealized_profit": 0.0,
-            "total_margin_balance": 1000.0,
-        })
-
-        trader.get_mark_price = MagicMock(return_value=50000.0)
-
-        trader.get_status = MagicMock(return_value={
-            "position_status": None,
-        })
-
-        trader.trade = MagicMock(return_value=True)
+        trader = a_mock_futures_trader()
 
         return trader
 
@@ -474,30 +452,9 @@ class TestMultipleSteps:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = MagicMock()
-        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
-        mock_observer.get_observations = MagicMock(return_value={
-            "1m_10": np.random.randn(10, 4).astype(np.float32),
-            "base_features": np.array([[50000, 50100, 49900, 50050]] * 10, dtype=np.float32),
-        })
-        mirror_features_on(mock_observer)
-        mock_observer.intervals = ["1m"]
-        mock_observer.window_sizes = [10]
+        mock_observer = a_mock_observer(["1m_10"], base=(50000, 50100, 49900, 50050))
 
-        mock_trader = MagicMock()
-        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
-        mock_trader.get_lot_size = MagicMock(
-            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-        mock_trader.cancel_open_orders = MagicMock(return_value=True)
-        mock_trader.close_position = MagicMock(return_value=True)
-        mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0,
-            "available_balance": 900.0,
-            "total_margin_balance": 1000.0,
-        })
-        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
-        mock_trader.get_status = MagicMock(return_value={"position_status": None})
-        mock_trader.trade = MagicMock(return_value=True)
+        mock_trader = a_mock_futures_trader()
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -759,8 +716,7 @@ class TestDuplicateActionPrevention:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = MagicMock()
-        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+        mock_observer = a_mock_observer(["1m_10"])
 
         mock_get_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
 
@@ -769,20 +725,7 @@ class TestDuplicateActionPrevention:
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
-        mock_trader = MagicMock()
-        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
-        mock_trader.get_lot_size = MagicMock(
-            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-        mock_trader.cancel_open_orders = MagicMock(return_value=True)
-        mock_trader.close_position = MagicMock(return_value=True)
-        mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0,
-            "available_balance": 900.0,
-            "total_margin_balance": 1000.0,
-        })
-        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
-        mock_trader.get_status = MagicMock(return_value={"position_status": None})
-        mock_trader.trade = MagicMock(return_value=True)
+        mock_trader = a_mock_futures_trader()
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -929,8 +872,7 @@ class TestBinanceSLTPNotionalTradeMode:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = MagicMock()
-        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+        mock_observer = a_mock_observer(["1m_10"])
 
         mock_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
 
@@ -939,20 +881,7 @@ class TestBinanceSLTPNotionalTradeMode:
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
-        mock_trader = MagicMock()
-        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
-        mock_trader.get_lot_size = MagicMock(
-            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-        mock_trader.cancel_open_orders = MagicMock(return_value=True)
-        mock_trader.close_position = MagicMock(return_value=True)
-        mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0,
-            "available_balance": 900.0,
-            "total_margin_balance": 1000.0,
-        })
-        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
-        mock_trader.get_status = MagicMock(return_value={"position_status": None})
-        mock_trader.trade = MagicMock(return_value=True)
+        mock_trader = a_mock_futures_trader()
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -1017,31 +946,9 @@ class TestBinanceSLTPNotionalTradeMode:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = MagicMock()
-        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
-        mock_observer.get_observations = MagicMock(return_value={
-            "1m_10": np.random.randn(10, 4).astype(np.float32),
-            "base_features": np.array(
-                [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
-            ),
-        })
-        mirror_features_on(mock_observer)
-        mock_observer.intervals = ["1m"]
-        mock_observer.window_sizes = [10]
+        mock_observer = a_mock_observer(["1m_10"], base=(50000, 50100, 49900, 50050))
 
-        mock_trader = MagicMock()
-        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
-        mock_trader.get_lot_size = MagicMock(
-            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
-        mock_trader.cancel_open_orders = MagicMock(return_value=True)
-        mock_trader.close_position = MagicMock(return_value=True)
-        mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0, "available_balance": 900.0,
-            "total_margin_balance": 1000.0,
-        })
-        mock_trader.get_status = MagicMock(return_value={"position_status": None})
-        mock_trader.trade = MagicMock(return_value=True)
+        mock_trader = a_mock_futures_trader()
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -1079,8 +986,7 @@ class TestBinanceSLTPNotionalTradeMode:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = MagicMock()
-        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
+        mock_observer = a_mock_observer(["1m_10"])
 
         mock_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
 
@@ -1089,13 +995,7 @@ class TestBinanceSLTPNotionalTradeMode:
         mock_observer.intervals = ["1m"]
         mock_observer.window_sizes = [10]
 
-        mock_trader = MagicMock()
-        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
-        mock_trader.get_lot_size = MagicMock(
-            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
-        mock_trader.cancel_open_orders = MagicMock(return_value=True)
-        mock_trader.close_position = MagicMock(return_value=True)
+        mock_trader = a_mock_futures_trader()
         mock_trader.get_account_balance = MagicMock(return_value={
             # wallet != margin: sizing must use total_margin_balance (equity, incl.
             # unrealized PnL), matching offline's portfolio_value basis (#65).
@@ -1104,8 +1004,6 @@ class TestBinanceSLTPNotionalTradeMode:
             "total_unrealized_profit": 100.0,
             "total_margin_balance": 1100.0,
         })
-        mock_trader.get_status = MagicMock(return_value={"position_status": None})
-        mock_trader.trade = MagicMock(return_value=True)
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",
@@ -1146,31 +1044,9 @@ class TestBinanceSLTPLockPosition:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = MagicMock()
-        mock_observer.get_keys = MagicMock(return_value=["1m_10"])
-        mock_observer.get_observations = MagicMock(return_value={
-            "1m_10": np.random.randn(10, 4).astype(np.float32),
-            "base_features": np.array(
-                [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
-            ),
-        })
-        mirror_features_on(mock_observer)
-        mock_observer.intervals = ["1m"]
-        mock_observer.window_sizes = [10]
+        mock_observer = a_mock_observer(["1m_10"], base=(50000, 50100, 49900, 50050))
 
-        mock_trader = MagicMock()
-        # Realistic lot step (float(MagicMock()) is 1.0 -- see the note above).
-        mock_trader.get_lot_size = MagicMock(
-            return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-        mock_trader.get_mark_price = MagicMock(return_value=50000.0)
-        mock_trader.cancel_open_orders = MagicMock(return_value=True)
-        mock_trader.close_position = MagicMock(return_value=True)
-        mock_trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0, "available_balance": 900.0,
-            "total_margin_balance": 1000.0,
-        })
-        mock_trader.get_status = MagicMock(return_value={"position_status": None})
-        mock_trader.trade = MagicMock(return_value=True)
+        mock_trader = a_mock_futures_trader()
 
         config = BinanceFuturesSLTPTradingEnvConfig(
             symbol="BTCUSDT",

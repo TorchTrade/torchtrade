@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
 from tests.envs.base_exchange_tests import (
+    a_mock_futures_trader,
+    a_mock_observer,
     a_position_status,
     a_mock_observer,
     INVALID_ACTIONS,
@@ -29,19 +31,7 @@ class TestBybitFuturesTorchTradingEnv:
     @pytest.fixture
     def mock_trader(self):
         """Create a mock trader."""
-        trader = MagicMock()
-        trader.cancel_open_orders = MagicMock(return_value=True)
-        trader.close_position = MagicMock(return_value=True)
-        trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0,
-            "available_balance": 900.0,
-            "total_unrealized_profit": 0.0,
-            "total_margin_balance": 1000.0,
-        })
-        trader.get_mark_price = MagicMock(return_value=50000.0)
-        trader.get_status = MagicMock(return_value={"position_status": None})
-        trader.trade = MagicMock(return_value=True)
-        trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
+        trader = a_mock_futures_trader()
         return trader
 
     @pytest.fixture
