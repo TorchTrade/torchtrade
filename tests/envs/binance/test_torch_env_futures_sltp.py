@@ -716,14 +716,7 @@ class TestDuplicateActionPrevention:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = a_mock_observer(["1m_10"])
-
-        mock_get_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
-
-        mock_observer.get_observations = MagicMock(side_effect=mock_get_observations)
-        mirror_features_on(mock_observer)
-        mock_observer.intervals = ["1m"]
-        mock_observer.window_sizes = [10]
+        mock_observer = a_mock_observer(["1m_10"], base=(50000, 50100, 49900, 50050))
 
         mock_trader = a_mock_futures_trader()
 
@@ -872,14 +865,7 @@ class TestBinanceSLTPNotionalTradeMode:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = a_mock_observer(["1m_10"])
-
-        mock_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
-
-        mock_observer.get_observations = MagicMock(side_effect=mock_observations)
-        mirror_features_on(mock_observer)
-        mock_observer.intervals = ["1m"]
-        mock_observer.window_sizes = [10]
+        mock_observer = a_mock_observer(["1m_10"], base=(50000, 50100, 49900, 50050))
 
         mock_trader = a_mock_futures_trader()
 
@@ -986,14 +972,7 @@ class TestBinanceSLTPNotionalTradeMode:
             BinanceFuturesSLTPTradingEnvConfig,
         )
 
-        mock_observer = a_mock_observer(["1m_10"])
-
-        mock_observations = some_observations(['1m_10'], base=(50000, 50100, 49900, 50050))
-
-        mock_observer.get_observations = MagicMock(side_effect=mock_observations)
-        mirror_features_on(mock_observer)
-        mock_observer.intervals = ["1m"]
-        mock_observer.window_sizes = [10]
+        mock_observer = a_mock_observer(["1m_10"], base=(50000, 50100, 49900, 50050))
 
         mock_trader = a_mock_futures_trader()
         mock_trader.get_account_balance = MagicMock(return_value={

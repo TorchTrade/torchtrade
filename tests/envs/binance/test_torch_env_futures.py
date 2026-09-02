@@ -6,7 +6,6 @@ import pytest
 from tests.envs.base_exchange_tests import (
     a_mock_observer,
     a_position_status,
-    a_mock_observer,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
     assert_an_invalid_action_raises_before_trading,

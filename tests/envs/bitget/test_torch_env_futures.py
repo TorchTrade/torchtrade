@@ -3,9 +3,9 @@
 import pytest
 
 from tests.envs.base_exchange_tests import (
+    a_mock_futures_trader,
     a_mock_observer,
     a_position_status,
-    a_mock_observer,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
     assert_an_invalid_action_raises_before_trading,
@@ -28,28 +28,8 @@ class TestBitgetFuturesTorchTradingEnv:
     @pytest.fixture
     def mock_trader(self):
         """Create a mock trader."""
-        trader = MagicMock()
-
-        # Mock methods
-        trader.cancel_open_orders = MagicMock(return_value=True)
-        trader.close_position = MagicMock(return_value=True)
-
-        trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0,
-            "available_balance": 900.0,
-            "total_unrealized_profit": 0.0,
-            "total_margin_balance": 1000.0,
-        })
-
-        trader.get_mark_price = MagicMock(return_value=50000.0)
-        trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
+        trader = a_mock_futures_trader()
         trader._round_amount = MagicMock(side_effect=lambda amount: amount)
-
-        trader.get_status = MagicMock(return_value={
-            "position_status": None,
-        })
-
-        trader.trade = MagicMock(return_value=True)
 
         return trader
 
