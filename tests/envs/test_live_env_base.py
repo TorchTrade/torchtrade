@@ -2120,17 +2120,75 @@ def _binance_status(**pos_overrides):
 # no coverage of #341's rule -- which is exactly what happened: bitget got the test,
 # bitget/bybit/okx got the `or` fix, and BINANCE got neither. A blank `liquidationPrice`
 # is binance's ordinary cross-margin shape, and it reported POSITION_UNKNOWN for it.
+def _bybit_status(side="Buy", **pos_overrides):
+    """Real bybit adapter over a stubbed pybit client."""
+    from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
+
+    pos = {"symbol": "BTCUSDT", "size": "1.0", "side": side, "avgPrice": "100",
+           "markPrice": "101", "unrealisedPnl": "1", "leverage": "10", "tradeMode": 1,
+           "liqPrice": "50", "positionValue": "101"}
+    pos.update(pos_overrides)
+    client = MagicMock()
+    client.get_positions = MagicMock(
+        return_value={"retCode": 0, "result": {"list": [pos]}})
+    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["bybit"])
+    client.switch_margin_mode = MagicMock(return_value={"retCode": 0})
+    client.switch_position_mode = MagicMock(return_value={"retCode": 0})
+    ex = BybitFuturesOrderClass(symbol="BTCUSDT", trade_mode="quantity", demo=True,
+                                leverage=10, client=client)
+    return ex.get_status().get("position_status")
+
+
+def _okx_status(pos_side="net", **pos_overrides):
+    """Real okx adapter over stubbed Account/PublicData clients."""
+    from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
+
+    pos = {"instId": "BTC-USDT-SWAP", "pos": "1.0", "posSide": pos_side,
+           "avgPx": "100", "markPx": "101", "upl": "1", "lever": "10",
+           "mgnMode": "cross", "liqPx": "50", "notionalUsd": "101"}
+    pos.update(pos_overrides)
+    account = MagicMock()
+    account.get_positions = MagicMock(return_value={"code": "0", "data": [pos]})
+    account.set_position_mode = MagicMock(return_value={"code": "0"})
+    account.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["okx"])
+    public = MagicMock()
+    public.get_instruments = MagicMock(return_value={"data": []})
+    ex = OKXFuturesOrderClass(symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True,
+                              leverage=10, account_client=account, public_client=public,
+                              client=MagicMock())
+    return ex.get_status().get("position_status")
+
+
+# venue -> (adapter, nullable position fields, the venue's own name for leverage).
+# The leverage key is a COLUMN and not a constant because okx calls it `lever`: passing
+# `leverage=0` to okx silently added a key it does not read, so the base "10" stood and
+# the test failed loudly rather than passing on a value it never set.
 _NULLABLE_POSITION_FIELDS = {
     "bitget": (_bitget_status, ["liquidationPrice", "entryPrice", "markPrice",
-                                "unrealizedPnl", "notional"]),
+                                "unrealizedPnl", "notional"], "leverage"),
     "binance": (_binance_status, ["liquidationPrice", "entryPrice", "markPrice",
-                                  "unRealizedProfit", "notional"]),
+                                  "unRealizedProfit", "notional"], "leverage"),
+    "bybit": (_bybit_status, ["liqPrice", "avgPrice", "markPrice",
+                              "unrealisedPnl", "positionValue"], "leverage"),
+    "okx": (_okx_status, ["liqPx", "avgPx", "markPx", "upl", "notionalUsd"], "lever"),
 }
+# The completeness guard the two sibling tables carry. bybit and okx already parse these
+# with `or 0`, so they were correct-but-UNCOVERED -- and "correct but uncovered on the
+# venue nobody checked" is exactly how binance went without #341's fix. A table that stops
+# at the venues currently known to be broken is the shrinkage these asserts prevent.
+assert set(_NULLABLE_POSITION_FIELDS) == {
+    c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS
+}, "a futures venue is missing from the nullable-field table"
+
+_NULLABLE_CASES = [(v, f) for v, (_, fields, _lev) in
+                   sorted(_NULLABLE_POSITION_FIELDS.items()) for f in fields]
 
 
-@pytest.mark.parametrize("venue", sorted(_NULLABLE_POSITION_FIELDS))
+@pytest.mark.parametrize("venue,field", _NULLABLE_CASES)
 @pytest.mark.parametrize("blank", [None, ""], ids=["null", "empty-string"])
-def test_a_blank_venue_field_does_not_turn_a_healthy_position_into_an_outage(venue, blank):
+def test_a_blank_venue_field_does_not_turn_a_healthy_position_into_an_outage(
+    venue, field, blank
+):
     """#341: a bare `float(None)` raises into the adapter's broad except, so a healthy
     position reports POSITION_UNKNOWN.
 
@@ -2142,11 +2200,15 @@ def test_a_blank_venue_field_does_not_turn_a_healthy_position_into_an_outage(ven
     ValueError, and binance's `liquidationPrice` key is PRESENT-and-empty on cross margin,
     so a `.get(key, 0)` default never fired for it.
     """
-    build, fields = _NULLABLE_POSITION_FIELDS[venue]
-    for field in fields:
-        status = build(**{field: blank})
-        assert status is not POSITION_UNKNOWN, f"{venue}: a blank {field} read as an outage"
-        assert status.qty == pytest.approx(1.0)
+    # `field` is its own axis rather than a loop in the body: a loop reports only the
+    # FIRST broken field, so a regression on a later one stays invisible until the earlier
+    # one is separately fixed. Confirmed as real, not hypothetical.
+    build, _fields, _lev = _NULLABLE_POSITION_FIELDS[venue]
+
+    status = build(**{field: blank})
+
+    assert status is not POSITION_UNKNOWN, f"{venue}: a blank {field} read as an outage"
+    assert status.qty == pytest.approx(1.0)
 
 
 @pytest.mark.parametrize("venue", sorted(_NULLABLE_POSITION_FIELDS))
@@ -2164,50 +2226,14 @@ def test_a_venue_reported_zero_leverage_is_not_swapped_for_the_config(venue, zer
     venues send numbers as strings, and `not "0"` is False, so a string zero cannot tell
     the correct guard from the falsy one. Only a numeric zero separates them.
     """
-    build, _ = _NULLABLE_POSITION_FIELDS[venue]
+    build, _fields, leverage_key = _NULLABLE_POSITION_FIELDS[venue]
 
-    status = build(leverage=zero)
+    status = build(**{leverage_key: zero})
 
     assert status is not POSITION_UNKNOWN
     assert status.leverage == pytest.approx(0.0), (
         f"{venue} swapped a venue-reported zero leverage for the config value"
     )
-
-
-def _bybit_status(side="Buy"):
-    """Real bybit adapter over a stubbed pybit client."""
-    from torchtrade.envs.live.bybit.order_executor import BybitFuturesOrderClass
-
-    client = MagicMock()
-    client.get_positions = MagicMock(return_value={"retCode": 0, "result": {"list": [
-        {"symbol": "BTCUSDT", "size": "1.0", "side": side, "avgPrice": "100",
-         "markPrice": "101", "leverage": "10", "tradeMode": 1},
-    ]}})
-    client.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["bybit"])
-    client.switch_margin_mode = MagicMock(return_value={"retCode": 0})
-    client.switch_position_mode = MagicMock(return_value={"retCode": 0})
-    ex = BybitFuturesOrderClass(symbol="BTCUSDT", trade_mode="quantity", demo=True,
-                                leverage=10, client=client)
-    return ex.get_status().get("position_status")
-
-
-def _okx_status(pos_side="net"):
-    """Real okx adapter over stubbed Account/PublicData clients."""
-    from torchtrade.envs.live.okx.order_executor import OKXFuturesOrderClass
-
-    account = MagicMock()
-    account.get_positions = MagicMock(return_value={"code": "0", "data": [
-        {"instId": "BTC-USDT-SWAP", "pos": "1.0", "posSide": pos_side,
-         "avgPx": "100", "markPx": "101", "lever": "10", "mgnMode": "cross"},
-    ]})
-    account.set_position_mode = MagicMock(return_value={"code": "0"})
-    account.set_leverage = MagicMock(return_value=_LEVERAGE_BODIES["okx"])
-    public = MagicMock()
-    public.get_instruments = MagicMock(return_value={"data": []})
-    ex = OKXFuturesOrderClass(symbol="BTC-USDT-SWAP", trade_mode="quantity", demo=True,
-                              leverage=10, account_client=account, public_client=public,
-                              client=MagicMock())
-    return ex.get_status().get("position_status")
 
 
 @pytest.mark.parametrize("pos_side,expected_sign", [("long", 1), ("short", -1)],
@@ -2382,6 +2408,29 @@ _MARK_VS_INDEX = {
     "bybit": lambda: _bybit_mark_payload({"markPrice": "101.5", "indexPrice": "99.0"}),
     "okx": lambda: _okx_mark_payload({"markPx": "101.5", "idxPx": "99.0"}),
 }
+
+
+# The two venues with a FALLBACK, and the shape their fallback must not swallow. okx and
+# binance have no fallback, so there is nothing here for them to get wrong.
+_MARK_FALLBACK = {
+    "bitget": lambda: _bitget_mark({"info": {"markPrice": 0}, "last": 101.0}),
+    "bybit": lambda: _bybit_mark_payload({"markPrice": 0, "lastPrice": "101.0"}),
+}
+
+
+@pytest.mark.parametrize("venue", sorted(_MARK_FALLBACK))
+def test_a_numeric_zero_mark_does_not_fall_back_to_the_last_trade(venue):
+    """The fallback fires when the venue OMITS a mark, not when it reports a broken one.
+
+    This is the row that separates the explicit `raw is None or raw == ""` chain from the
+    tidier `markPrice or lastPrice`: the latter treats a numeric 0 as absent and
+    substitutes a stale last-trade print for a mark the venue reported as unusable.
+
+    bitget had this row and bybit did not, so simplifying bybit's chain back failed
+    nothing -- the same one-venue-short shape this whole PR keeps finding.
+    """
+    with pytest.raises(RuntimeError, match="mark price"):
+        _MARK_FALLBACK[venue]()
 
 
 @pytest.mark.parametrize("venue", sorted(_MARK_VS_INDEX))
