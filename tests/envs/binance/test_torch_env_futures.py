@@ -140,40 +140,8 @@ class TestBinanceFuturesTorchTradingEnv:
         assert env.config.demo is True
 
     def test_action_spec(self, env):
-        """Test action spec uses fractional mode with proper ordering."""
-        # Should have fractional action levels (not exact count check)
-        assert env.action_spec.n >= 3, "Should have at least 3 actions"
-
-        # Verify action levels are fractional (floats between -1 and 1)
-        action_levels = env.action_levels
-        assert all(isinstance(level, (int, float)) for level in action_levels), \
-            "Action levels should be numeric"
-        assert all(-1 <= level <= 1 for level in action_levels), \
-            f"Action levels should be in [-1, 1], got {action_levels}"
-
-        # Verify proper ordering: negative values, then 0, then positive values
-        # Should be sorted in ascending order: [-1, -0.5, 0, 0.5, 1] ✓
-        # Should NOT be: [1, 0.5, 0, -0.5, -1] ✗
-        assert action_levels == sorted(action_levels), \
-            f"Action levels should be sorted ascending, got {action_levels}"
-
-        # Verify no improper mixing (e.g., [-1, 0.5, 0, 0.5, 1] would be wrong)
-        negatives = [x for x in action_levels if x < 0]
-        positives = [x for x in action_levels if x > 0]
-        zeros = [x for x in action_levels if x == 0]
-
-        # If we have negatives and positives, zero should be between them
-        if negatives and positives:
-            assert len(zeros) > 0, "Should have 0 between negative and positive values"
-            neg_indices = [i for i, x in enumerate(action_levels) if x < 0]
-            pos_indices = [i for i, x in enumerate(action_levels) if x > 0]
-            zero_indices = [i for i, x in enumerate(action_levels) if x == 0]
-
-            # All negatives should come before zero, zero before positives
-            assert max(neg_indices) < min(zero_indices), \
-                "Negative values should come before zero"
-            assert max(zero_indices) < min(pos_indices), \
-                "Zero should come before positive values"
+        """The unset default, same as its three siblings assert (#288)."""
+        assert env.action_spec.n == 3  # the default: short / flat / long
 
     def test_base_features_declared_in_observation_spec(self, env_config, mock_observer, mock_trader):
         """include_base_features=True must DECLARE base_features in observation_spec, not just
@@ -426,7 +394,7 @@ class TestBinanceFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is FLAT here ([-1, 0, 1])
+            long_idx = len(env.action_levels) - 1
             for _ in range(5):
                 env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
             assert env.position.hold_counter > 0      # genuinely aged

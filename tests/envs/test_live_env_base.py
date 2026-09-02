@@ -3785,9 +3785,13 @@ PLAIN_CONFIGS = [
     for c in PLAIN_FUTURES_ENVS
 ]
 
+# Both families, for the guards that apply to a futures config regardless of brackets.
+_ALL_FUTURES_CONFIGS = [p.values[0] for p in PLAIN_CONFIGS + SLTP_CONFIGS]
+assert len(_ALL_FUTURES_CONFIGS) == 8, [c.__name__ for c in _ALL_FUTURES_CONFIGS]
+
 # Venue surface: what a plain config is still allowed to declare for itself. `margin_mode`
-# is a DIFFERENT enum per venue (okx spells its member CROSS where the others say
-# CROSSED), so hoisting it would flatten a real vocabulary difference into Any.
+# is a DIFFERENT enum CLASS per venue, so there is no one type to hoist -- hoisting it
+# would need `Any`, which is how the okx default slipped from ISOLATED to CROSS.
 _PLAIN_VENUE_FIELDS = {"symbol", "margin_mode", "position_mode", "product_type"}
 
 
@@ -3814,8 +3818,27 @@ def test_every_plain_config_runs_the_shared_post_init(config_cls):
     )
 
 
-@pytest.mark.parametrize("config_cls", [p.values[0] for p in PLAIN_CONFIGS + SLTP_CONFIGS],
-                         ids=lambda c: c.__name__)
+@pytest.mark.parametrize("config_cls", _ALL_FUTURES_CONFIGS, ids=lambda c: c.__name__)
+def test_every_config_normalizes_with_its_own_venue_parser(config_cls):
+    """The one token the fold left unguarded.
+
+    Hoisting `__post_init__` turned four inline `normalize_<venue>_timeframe_config`
+    calls into one class attribute per subclass, and nothing checked where it points.
+    Cross-wiring bybit's config to binance's normalizer passes all 3678 env tests -- but
+    the parsers are genuinely different vocabularies, so bybit's native `"60"`/`"D"`/
+    `"240"` all become construction-time ValueErrors. It fails loud rather than trading
+    wrong, which is why it is a pin and not a bug; the guards above check the fields and
+    the `__post_init__` identity and stop one line short of what it calls (#288).
+    """
+    venue = config_cls.__module__.split(".")[-2]
+    expected = getattr(importlib.import_module(f"torchtrade.envs.live.{venue}.utils"),
+                       f"normalize_{venue}_timeframe_config")
+    assert config_cls._normalize_timeframes is expected, (
+        f"{config_cls.__name__} normalizes timeframes with a parser that is not {venue}'s"
+    )
+
+
+@pytest.mark.parametrize("config_cls", _ALL_FUTURES_CONFIGS, ids=lambda c: c.__name__)
 def test_no_venue_defaults_to_cross_margin(config_cls):
     """The default margin mode is a MONEY decision, and nothing pinned its VALUE.
 
@@ -3829,13 +3852,15 @@ def test_no_venue_defaults_to_cross_margin(config_cls):
     Parametrized, not looped: a loop stops at the first venue and a second regression of
     the same shape would stay hidden behind it. Both families, because okx's plain and
     SLTP twins had already disagreed for the length of one commit.
-    """
-    from torchtrade.envs.core.common_types import MarginMode as SharedMarginMode
 
+    On the VALUE, not the member name: the value is what reaches the venue. Case-folded
+    because binance's shared enum spells it upper-case where the other three send the
+    lower-case wire string.
+    """
     mode = config_cls().margin_mode
-    assert mode.name == SharedMarginMode.ISOLATED.name, (
-        f"{config_cls.__name__} defaults to {mode.name}; isolated margin is the default "
-        f"every venue ships, and cross exposes the whole balance"
+    assert mode.value.lower() == "isolated", (
+        f"{config_cls.__name__} defaults to {mode.name}={mode.value!r}; isolated margin "
+        f"is the default every venue ships, and cross exposes the whole balance"
     )
 
 

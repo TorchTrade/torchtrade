@@ -233,7 +233,7 @@ class TestOKXFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             mock_env_trader.get_status = MagicMock(return_value=status(0.01))
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is FLAT under the [-1, 0, 1] default (#288)
+            long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
 
             for _ in range(5):                       # age a real position
@@ -267,7 +267,7 @@ class TestOKXFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is FLAT under the [-1, 0, 1] default (#288)
+            long_idx = len(env.action_levels) - 1
             for _ in range(5):
                 env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
             assert env.position.hold_counter > 0      # genuinely aged
