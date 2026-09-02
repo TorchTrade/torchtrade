@@ -20,53 +20,19 @@ from torchtrade.envs.core.live import (
 from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
 )
+from torchtrade.envs.live.shared.futures_config import BaseFuturesTradingConfig
+from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
 
 
 @dataclass
-class BybitFuturesTradingEnvConfig:
+class BybitFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     """Configuration for Bybit Futures Trading Environment."""
 
-    symbol: str = "BTCUSDT"
-
-    # Timeframes and windows
-    time_frames: Union[List[Union[str, "TimeFrame"]], Union[str, "TimeFrame"]] = "1Hour"
-    window_sizes: Union[List[int], int] = 10
-    execute_on: Union[str, "TimeFrame"] = "1Hour"
-
-    # Trading parameters
-    leverage: int = 1
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.ONE_WAY
 
-    # Action space configuration
-    action_levels: List[float] = None
+    _normalize_timeframes = staticmethod(normalize_bybit_timeframe_config)
 
-    # Termination settings
-    done_on_bankruptcy: bool = True
-    bankrupt_threshold: float = 0.1
-
-    # Environment settings
-    demo: bool = True
-    seed: Optional[int] = 42
-    include_base_features: bool = False
-    close_position_on_init: bool = True
-    close_position_on_reset: bool = False
-    observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
-    # Bars to ride out an unreadable venue before truncating; 0 disables (#295).
-    max_unknown_status_steps: int = 0
-
-    def __post_init__(self):
-        self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
-        validate_unknown_status_budget(self.max_unknown_status_steps)
-        from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
-        self.execute_on, self.time_frames, self.window_sizes = normalize_bybit_timeframe_config(
-            self.execute_on, self.time_frames, self.window_sizes
-        )
-
-        if self.action_levels is None:
-            self.action_levels = [-1.0, -0.5, 0.0, 0.5, 1.0]
-
-        validate_action_levels(self.action_levels)
 
 
 class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):

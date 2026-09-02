@@ -135,11 +135,13 @@ class TestBitgetFuturesTorchTradingEnv:
 
     def test_action_spec(self, env):
         """Test action spec is correctly defined."""
-        assert env.action_spec.n == 5  # fractional: -1.0, -0.5, 0.0, 0.5, 1.0
+        assert env.action_spec.n == 3  # the default: short / flat / long
 
     def test_action_levels(self, env):
         """Test action levels are correctly set."""
-        assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
+        # The DEFAULT, shared by all four venues since #288. Any monotonic list in
+        # [-1, 1] is valid -- see BaseFuturesTradingConfig.action_levels.
+        assert env.action_levels == [-1, 0, 1]
 
     def test_base_features_declared_in_observation_spec(self, env_config, mock_observer, mock_trader):
         """include_base_features=True must DECLARE base_features in observation_spec, not just
@@ -208,7 +210,8 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
+            long_idx = env.action_levels.index(1)  # by VALUE: the list length may change
+            action_td = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
             next_td = env.step(action_td)
 
             # Trade should have been attempted
@@ -290,8 +293,9 @@ class TestBitgetFuturesTorchTradingEnv:
             mock_trader.close_position.reset_mock()
 
             # Fractional action levels: [0=-1.0, 1=-0.5, 2=0.0, 3=0.5, 4=1.0]
-            # Action index 2 -> level 0.0 -> close the open position.
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
+            # Level 0.0 -> close the open position.
+            flat_idx = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat_idx)}, batch_size=())
             env._step(action_td)
 
         mock_trader.close_position.assert_called_once()
@@ -319,7 +323,8 @@ class TestBitgetFuturesTorchTradingEnv:
             env.reset()
 
             # Go long (should buy to flip from short to long)
-            action_td = TensorDict({"action": torch.tensor(4)}, batch_size=())  # Long (1.0)
+            long_idx = env.action_levels.index(1)  # by VALUE: the list length may change
+            action_td = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
             env._step(action_td)
 
             # With fractional sizing, it should call trade() with the delta amount to flip position

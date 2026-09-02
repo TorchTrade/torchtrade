@@ -3774,6 +3774,64 @@ SHARED_DEFAULTS = {
 }
 
 
+from torchtrade.envs.live.shared.futures_config import BaseFuturesTradingConfig
+from torchtrade.envs.utils.fractional_sizing import build_default_action_levels
+
+# The PLAIN configs, discovered from the env classes so a fifth venue cannot opt out.
+PLAIN_CONFIGS = [
+    pytest.param(
+        next(o for o in vars(importlib.import_module(c.__module__)).values()
+             if dataclasses.is_dataclass(o)
+             and getattr(o, "__name__", "").endswith("TradingEnvConfig")),
+        id=c.__module__.split(".")[-2],
+    )
+    for c in PLAIN_FUTURES_ENVS
+]
+
+# Venue surface: what a plain config is still allowed to declare for itself. `margin_mode`
+# is a DIFFERENT enum per venue (okx spells its member CROSS where the others say
+# CROSSED), so hoisting it would flatten a real vocabulary difference into Any.
+_PLAIN_VENUE_FIELDS = {"symbol", "margin_mode", "position_mode", "product_type"}
+
+
+@pytest.mark.parametrize("config_cls", PLAIN_CONFIGS)
+def test_every_plain_config_inherits_the_shared_fields(config_cls):
+    """The plain twin of the SLTP guard below. A subclass re-declaring a shared field
+    silently shadows the base default -- same value today, stops tracking tomorrow (#288).
+    """
+    assert issubclass(config_cls, BaseFuturesTradingConfig)
+    own = set(vars(config_cls).get("__annotations__", {}))
+    assert not (own - _PLAIN_VENUE_FIELDS), (
+        f"{config_cls.__name__} re-declares {sorted(own - _PLAIN_VENUE_FIELDS)}; only the "
+        f"venue surface belongs in a subclass"
+    )
+
+
+@pytest.mark.parametrize("config_cls", PLAIN_CONFIGS)
+def test_every_plain_config_runs_the_shared_post_init(config_cls):
+    """A subclass growing its own `__post_init__` and dropping the super() call stops
+    validating every field the shared one checks, silently.
+    """
+    assert config_cls.__post_init__ is BaseFuturesTradingConfig.__post_init__, (
+        f"{config_cls.__name__} defines its own __post_init__"
+    )
+
+
+def test_every_plain_config_defaults_to_the_same_action_space():
+    """One unset config, one `action_spec.n`, on every venue.
+
+    binance derived its default from `build_default_action_levels` while the other three
+    hard-coded a five-level list, so the SAME config produced a 3-action space on one
+    venue and a 5-action space on the other three. `action_spec.n` is what a checkpoint is
+    bound to, so a policy could not move between venues it was meant to be portable
+    across (#288). The VALUE is a default, not a constraint -- a config that sets
+    `action_levels` explicitly is the supported way to trade half sizes.
+    """
+    levels = {c.values[0].__name__: c.values[0]().action_levels for c in PLAIN_CONFIGS}
+    assert len(set(map(tuple, levels.values()))) == 1, levels
+    assert next(iter(levels.values())) == build_default_action_levels(allow_short=True)
+
+
 @pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
 def test_every_sltp_config_inherits_the_shared_fields(config_cls):
     """A subclass re-declaring a shared field silently shadows the base default (#288)."""
@@ -5620,18 +5678,22 @@ def test_the_history_row_is_the_one_the_reward_function_scores(sltp):
     )
 
 
-# binance ships [-1, 0, 1]; the other three ship [-1, -0.5, 0, 0.5, 1]. The venue axis is
-# NOT theatre here, unlike elsewhere in this file: venues differ in DATA,
-# not only in code, and on binance a mutation flattening the level to its sign is a no-op.
-#
-@pytest.mark.parametrize("venue,want", [
-    ("binance", 1), ("binance", -1), ("bitget", 0.5), ("bitget", -0.5),
+# The half rows set `action_levels` EXPLICITLY. They used to lean on bitget defaulting to
+# five levels while binance defaulted to three -- a divergence #288 removed, since the same
+# unset config produced a different `action_spec.n` per venue. A fractional level is still
+# the case that matters here (a mutation flattening the level to its sign is a no-op on
+# +-1), so the test now asks for it rather than relying on a venue's default.
+@pytest.mark.parametrize("venue,want,levels", [
+    ("binance", 1, None), ("binance", -1, None),
+    ("bitget", 0.5, [-1.0, -0.5, 0.0, 0.5, 1.0]),
+    ("bitget", -0.5, [-1.0, -0.5, 0.0, 0.5, 1.0]),
 ], ids=["full-long", "full-short", "half-long", "half-short"])
-def test_the_plain_history_row_records_the_action_actually_traded(venue, want):
+def test_the_plain_history_row_records_the_action_actually_traded(venue, want, levels):
     """`action` in the history row is what the reward function scores -- the LEVEL, not
     its sign.
     """
-    env, _ = _real_futures_env(budget=0, venue=venue)
+    kw = {"action_levels": levels} if levels else {}
+    env, _ = _real_futures_env(budget=0, venue=venue, **kw)
     # Index by value, not position: the action_levels lists differ in length.
     action = env.action_levels.index(want)
     td = env.reset()

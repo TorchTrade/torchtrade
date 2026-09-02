@@ -104,8 +104,9 @@ class TestBybitFuturesTorchTradingEnv:
 
     def test_action_spec(self, env):
         """Test action spec and levels are correctly defined."""
-        assert env.action_spec.n == 5  # [-1.0, -0.5, 0.0, 0.5, 1.0]
-        assert env.action_levels == [-1.0, -0.5, 0.0, 0.5, 1.0]
+        assert env.action_spec.n == 3  # the default: short / flat / long
+        # Any monotonic list in [-1, 1] is valid; see BaseFuturesTradingConfig.action_levels.
+        assert env.action_levels == [-1, 0, 1]
 
     def test_include_base_features_flows_through_shared_get_observation(self, mock_observer, mock_trader):
         """The shared TorchTradeFuturesLiveEnv._get_observation passes base_features through.
@@ -176,15 +177,16 @@ class TestBybitFuturesTorchTradingEnv:
             assert "done" in next_td["next"].keys()
             assert "account_state" in next_td["next"].keys()
 
-    @pytest.mark.parametrize("action_idx,label", [
-        (4, "long"),   # action_levels[4] = 1.0
-        (0, "short"),  # action_levels[0] = -1.0
+    @pytest.mark.parametrize("level,label", [
+        (1, "long"), (-1, "short"),
     ], ids=["long", "short"])
-    def test_step_trade_action(self, env, mock_trader, action_idx, label):
+    def test_step_trade_action(self, env, mock_trader, level, label):
         """Test step with long/short action calls trade."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            action_td = TensorDict({"action": torch.tensor(action_idx)}, batch_size=())
+            # By VALUE, so the test does not encode the length of action_levels.
+            idx = env.action_levels.index(level)
+            action_td = TensorDict({"action": torch.tensor(idx)}, batch_size=())
             env.step(action_td)
             mock_trader.trade.assert_called()
 

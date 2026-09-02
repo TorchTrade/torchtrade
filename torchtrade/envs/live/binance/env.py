@@ -21,58 +21,18 @@ from torchtrade.envs.utils.fractional_sizing import (
     validate_action_levels,
     build_default_action_levels,
 )
+from torchtrade.envs.live.shared.futures_config import BaseFuturesTradingConfig
+from torchtrade.envs.live.binance.utils import normalize_binance_timeframe_config
 
 
 @dataclass
-class BinanceFuturesTradingEnvConfig:
+class BinanceFuturesTradingEnvConfig(BaseFuturesTradingConfig):
     """Configuration for Binance Futures Trading Environment."""
 
-    symbol: str = "BTCUSDT"
-
-    # Timeframes and windows
-    time_frames: Union[List[Union[str, TimeFrame]], Union[str, TimeFrame]] = "1Hour"
-    window_sizes: Union[List[int], int] = 10
-    execute_on: Union[str, TimeFrame] = "1Hour"  # Timeframe for trade execution timing
-
-    # Trading parameters
-    leverage: int = 1  # Leverage (1-125)
     margin_mode: MarginMode = MarginMode.ISOLATED
 
-    # Action space configuration (fractional mode only)
-    action_levels: List[float] = None  # Custom action levels, or None for defaults
+    _normalize_timeframes = staticmethod(normalize_binance_timeframe_config)
 
-    # Termination settings
-    done_on_bankruptcy: bool = True
-    bankrupt_threshold: float = 0.1  # 10% of initial balance
-
-    # Environment settings
-    demo: bool = True  # Use demo/testnet for paper trading
-    seed: Optional[int] = 42
-    include_base_features: bool = False
-    close_position_on_init: bool = True
-    close_position_on_reset: bool = False
-    observation_failure_policy: ObservationFailurePolicy | str = ObservationFailurePolicy.HALT
-    # Bars to ride out an unreadable venue before truncating; 0 disables (#295).
-    max_unknown_status_steps: int = 0
-
-    def __post_init__(self):
-        """Normalize timeframe configuration and build action levels."""
-        from torchtrade.envs.live.binance.utils import normalize_binance_timeframe_config
-
-        self.observation_failure_policy = ObservationFailurePolicy(self.observation_failure_policy)
-        validate_unknown_status_budget(self.max_unknown_status_steps)
-
-        self.execute_on, self.time_frames, self.window_sizes = normalize_binance_timeframe_config(
-            self.execute_on, self.time_frames, self.window_sizes
-        )
-
-        # Build default action levels
-        if self.action_levels is None:
-            self.action_levels = build_default_action_levels(
-                allow_short=True  # Futures allow short positions
-            )
-
-        validate_action_levels(self.action_levels)
 
 
 class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
