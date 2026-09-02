@@ -27,7 +27,8 @@ WINDOW = 10   # every fixture below emits a 10-bar window
 
 def some_observations(keys, *, base=None):
     """One window per key. `base` is the OHLC bar `return_base_ohlc=True` should yield --
-    a 4-tuple for a fixed bar, or None for noise. `base_timestamps` rides along with it,
+    a 4-tuple for a fixed bar, or None for noise. `base=None` is for SHAPE-only tests: the
+    close can come out negative or zero, which an SLTP test pricing off it would flake on. `base_timestamps` rides along with it,
     as the real observer does (`shared/base_obs.py:287-293` emits both or neither)."""
     def observations(return_base_ohlc=False):
         obs = {k: np.random.randn(WINDOW, 4).astype(np.float32) for k in keys}
