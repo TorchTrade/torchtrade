@@ -262,14 +262,12 @@ def _drive(venue, actions, prices, *, flatten_before_step=None, **config_kw):
     The mirror is load-bearing, not scaffolding: `_sync_position_from_exchange` releases the
     duplicate-action guard whenever the venue's qty disagrees with the target (invariant 2,
     #243). A harness that reports a stale position therefore makes ALL FOUR venues re-trade,
-    and the difference this test exists to measure disappears -- which is exactly what my
-    first two attempts at it showed.
+    and the difference this test exists to measure disappears.
 
     Mirroring inside the mocks covers both submission paths for free: binance calls
     `close_position()` then `trade(...)`, bybit sends one `trade(...)` spanning
     close-and-open. Counting only `trade` left binance's mirrored position long, and the
-    guard then released on the divergence -- correctly, which is what made it look like a
-    venue difference rather than a harness bug.
+    guard then released on the divergence -- correctly.
     """
     env, trader = _real_futures_env(budget=0, venue=venue, **config_kw)
     held = 0.0
@@ -304,12 +302,13 @@ def _drive(venue, actions, prices, *, flatten_before_step=None, **config_kw):
         sent, closed = trader.trade.call_count, trader.close_position.call_count
         td = env.step(td.exclude("done", "terminated", "truncated", "reward")
                       .set("action", torch.tensor(env.action_levels.index(value))))["next"]
-        # A close IS an order. Counting only `trade` left a close-to-flat invisible, and a
-        # gate that swallowed every one of them passed all 20 rows.
-        shape = "close" if trader.close_position.call_count > closed else ""
+        # A close IS an order: counting only `trade` left a close-to-flat invisible.
+        parts = []
+        if trader.close_position.call_count > closed:
+            parts.append("close")
         if trader.trade.call_count > sent:
-            shape = f"{shape}+{trader.trade.call_args.kwargs['side']}".lstrip("+")
-        shapes.append(shape)
+            parts.append(trader.trade.call_args.kwargs["side"])
+        shapes.append("+".join(parts))
     return shapes
 
 
@@ -331,10 +330,10 @@ _HALF_STEPS = [-1.0, -0.5, 0.0, 0.5, 1.0]    # ...where a same-direction resize 
     # one stale write away from refusing every trade. The reversal's SHAPE is venue
     # business -- binance closes then opens, bybit sends one order spanning both -- so this
     # row asserts only that it traded.
-    (_FULL, [1.0, 1.0, -1.0, -1.0], [100., 101., 102., 103.], [ANY_ORDER, "", ANY_ORDER, ""]),
+    (_FULL, [1.0, 1.0, -1.0, -1.0], [100., 101., 102., 103.], ["buy", "", ANY_ORDER, ""]),
     # A close IS an order, and the gate must not swallow it: mutating it to skip every
     # close-to-flat passed every row here while the position stayed open (#288 round 2).
-    (_FULL, [1.0, 0.0, 0.0], [100., 101., 102.], ["buy", "close", ""]),
+    (_FULL, [1.0, 0.0], [100., 101.], ["buy", "close"]),
     # A different level in the SAME direction is a trade, and it must be ONE order on the
     # same side -- not a close-and-reopen. The third bar MOVES: at a constant price the
     # resize delta is zero and the final "" passes with the guard deleted.
@@ -354,8 +353,38 @@ def test_the_trade_gate(venue, levels, actions, prices, expected):
     this row's comment claimed to cover it.
     """
     got = _drive(venue, actions, prices, action_levels=levels)
-    got = [ANY_ORDER if e is ANY_ORDER and g else g for g, e in zip(got, expected)]
+    # `zip` truncates, so a short `expected` would skip the tail silently. ANY_ORDER means
+    # "it traded, the shape is venue business"; it does NOT check the side -- a wrong-side
+    # reversal surfaces at the NEXT step, when cache and venue diverge.
+    assert len(got) == len(expected), f"{venue}: {len(got)} steps, {len(expected)} expected"
+    got = [ANY_ORDER if want is ANY_ORDER and shape else shape
+           for shape, want in zip(got, expected)]
     assert got == expected, venue
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+def test_the_gate_forwards_the_price_it_was_handed(venue):
+    """Shape is not size, and the gate rows only assert shape.
+
+    Corrupting the price `_execute_trade_if_needed` forwards doubles the quantity every
+    venue sends and passes the whole suite: the target stays self-consistent with what the
+    venue then reports, so the sync never diverges and no shape changes. (Pre-existing --
+    the same corruption survives on main's four separate forwarders; the fold makes it one
+    forwarder to get wrong instead of four.)
+
+    A band, not a golden number: the four venues net their own taker fee off the notional,
+    so they legitimately differ in the third decimal.
+    """
+    env, trader = _real_futures_env(budget=0, venue=venue)
+    trader.get_mark_price.return_value = 100.0
+    td = env.reset()
+    env.step(td.set("action", torch.tensor(env.action_levels.index(1.0))))
+
+    qty = trader.trade.call_args.kwargs["quantity"]
+    assert 95.0 < qty < 100.0, (
+        f"{venue} sent {qty} for a full-long on a $10,000 account at $100; a mark that "
+        f"reached sizing halved or doubled would land outside this band"
+    )
 
 
 @pytest.mark.parametrize("venue", PLAIN_VENUES)
@@ -436,12 +465,8 @@ def test_non_sltp_step_syncs_before_it_trades(env_cls):
 # unimplemented abstractmethods", which stopped discriminating when #288 gave the base's
 # last @abstractmethod a body: the five intermediate bases became concrete and this list
 # grew 10 -> 15. Where a class LIVES is stable under a refactor; which method happens to be
-# abstract is not. The isabstract half states intent rather than catching anything: an
-# abstract class added inside a venue env.py trips `len(PLAIN_FUTURES_ENVS) == 4` first,
-# with or without it.
-STEPPING_ENVS = [c for c in LIVE_ENVS
-                 if c.__module__.endswith((".env", ".env_sltp"))
-                 and not inspect.isabstract(c)]
+# abstract is not.
+STEPPING_ENVS = [c for c in LIVE_ENVS if c.__module__.endswith((".env", ".env_sltp"))]
 assert len(STEPPING_ENVS) == 10, (
     f"expected the 10 concrete live envs (5 venues x plain/SLTP), got "
     f"{[c.__name__ for c in STEPPING_ENVS]}"

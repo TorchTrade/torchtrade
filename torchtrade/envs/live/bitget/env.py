@@ -158,4 +158,3 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         info["target_qty"] = target_qty
         info["target_tol"] = min_qty
         return info
-

@@ -107,4 +107,3 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
         info["target_qty"] = target_qty
         info["target_tol"] = lot_size["min_qty"]
         return info
-

@@ -37,7 +37,8 @@ from tensordict import TensorDictBase
 
 import torchtrade
 import torchtrade.envs  # noqa: F401 -- registers every live env as a subclass
-from tests.envs.test_live_env_base import STEPPING_ENVS
+# The same 10 concrete envs; test_live_env_base length-asserts them at import.
+from tests.envs.test_live_env_base import STEPPING_ENVS as LIVE_ENVS
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.offline import (
     OneStepTradingEnv,
@@ -186,8 +187,6 @@ class _StubObserver:
 
 
 
-LIVE_ENVS = STEPPING_ENVS   # the same 10; test_live_env_base length-asserts them
-
 
 @pytest.mark.parametrize("env_cls", LIVE_ENVS, ids=[c.__name__ for c in LIVE_ENVS])
 def test_live_env_specs_sample_finite(env_cls):
@@ -237,7 +236,7 @@ def test_transform_observation_spec_samples_finite():
 
 def test_polymarket_env_specs_sample_finite():
     """PolymarketBetEnv subclasses EnvBase directly, not TorchTradeLiveEnv, so it is
-    invisible to the __subclasses__ discovery above."""
+    invisible to the __subclasses__ discovery in test_live_env_base."""
     from unittest.mock import MagicMock
 
     from torchtrade.envs.live.polymarket import PolymarketBetEnv, PolymarketBetEnvConfig

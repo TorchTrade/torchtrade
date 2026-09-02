@@ -239,4 +239,3 @@ class BinanceFuturesTorchTradingEnv(BinanceBaseTorchTradingEnv):
         # action level, and re-size every bar (#414).
         info["target_tol"] = float(self.trader.get_lot_size()["min_qty"])
         return info
-
