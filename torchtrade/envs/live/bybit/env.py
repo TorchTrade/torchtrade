@@ -48,12 +48,12 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
 
     Action Space (Fractional Mode - Default):
     - action = -1.0: 100% short (all-in short)
-    - action = -0.5: 50% short
     - action = 0.0: Market neutral (close all positions)
-    - action = 0.5: 50% long
     - action = 1.0: 100% long (all-in long)
 
-    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Default action_levels: [-1, 0, 1] (short / flat / long). It is a DEFAULT, not a
+    constraint -- pass any monotonic list in [-1.0, 1.0] and its length becomes the
+    Categorical's n, e.g. [-1.0, -0.5, 0.0, 0.5, 1.0] for half-size steps.
     """
 
     def __init__(

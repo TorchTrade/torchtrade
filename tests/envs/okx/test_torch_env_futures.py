@@ -111,14 +111,23 @@ class TestOKXFuturesTorchTradingEnv:
         assert td["market_data_1Minute_10"].shape == (10, 4)
         mock_env_trader.cancel_open_orders.assert_called()
 
-    def test_step_hold_action(self, env):
+    def test_step_hold_action(self, env, mock_env_trader):
         """Test step with hold action produces valid output."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())
+            # Flat, BY VALUE. Hardcoding index 2 meant 0.0 under the old 5-level
+            # default and means a full LONG under [-1, 0, 1] -- so this stopped
+            # testing a hold the moment the defaults were unified (#288).
+            flat = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
             next_td = env.step(action_td)
             assert "reward" in next_td["next"].keys()
             assert "done" in next_td["next"].keys()
+
+            # The assertion this test's NAME promised and never made: it only checked
+            # that keys existed, so a flat action that TRADED passed it. Disabling
+            # the flat branch in the env used to fail nothing (#288).
+            mock_env_trader.trade.assert_not_called()
 
     @pytest.mark.parametrize("level,label", [
         (1, "long"), (-1, "short"),
@@ -136,7 +145,11 @@ class TestOKXFuturesTorchTradingEnv:
         """The done family is asserted by assert_the_step_emits_the_whole_done_family."""
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            next_td = env.step(TensorDict({"action": torch.tensor(2)}, batch_size=()))
+            # Flat, BY VALUE. Hardcoding index 2 meant 0.0 under the old 5-level
+            # default and means a full LONG under [-1, 0, 1] -- so this stopped
+            # testing a hold the moment the defaults were unified (#288).
+            flat = env.action_levels.index(0)
+            next_td = env.step(TensorDict({"action": torch.tensor(flat)}, batch_size=()))
             assert next_td["next"]["reward"].shape == (1,)
 
     @pytest.mark.parametrize("done_on_bankruptcy,expected_done", [

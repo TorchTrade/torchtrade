@@ -27,6 +27,8 @@ class BitgetFuturesTradingEnvConfig(BaseFuturesTradingConfig):
 
     margin_mode: MarginMode = MarginMode.ISOLATED
     position_mode: PositionMode = PositionMode.ONE_WAY
+    # V2 API: USDT-FUTURES, COIN-FUTURES, USDC-FUTURES. A bare str with no
+    # validator, so this comment is where the legal values live.
     product_type: str = "USDT-FUTURES"
 
     _normalize_timeframes = staticmethod(normalize_bitget_timeframe_config)
@@ -50,15 +52,15 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
     Action values in range [-1.0, 1.0]:
 
     - action = -1.0: 100% short (all-in short)
-    - action = -0.5: 50% short
     - action = 0.0: Market neutral (close all positions, stay in cash)
-    - action = 0.5: 50% long
     - action = 1.0: 100% long (all-in long)
 
     Position sizing formula:
         position_size = (balance × |action| × leverage) / price
 
-    Default action_levels: [-1.0, -0.5, 0.0, 0.5, 1.0]
+    Default action_levels: [-1, 0, 1] (short / flat / long). It is a DEFAULT, not a
+    constraint -- pass any monotonic list in [-1.0, 1.0] and its length becomes the
+    Categorical's n, e.g. [-1.0, -0.5, 0.0, 0.5, 1.0] for half-size steps.
     Custom levels supported: e.g., [-1, -0.3, -0.1, 0, 0.1, 0.3, 1]
 
     Leverage Design:

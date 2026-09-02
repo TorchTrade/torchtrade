@@ -648,12 +648,11 @@ def _replay_env(env_cls, config_cls, replay_df, **config_kw):
     Eight venue test classes built this identically, differing only in the two classes
     and the config values -- which are exactly the two things this takes as arguments.
     """
-    from unittest.mock import patch
-
     from torchtrade.envs.replay import ReplayObserver, ReplayOrderExecutor
 
     config = config_cls(
-        time_frames=["1m"], window_sizes=[10], execute_on="1m", leverage=5, **config_kw
+        **{"time_frames": ["1m"], "window_sizes": [10], "execute_on": "1m",
+           "leverage": 5, **config_kw}   # merged, so a caller may override any of them
     )
     executor = ReplayOrderExecutor(initial_balance=10000.0, leverage=5)
     observer = ReplayObserver(
@@ -676,10 +675,6 @@ def assert_a_replay_episode_runs(env_cls, config_cls, replay_df, *, actions, ste
     action LEVELS and the SLTP ones can cycle bracket indices -- the one thing that
     genuinely differed between the eight copies.
     """
-    from unittest.mock import patch
-
-    import torch
-
     env, executor = _replay_env(env_cls, config_cls, replay_df, **config_kw)
     with patch.object(env, "_wait_for_next_timestamp"):
         td = env.reset()
@@ -695,7 +690,6 @@ def assert_a_replay_episode_runs(env_cls, config_cls, replay_df, *, actions, ste
                 break
 
     assert executor.current_price > 0
-    return env, executor
 
 
 def assert_the_replay_portfolio_tracks_price(env_cls, config_cls, replay_df, **config_kw):
@@ -704,10 +698,6 @@ def assert_the_replay_portfolio_tracks_price(env_cls, config_cls, replay_df, **c
     A static value is the failure this catches: an env that never re-reads the mark
     reports the same equity every bar, which looks like a working episode.
     """
-    from unittest.mock import patch
-
-    import torch
-
     env, executor = _replay_env(env_cls, config_cls, replay_df, **config_kw)
     with patch.object(env, "_wait_for_next_timestamp"):
         td = env.reset()

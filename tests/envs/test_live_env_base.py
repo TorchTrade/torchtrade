@@ -3817,6 +3817,31 @@ def test_every_plain_config_runs_the_shared_post_init(config_cls):
     )
 
 
+def test_no_venue_defaults_to_cross_margin():
+    """The default margin mode is a MONEY decision, and nothing pinned its VALUE.
+
+    Folding the four configs, I changed okx's default from ISOLATED to CROSS by mistake
+    and the whole suite stayed green: the existing guard asserts the field's NAME is
+    spelled the same everywhere, and `_PLAIN_VENUE_FIELDS` deliberately treats the value
+    as venue business. Cross margin backs the position with the entire account balance
+    rather than the position's own margin, so it is not a default anything should acquire
+    silently -- least of all from a deduplication (#288).
+
+    Both config families, because okx's plain and SLTP twins had already disagreed for
+    the length of one commit.
+    """
+    from torchtrade.envs.core.common_types import MarginMode as SharedMarginMode
+
+    for family in (PLAIN_CONFIGS, SLTP_CONFIGS):
+        for param in family:
+            cfg = param.values[0]
+            mode = cfg().margin_mode
+            assert mode.name == SharedMarginMode.ISOLATED.name, (
+                f"{cfg.__name__} defaults to {mode.name}; isolated margin is the default "
+                f"every venue ships, and cross exposes the whole balance"
+            )
+
+
 def test_every_plain_config_defaults_to_the_same_action_space():
     """One unset config, one `action_spec.n`, on every venue.
 

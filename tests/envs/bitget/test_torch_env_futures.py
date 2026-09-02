@@ -197,13 +197,22 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # Hold/Close (0.0)
+            # Flat, BY VALUE. Hardcoding index 2 meant 0.0 under the old 5-level
+            # default and means a full LONG under [-1, 0, 1] -- so this stopped
+            # testing a hold the moment the defaults were unified (#288).
+            flat = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
             next_td = env.step(action_td)
 
             # TorchRL step returns results under "next" key
             assert "reward" in next_td["next"].keys()
             assert "done" in next_td["next"].keys()
             assert "account_state" in next_td["next"].keys()
+
+            # The assertion this test's NAME promised and never made: it only checked
+            # that keys existed, so a flat action that TRADED passed it. Disabling
+            # the flat branch in the env used to fail nothing (#288).
+            mock_trader.trade.assert_not_called()
 
     def test_step_long_action(self, env, mock_trader):
         """Test step with long action."""
@@ -232,7 +241,11 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
+            # Flat, BY VALUE. Hardcoding index 2 meant 0.0 under the old 5-level
+            # default and means a full LONG under [-1, 0, 1] -- so this stopped
+            # testing a hold the moment the defaults were unified (#288).
+            flat = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
             next_td = env.step(action_td)
 
             reward = next_td["next"]["reward"]
@@ -690,7 +703,11 @@ class TestBitgetFuturesTorchTradingEnvIntegration:
         td = env.reset()
         assert "account_state" in td.keys()
 
-        action_td = TensorDict({"action": torch.tensor(2)}, batch_size=())  # 0.0
+        # Flat, BY VALUE. Hardcoding index 2 meant 0.0 under the old 5-level
+        # default and means a full LONG under [-1, 0, 1] -- so this stopped
+        # testing a hold the moment the defaults were unified (#288).
+        flat = env.action_levels.index(0)
+        action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
         next_td = env.step(action_td)
         assert "reward" in next_td["next"].keys()
 
