@@ -289,6 +289,45 @@ def test_a_flat_account_is_none_not_a_zero_quantity():
 PLAIN_VENUES = [c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS]
 
 
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+@pytest.mark.parametrize("levels", [[0.0, 1.0], [-1.0, 0.0, 1.0], [-1.0, -0.5, 0.0, 0.5, 1.0]],
+                         ids=["two", "three", "five"])
+def test_a_plain_env_sizes_its_action_spec_from_the_config_it_was_given(venue, levels):
+    """`action_spec.n` is DERIVED, not a constant that happens to match today.
+
+    Nothing constructed a plain futures env with non-default `action_levels`, so replacing
+    `Categorical(len(self.action_levels))` with `Categorical(3)` survived the whole suite on
+    main and on this branch -- indistinguishable from the real thing while every venue ships
+    a 3-level default. That is #425 one venue over: a checkpoint binds to `action_spec.n`.
+    """
+    env, _ = _real_futures_env(budget=0, venue=venue, action_levels=levels)
+
+    assert env.action_levels == levels
+    assert env.action_spec.n == len(levels), (
+        f"{venue} built a {env.action_spec.n}-action space from {len(levels)} levels"
+    )
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+def test_a_plain_env_keeps_the_reward_function_it_was_handed(venue):
+    """`reward_function or log_return_reward` had no test on the left of the `or`.
+
+    Dropping the caller's function entirely -- `self.reward_function = log_return_reward`,
+    unconditionally -- failed 0 of 3718 tests, on main and here. A silently ignored reward
+    function trains against a different objective than the one that was asked for.
+    """
+    def a_custom_reward(history):
+        return 0.0
+
+    env, _ = _real_futures_env(budget=0, venue=venue, reward_function=a_custom_reward)
+
+    assert env.reward_function is a_custom_reward, (
+        f"{venue} replaced the caller's reward function with {env.reward_function}"
+    )
+
+
+
+
 def _drive(venue, actions, prices, *, flatten_before_step=None, **config_kw):
     """Step `actions` at `prices`, mirroring each fill back so venue and env agree.
 
