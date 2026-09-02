@@ -3852,7 +3852,9 @@ def test_every_plain_config_defaults_to_the_same_action_space():
     """
     levels = {c.values[0].__name__: c.values[0]().action_levels for c in PLAIN_CONFIGS}
     assert len(set(map(tuple, levels.values()))) == 1, levels
-    assert next(iter(levels.values())) == build_default_action_levels(allow_short=True)
+    # A LITERAL, not `build_default_action_levels(...)`: comparing the helper's output
+    # against itself is true by construction and cannot see the default change.
+    assert next(iter(levels.values())) == [-1, 0, 1]
 
 
 @pytest.mark.parametrize("config_cls", SLTP_CONFIGS)
@@ -4414,17 +4416,17 @@ def test_a_recovered_venue_does_not_truncate_the_next_episode():
         ), observer=observer, trader=trader)
 
         td = env.reset()
-        td = env.step(td.set("action", torch.tensor(1)))["next"]
+        td = env.step(td.set("action", torch.tensor(env.action_levels.index(0))))["next"]
         trader.get_status.side_effect = PositionUnknownError("down")
         for _ in range(2):
             td = env.step(td.exclude("done", "terminated", "truncated", "reward")
-                          .set("action", torch.tensor(1)))["next"]
+                          .set("action", torch.tensor(env.action_levels.index(0))))["next"]
         assert bool(td["truncated"]), "setup: the outage should have truncated"
 
         trader.get_status.side_effect = None          # venue recovers
         fresh = env.reset()
         assert env.consecutive_unknown_status == 0
-        nxt = env.step(fresh.set("action", torch.tensor(1)))["next"]
+        nxt = env.step(fresh.set("action", torch.tensor(env.action_levels.index(0))))["next"]
 
     assert not bool(nxt["truncated"]), (
         "the new episode truncated on its first step: the outage counter survived reset"

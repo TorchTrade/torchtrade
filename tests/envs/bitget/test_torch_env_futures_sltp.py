@@ -989,6 +989,9 @@ class TestWithReplayData:
 
         assert_the_replay_portfolio_tracks_price(
             BitgetFuturesSLTPTorchTradingEnv, BitgetFuturesSLTPTradingEnvConfig, replay_df, symbol="BTCUSDT",
+            # SLTP action map: 0 is HOLD, 1 the first bracket. Stated, not assumed --
+            # the helper used to hardcode these and was silently wrong off-SLTP.
+            open_action=1, hold_action=0,
             stoploss_levels=(-0.05,), takeprofit_levels=(0.05,),
             trade_mode="quantity", quantity_per_trade=0.01,
         )

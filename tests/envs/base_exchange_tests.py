@@ -694,23 +694,34 @@ def assert_a_replay_episode_runs(env_cls, config_cls, replay_df, *, actions, ste
     assert executor.current_price > 0
 
 
-def assert_the_replay_portfolio_tracks_price(env_cls, config_cls, replay_df, **config_kw):
+def assert_the_replay_portfolio_tracks_price(env_cls, config_cls, replay_df, *,
+                                             open_action, hold_action, **config_kw):
     """Open a position, hold, and require the portfolio value to MOVE.
 
     A static value is the failure this catches: an env that never re-reads the mark
     reports the same equity every bar, which looks like a working episode.
+
+    The two actions are ARGUMENTS, not literals. Hardcoding 1=open / 0=hold was correct
+    for the four SLTP callers and silently wrong for anything else: driven with a plain
+    env under [-1, 0, 1], action 1 is FLAT (so nothing opens) and action 0 is a full
+    SHORT held ten times -- the balance moves, the assertion passes, and the helper
+    reports success having measured a maximum short it never meant to open (#288).
     """
     env, executor = _replay_env(env_cls, config_cls, replay_df, **config_kw)
     with patch.object(env, "_wait_for_next_timestamp"):
         td = env.reset()
         action_td = td.clone()
-        action_td["action"] = torch.tensor(1)          # open
+        action_td["action"] = torch.tensor(open_action)
         td = env.step(action_td)["next"]
+        assert executor.get_status()["position_status"] is not None, (
+            "the 'open' action opened nothing; the rest of this test would measure a "
+            "position it never took"
+        )
 
         balances = []
         for _ in range(10):
             action_td = td.clone()
-            action_td["action"] = torch.tensor(0)      # hold
+            action_td["action"] = torch.tensor(hold_action)
             td = env.step(action_td)["next"]
             balances.append(executor.get_account_balance()["total_wallet_balance"])
 

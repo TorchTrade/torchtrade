@@ -308,7 +308,7 @@ class TestBitgetFuturesTorchTradingEnv:
             # so assert_called_once() counts only what _step does.
             mock_trader.close_position.reset_mock()
 
-            # Fractional action levels: [0=-1.0, 1=-0.5, 2=0.0, 3=0.5, 4=1.0]
+            # Action levels default to [-1, 0, 1]; index by value, not position.
             # Level 0.0 -> close the open position.
             flat_idx = env.action_levels.index(0)
             action_td = TensorDict({"action": torch.tensor(flat_idx)}, batch_size=())
@@ -486,7 +486,7 @@ class TestBitgetFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             mock_trader.get_status = MagicMock(return_value=status(0.01))
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            long_idx = len(env.action_levels) - 1     # index 1 is FLAT under the [-1, 0, 1] default (#288)
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
 
             for _ in range(5):                       # age a real position
@@ -520,7 +520,7 @@ class TestBitgetFuturesTorchTradingEnv:
 
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
-            long_idx = len(env.action_levels) - 1     # index 1 is a half SHORT in these fixtures
+            long_idx = len(env.action_levels) - 1     # index 1 is FLAT under the [-1, 0, 1] default (#288)
             for _ in range(5):
                 env.step(TensorDict({"action": torch.tensor(long_idx)}, batch_size=()))
             assert env.position.hold_counter > 0      # genuinely aged

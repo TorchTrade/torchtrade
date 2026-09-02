@@ -229,13 +229,20 @@ class TestBinanceFuturesTorchTradingEnv:
         with patch.object(env, "_wait_for_next_timestamp"):
             env.reset()
 
-            action_td = TensorDict({"action": torch.tensor(1)}, batch_size=())  # Hold
+            # Flat BY VALUE, like its three siblings. binance was left positional because
+            # its default was the one that WON the unification -- which is exactly why it
+            # should end up identical to the others, not exempt (#288).
+            flat = env.action_levels.index(0)
+            action_td = TensorDict({"action": torch.tensor(flat)}, batch_size=())
             next_td = env.step(action_td)
 
-            # TorchRL step returns results under "next" key
             assert "reward" in next_td["next"].keys()
             assert "done" in next_td["next"].keys()
             assert "account_state" in next_td["next"].keys()
+            # The assertion the name always promised: it only checked keys existed.
+            # Defence in depth, not a discriminating pin -- the flat route has FOUR
+            # independent zero-guards, so no single-branch mutation reaches a trade.
+            mock_trader.trade.assert_not_called()
 
     def test_sizing_delegates_rounding_to_the_executor(self, env, mock_trader):
         """#271: the env carried a SECOND LOT_SIZE parser with the bug this PR fixes.
@@ -517,8 +524,10 @@ class TestBinanceFuturesTorchTradingEnv:
             )} if qty else {"position_status": None}
 
         with patch.object(env, "_wait_for_next_timestamp"):
-            long = TensorDict({"action": torch.tensor(2)}, batch_size=())   # levels [-1, 0, 1]
-            flat = TensorDict({"action": torch.tensor(1)}, batch_size=())
+            long = TensorDict({"action": torch.tensor(env.action_levels.index(1))},
+                              batch_size=())
+            flat = TensorDict({"action": torch.tensor(env.action_levels.index(0))},
+                              batch_size=())
 
             mock_trader.get_status = MagicMock(return_value=status(0.01))
             env.reset()
