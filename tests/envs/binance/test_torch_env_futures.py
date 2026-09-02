@@ -24,12 +24,7 @@ class TestBinanceFuturesTorchTradingEnv:
 
     @pytest.fixture
     def mock_observer(self):
-        return a_mock_observer(
-            ["1m_10", "5m_10"],
-            timestamps=True,
-            intervals=["1m", "5m"],
-            window_sizes=[10, 10],
-        )
+        return a_mock_observer(["1m_10", "5m_10"])
 
     @pytest.fixture
     def mock_trader(self):
@@ -430,7 +425,7 @@ class TestBinanceFuturesTorchTradingEnv:
         """
 
         def status(qty):
-            return a_position_status(qty, flat_is_none=True)
+            return a_position_status(qty)
 
         with patch.object(env, "_wait_for_next_timestamp"):
             long = TensorDict({"action": torch.tensor(env.action_levels.index(1))},
@@ -460,7 +455,7 @@ class TestBinanceFuturesTorchTradingEnv:
         """
 
         def status(qty):
-            return a_position_status(qty, flat_is_none=True)
+            return a_position_status(qty)
 
         with patch.object(env, "_wait_for_next_timestamp"):
             long_idx = len(env.action_levels) - 1

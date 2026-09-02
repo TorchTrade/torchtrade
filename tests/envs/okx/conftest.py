@@ -140,7 +140,7 @@ def mock_okx_market_client():
 
 @pytest.fixture
 def mock_env_observer():
-    return a_mock_observer(["1Minute_10"], base=(50000, 50100, 49900, 50050), features=True)
+    return a_mock_observer(["1Minute_10"], base=(50000, 50100, 49900, 50050))
 
 
 @pytest.fixture

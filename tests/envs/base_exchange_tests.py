@@ -17,23 +17,15 @@ from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
 # --- the mocks every venue builds, with the venue's own data at the CALL SITE (#288) -----
-#
-# These were 8 copies of `mock_observer`, 10 of a nested `status`, and a scatter of
-# `mock_observations`/`mock_get_observations`/`mock_obs_zero`. What differed between them
-# was data, not shape: binance and bitget name their timeframes "1m_10" where bybit and okx
-# say "1Minute_10", and a couple of tests need a fixed OHLC bar rather than noise. Passing
-# that in keeps the venue axis these tests exist to cover -- folding it into the helper is
-# how a shared fixture stops testing four venues and starts testing one.
-
-_OBS_FEATURES = {
-    "observation_features": ["feature_close", "feature_open", "feature_high", "feature_low"],
-    "original_features": ["open", "high", "low", "close", "volume"],
-}
+# The keys stay at the call site on purpose: binance and bitget name their timeframes
+# "1m_10" where bybit and okx say "1Minute_10". Folding that in is how a shared fixture
+# stops testing four venues and starts testing one.
 
 
-def some_observations(keys, base=None, timestamps=False):
+def some_observations(keys, base=None):
     """One window per key. `base` is the OHLC bar `return_base_ohlc=True` should yield --
-    a 4-tuple for a fixed bar, or None for noise."""
+    a 4-tuple for a fixed bar, or None for noise. `base_timestamps` rides along with it,
+    as the real observer does (`shared/base_obs.py:287-293` emits both or neither)."""
     def observations(return_base_ohlc=False):
         obs = {k: np.random.randn(10, 4).astype(np.float32) for k in keys}
         if return_base_ohlc:
@@ -41,32 +33,23 @@ def some_observations(keys, base=None, timestamps=False):
                 np.random.randn(10, 4).astype(np.float32) if base is None
                 else np.array([list(base)] * 10, dtype=np.float32)
             )
-            if timestamps:
-                obs["base_timestamps"] = np.arange(10)
+            obs["base_timestamps"] = np.arange(10)
         return obs
     return observations
 
 
-def a_mock_observer(keys, *, base=None, timestamps=False, features=False,
-                    intervals=None, window_sizes=None):
-    """The observer mock, parametrised by what actually differs between the venues."""
+def a_mock_observer(keys, *, base=None):
+    """The observer mock. Features are MIRRORED off the data rather than declared, so the
+    fixture cannot claim a width its own observations contradict (#288)."""
     observer = MagicMock()
     observer.get_keys = MagicMock(return_value=list(keys))
-    observer.get_observations = MagicMock(
-        side_effect=some_observations(keys, base, timestamps))
-    if features:
-        observer.get_features = MagicMock(return_value=dict(_OBS_FEATURES))
-    else:
-        mirror_features_on(observer)
-    if intervals is not None:
-        observer.intervals = intervals
-    if window_sizes is not None:
-        observer.window_sizes = window_sizes
+    observer.get_observations = MagicMock(side_effect=some_observations(keys, base))
+    mirror_features_on(observer)
     return observer
 
 
 def a_mock_futures_trader():
-    """The flat, healthy trader every futures env test starts from."""
+    """The flat, healthy trader a futures env test starts from."""
     trader = MagicMock()
     trader.cancel_open_orders = MagicMock(return_value=True)
     trader.close_position = MagicMock(return_value=True)
@@ -96,16 +79,15 @@ def add_custom_features(df):
     return df
 
 
-def a_position_status(qty, *, notional=500.0, entry=50000.0, mark=50000.0, leverage=5,
-                      liquidation=45000.0, flat_is_none=False):
+def a_position_status(qty, *, notional=500.0, mark=50000.0, liquidation=45000.0):
     """What `trader.get_status()` returns. `PositionStatus` is ONE class for all four
-    venues (`core.common_types`), so the per-venue import these copies each carried was
-    itself the duplication."""
-    if flat_is_none and not qty:
+    venues (`core.common_types`), so the per-venue import these copies carried was itself
+    the duplication. `qty=None` is a flat account, which is what the venues report."""
+    if qty is None:
         return {"position_status": None}
     return {"position_status": PositionStatus(
-        qty=qty, notional_value=notional, entry_price=entry, unrealized_pnl=0.0,
-        unrealized_pnl_pct=0.0, mark_price=mark, leverage=leverage,
+        qty=qty, notional_value=notional, entry_price=50000.0, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=mark, leverage=5,
         margin_mode="isolated", liquidation_price=liquidation,
     )}
 
