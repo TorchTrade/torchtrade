@@ -315,6 +315,24 @@ def test_a_plain_env_sizes_its_action_spec_from_the_config_it_was_given(venue, l
 
 
 @pytest.mark.parametrize("venue", PLAIN_VENUES)
+@pytest.mark.parametrize("hold", [True, False], ids=["with-hold", "no-hold"])
+def test_the_hold_action_is_index_zero_only_when_the_config_asks_for_it(venue, hold):
+    """`include_hold_action` reached the shared map builder untested on every live venue.
+
+    Hardcoding it to True failed 0 of 4750 tests. It is not a cosmetic flag: with hold off,
+    HOLD leaves index 0 and EVERY index shifts down by one, so a policy trained without it
+    reads live action 0 as "open a long bracket" rather than "do nothing". That is #418's
+    shape (a map that threw the side away) at the one line this fold made single.
+    """
+    env, _ = _real_futures_env(budget=0, venue=venue, sltp=True, include_hold_action=hold)
+
+    assert (env.action_map[0] == (None, None, None)) is hold, (
+        f"{venue} action_map[0] is {env.action_map[0]} with include_hold_action={hold}"
+    )
+    assert env.action_spec.n == len(env.action_map)
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
 @pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
 def test_a_live_env_keeps_the_reward_function_it_was_handed(venue, sltp):
     """`reward_function or log_return_reward` had no test on the left of the `or`.
@@ -5729,6 +5747,41 @@ def test_no_futures_env_reforks_a_shared_step_or_reset(cls, owner, method):
         f"than {owner.__name__}.{method}; a private copy is where a shared fix silently "
         f"fails to land"
     )
+
+
+def test_every_live_env_actually_calls_its_shared_initialiser():
+    """The ownership table cannot see a leaf that stops CALLING the shared method.
+
+    `getattr(cls, m) is getattr(owner, m)` is the right check for `_step`/`_reset`, which
+    the framework dispatches. It is a no-op for an initialiser the leaf calls explicitly: a
+    venue that inlines a faithful copy still RESOLVES to the shared one, so the table stays
+    green while the fold silently stops applying to it. Verified -- re-forking bybit's SLTP
+    tail that way passed all 4749 tests.
+
+    AST, not substring, for the reason the guard below records: a comment mentioning the
+    name would satisfy a grep.
+    """
+    import ast
+
+    expected = {".env": "_init_action_space", ".env_sltp": "_init_bracket_action_space"}
+    checked = 0
+    for env_cls in LIVE_ENVS:
+        suffix = next((k for k in expected if env_cls.__module__.endswith(k)), None)
+        if suffix is None or "__init__" not in vars(env_cls):
+            continue
+        want = expected[suffix]
+        called = {
+            n.func.attr for n in ast.walk(ast.parse(textwrap.dedent(
+                inspect.getsource(env_cls.__init__))))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert want in called, (
+            f"{env_cls.__name__}.__init__ never calls {want}; it inherits the shared "
+            f"initialiser but builds its own action space, which is the drift the fold "
+            f"exists to remove"
+        )
+        checked += 1
+    assert checked == 10, f"expected 5 plain + 5 SLTP leaves, checked {checked}"
 
 
 def test_no_sltp_env_writes_the_dead_position_closed_field():
