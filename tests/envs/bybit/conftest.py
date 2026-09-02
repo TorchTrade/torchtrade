@@ -1,6 +1,6 @@
 """Shared test fixtures for Bybit tests."""
 
-import numpy as np
+from tests.envs.base_exchange_tests import a_mock_futures_trader, a_mock_observer
 import pytest
 from unittest.mock import MagicMock
 
@@ -126,43 +126,12 @@ def mock_pybit_client():
 
 @pytest.fixture
 def mock_env_observer():
-    """Create a mock observer for env tests (single timeframe)."""
-    observer = MagicMock()
-    observer.get_keys = MagicMock(return_value=["1Minute_10"])
-
-    def mock_observations(return_base_ohlc=False):
-        obs = {"1Minute_10": np.random.randn(10, 4).astype(np.float32)}
-        if return_base_ohlc:
-            obs["base_features"] = np.array(
-                [[50000, 50100, 49900, 50050]] * 10, dtype=np.float32
-            )
-        return obs
-
-    observer.get_observations = MagicMock(side_effect=mock_observations)
-    observer.get_features = MagicMock(return_value={
-        "observation_features": ["feature_close", "feature_open", "feature_high", "feature_low"],
-        "original_features": ["open", "high", "low", "close", "volume"],
-    })
-    return observer
+    return a_mock_observer(["1Minute_10"], base=(50000, 50100, 49900, 50050))
 
 
 @pytest.fixture
 def mock_env_trader():
-    """Create a mock trader for env tests."""
-    trader = MagicMock()
-    trader.cancel_open_orders = MagicMock(return_value=True)
-    trader.close_position = MagicMock(return_value=True)
-    trader.get_account_balance = MagicMock(return_value={
-        "total_wallet_balance": 1000.0,
-        "available_balance": 900.0,
-        "total_unrealized_profit": 0.0,
-        "total_margin_balance": 1000.0,
-    })
-    trader.get_mark_price = MagicMock(return_value=50000.0)
-    trader.get_status = MagicMock(return_value={"position_status": None})
-    trader.trade = MagicMock(return_value=True)
-    trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
-    return trader
+    return a_mock_futures_trader()
 
 
 @pytest.fixture

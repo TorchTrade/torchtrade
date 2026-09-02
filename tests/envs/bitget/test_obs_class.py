@@ -10,7 +10,7 @@ import numpy as np
 from unittest.mock import MagicMock
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
-from tests.envs.base_exchange_tests import BaseObservationClassTests
+from tests.envs.base_exchange_tests import BaseObservationClassTests, add_custom_features
 
 
 def _make_bitget_client():
@@ -98,21 +98,10 @@ class TestBitgetObservationClass(BaseObservationClassTests):
 
     def test_custom_preprocessing_five_features(self, mock_ccxt_client):
         """Custom preprocessing adding OHLC-derived + custom feature -> 5 cols."""
-        def custom_preprocess(df):
-            df = df.copy()
-            df.dropna(inplace=True)
-            df.drop_duplicates(inplace=True)
-            df["feature_close"] = df["close"].pct_change().fillna(0)
-            df["feature_open"] = df["open"] / df["close"]
-            df["feature_high"] = df["high"] / df["close"]
-            df["feature_low"] = df["low"] / df["close"]
-            df["feature_custom"] = df["close"] * 2
-            df.dropna(inplace=True)
-            return df
 
         observer = BitgetObservationClass(
             symbol="BTC/USDT:USDT", time_frames=TimeFrame(1, TimeFrameUnit.Minute),
-            window_sizes=10, feature_preprocessing_fn=custom_preprocess, client=mock_ccxt_client)
+            window_sizes=10, feature_preprocessing_fn=add_custom_features, client=mock_ccxt_client)
         assert observer.get_observations()["1Minute_10"].shape[1] == 5
 
     def test_get_features_names(self, observer_single):

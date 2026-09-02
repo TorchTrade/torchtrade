@@ -3,14 +3,15 @@
 import pytest
 
 from tests.envs.base_exchange_tests import (
+    a_mock_futures_trader,
+    a_mock_observer,
+    a_position_status,
     INVALID_ACTIONS,
     assert_an_invalid_action_cannot_move_an_open_position,
     assert_an_invalid_action_raises_before_trading,
-    mirror_features_on,
 )
 import torch
 from torchrl.envs.utils import check_env_specs
-import numpy as np
 from unittest.mock import MagicMock, patch
 from tensordict import TensorDict
 
@@ -22,56 +23,12 @@ class TestBitgetFuturesTorchTradingEnv:
 
     @pytest.fixture
     def mock_observer(self):
-        """Create a mock observer."""
-        observer = MagicMock()
-
-        # Mock get_keys
-        observer.get_keys = MagicMock(return_value=["1m_10", "5m_10"])
-
-        # Mock get_observations
-        def mock_observations(return_base_ohlc=False):
-            obs = {
-                "1m_10": np.random.randn(10, 4).astype(np.float32),
-                "5m_10": np.random.randn(10, 4).astype(np.float32),
-            }
-            if return_base_ohlc:
-                obs["base_features"] = np.random.randn(10, 4).astype(np.float32)
-                obs["base_timestamps"] = np.arange(10)
-            return obs
-
-        observer.get_observations = MagicMock(side_effect=mock_observations)
-        mirror_features_on(observer)
-        observer.intervals = ["1m", "5m"]
-        observer.window_sizes = [10, 10]
-
-        return observer
+        return a_mock_observer(["1m_10", "5m_10"])
 
     @pytest.fixture
     def mock_trader(self):
-        """Create a mock trader."""
-        trader = MagicMock()
-
-        # Mock methods
-        trader.cancel_open_orders = MagicMock(return_value=True)
-        trader.close_position = MagicMock(return_value=True)
-
-        trader.get_account_balance = MagicMock(return_value={
-            "total_wallet_balance": 1000.0,
-            "available_balance": 900.0,
-            "total_unrealized_profit": 0.0,
-            "total_margin_balance": 1000.0,
-        })
-
-        trader.get_mark_price = MagicMock(return_value=50000.0)
-        trader.get_lot_size = MagicMock(return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
+        trader = a_mock_futures_trader()
         trader._round_amount = MagicMock(side_effect=lambda amount: amount)
-
-        trader.get_status = MagicMock(return_value={
-            "position_status": None,
-        })
-
-        trader.trade = MagicMock(return_value=True)
-
         return trader
 
     @pytest.fixture
@@ -435,17 +392,9 @@ class TestBitgetFuturesTorchTradingEnv:
     def test_dust_between_positions_does_not_age_the_next_one(self, env, mock_trader):
         """A residual left between two positions must not carry the old age into the new one.
         """
-        from torchtrade.envs.live.bitget.order_executor import PositionStatus
-
-        def status(qty):
-            return {"position_status": PositionStatus(
-                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_mode="isolated", liquidation_price=45000.0,
-            )}
 
         with patch.object(env, "_wait_for_next_timestamp"):
-            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))
             env.reset()
             long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
@@ -453,10 +402,10 @@ class TestBitgetFuturesTorchTradingEnv:
             for _ in range(5):                       # age a real position
                 env.step(long)
 
-            mock_trader.get_status = MagicMock(return_value=status(1e-12))   # closed -> dust
+            mock_trader.get_status = MagicMock(return_value=a_position_status(1e-12))   # closed -> dust
             env.step(long)
 
-            mock_trader.get_status = MagicMock(return_value=status(0.01))    # a NEW position
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))    # a NEW position
             td = env.step(long)
 
         holding_time = td["next"]["account_state"][3].item()
@@ -515,27 +464,19 @@ class TestBitgetFuturesTorchTradingEnv:
         The sync detects the close and lets the guard re-enter -- but if it does not discard
         hold_counter, the policy is handed a brand-new position as N+1 bars old.
         """
-        from torchtrade.envs.live.bitget.order_executor import PositionStatus
-
-        def status(qty):
-            return {"position_status": PositionStatus(
-                qty=qty, notional_value=500.0, entry_price=50000.0, unrealized_pnl=0.0,
-                unrealized_pnl_pct=0.0, mark_price=50000.0, leverage=5,
-                margin_mode="isolated", liquidation_price=45000.0,
-            )} if qty else {"position_status": None}
 
         with patch.object(env, "_wait_for_next_timestamp"):
             long_idx = len(env.action_levels) - 1
             long = TensorDict({"action": torch.tensor(long_idx)}, batch_size=())
 
-            mock_trader.get_status = MagicMock(return_value=status(0.01))
+            mock_trader.get_status = MagicMock(return_value=a_position_status(0.01))
             env.reset()
             for _ in range(5):
                 env.step(long)
             aged = env.position.hold_counter
             assert aged > 1
 
-            mock_trader.get_status = MagicMock(return_value=status(None))   # liquidated
+            mock_trader.get_status = MagicMock(return_value=a_position_status(None))   # liquidated
             td = env.step(long)                                          # same-step re-entry
 
         assert td["next"]["account_state"][3].item() <= 1.0, (
@@ -586,13 +527,7 @@ class TestBitgetInitCleanup:
 
     @pytest.fixture
     def mock_observer(self):
-        observer = MagicMock()
-        observer.get_keys = MagicMock(return_value=["1m_10"])
-        observer.get_observations = MagicMock(return_value={
-            "1m_10": np.random.randn(10, 4).astype(np.float32),
-        })
-        mirror_features_on(observer)
-        return observer
+        return a_mock_observer(["1m_10"])
 
     @pytest.fixture
     def mock_trader(self):

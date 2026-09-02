@@ -12,22 +12,103 @@ import torch
 from tensordict import TensorDict
 from unittest.mock import MagicMock, patch
 from abc import ABC, abstractmethod
+from torchtrade.envs.core.common_types import PositionStatus
 from torchtrade.envs.utils.timeframe import TimeFrame, TimeFrameUnit
 
 
-def mirror_features_on(observer):
-    """Derive a mock observer's get_features from the observations it actually emits.
+# --- the mocks every venue builds, with the venue's own data at the CALL SITE (#288) -----
+# The keys stay at the call site on purpose: binance and bitget name their timeframes
+# "1m_10" where bybit and okx say "1Minute_10". Folding that in is how a shared fixture
+# stops testing four venues and starts testing one.
+
+
+WINDOW = 10   # every fixture below emits a 10-bar window
+
+
+def some_observations(keys, *, base=None):
+    """One window per key. `base` is the OHLC bar `return_base_ohlc=True` should yield --
+    a 4-tuple for a fixed bar, or None for noise. `base=None` is for SHAPE-only tests: the
+    close can come out negative or zero, which an SLTP test pricing off it would flake on. `base_timestamps` rides along with it,
+    as the real observer does (`shared/base_obs.py:287-293` emits both or neither)."""
+    def observations(return_base_ohlc=False):
+        obs = {k: np.random.randn(WINDOW, 4).astype(np.float32) for k in keys}
+        if return_base_ohlc:
+            # Each row is `base` faded 0.1% per bar into the past, so the LAST row is
+            # exactly `base`. Ten identical rows made "the last candle" unobservable:
+            # reading `base_features[0]` instead of `[-1]` passed the whole suite (#288).
+            fade = 1 - 0.001 * np.arange(WINDOW)[::-1]          # [0.991 ... 1.0]
+            obs["base_features"] = (
+                np.random.randn(WINDOW, 4).astype(np.float32) if base is None
+                else np.outer(fade, base).astype(np.float32)
+            )
+            obs["base_timestamps"] = np.arange(WINDOW)
+        return obs
+    return observations
+
+
+def a_mock_observer(keys, *, base=None):
+    """The observer mock, with its feature list MIRRORED off the data it actually emits.
 
     The envs build observation_spec from get_features() (#288), so a fixture that stubs
     only get_observations declares width 0 against emitted 4 -- which is exactly what the
-    binance and bitget check_env_specs tests caught when the switch landed. Deriving
-    means a fixture cannot declare a width its own data contradicts.
+    binance and bitget check_env_specs tests caught when the switch landed. Deriving means
+    a fixture cannot declare a width its own data contradicts.
     """
-    width = next(iter(observer.get_observations().values())).shape[1]
+    observations = some_observations(keys, base=base)
+    width = next(iter(observations().values())).shape[1]
+    observer = MagicMock()
+    observer.get_keys = MagicMock(return_value=list(keys))
+    observer.get_observations = MagicMock(side_effect=observations)
     observer.get_features = MagicMock(return_value={
         "observation_features": [f"feature_{i}" for i in range(width)],
         "original_features": [],
     })
+    return observer
+
+
+def a_mock_futures_trader():
+    """The flat, healthy trader a futures env test starts from."""
+    trader = MagicMock()
+    trader.cancel_open_orders = MagicMock(return_value=True)
+    trader.close_position = MagicMock(return_value=True)
+    trader.get_account_balance = MagicMock(return_value={
+        "total_wallet_balance": 1000.0, "available_balance": 900.0,
+        "total_unrealized_profit": 0.0, "total_margin_balance": 1000.0,
+    })
+    trader.get_mark_price = MagicMock(return_value=50000.0)
+    trader.get_status = MagicMock(return_value={"position_status": None})
+    trader.trade = MagicMock(return_value=True)
+    trader.get_lot_size = MagicMock(
+        return_value={"min_qty": 0.001, "qty_step": 0.001, "min_notional": 0.0})
+    return trader
+
+
+def add_custom_features(df):
+    """The `feature_*` preprocessing three venues' observation tests each defined."""
+    df = df.copy()
+    df.dropna(inplace=True)
+    df.drop_duplicates(inplace=True)
+    df["feature_close"] = df["close"].pct_change().fillna(0)
+    df["feature_open"] = df["open"] / df["close"]
+    df["feature_high"] = df["high"] / df["close"]
+    df["feature_low"] = df["low"] / df["close"]
+    df["feature_custom"] = df["close"] * 2
+    df.dropna(inplace=True)
+    return df
+
+
+def a_position_status(qty, *, notional=500.0, mark=50000.0, liquidation=45000.0):
+    """What `trader.get_status()` returns. `PositionStatus` is ONE class for all four
+    venues (`core.common_types`), so the per-venue import these copies carried was itself
+    the duplication. `qty=None` is a flat account, which is what the venues report --
+    NOT `qty=0`, which is an open position of size zero and reaches the dust rule."""
+    if qty is None:
+        return {"position_status": None}
+    return {"position_status": PositionStatus(
+        qty=qty, notional_value=notional, entry_price=50000.0, unrealized_pnl=0.0,
+        unrealized_pnl_pct=0.0, mark_price=mark, leverage=5,
+        margin_mode="isolated", liquidation_price=liquidation,
+    )}
 
 
 class BaseObservationClassTests(ABC):

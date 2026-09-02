@@ -44,7 +44,7 @@ from torchtrade.envs.utils.liquidation import (
     cross_liquidation_price,
     isolated_liquidation_price,
 )
-from tests.envs.base_exchange_tests import _sole, wire_outage_state
+from tests.envs.base_exchange_tests import _sole, a_position_status, some_observations, wire_outage_state
 from tests.envs.test_live_observation_failsafe import _real_futures_env
 from torchtrade.envs.core.common_types import PositionStatus
 from torchtrade.envs.core.state import (
@@ -249,6 +249,39 @@ def test_no_futures_env_reforks_the_shared_observation(env_cls, method):
         f"{env_cls.__name__} re-forks {method} instead of sharing TorchTradeFuturesLiveEnv's. "
         f"Drop the override, or the unification no longer covers it."
     )
+
+
+# --- the shared fixture factories, guarded (#288) ----------------------------------------
+
+
+def test_the_mocked_base_window_can_tell_its_last_bar_from_its_first():
+    """The guard on a guard.
+
+    The window used to be ten identical rows, which made "price off the most recent
+    candle" unobservable: reading `base_features[0]` instead of `[-1]` for bracket pricing
+    passed the whole suite. A ramp fixed it -- but nothing stops the ramp being flattened
+    again by widening the window or shrinking the factor until float32 rounds the rows
+    together, and every existing assertion reads the LAST row, which stays right either way.
+    """
+    bar = (50000.0, 50100.0, 49900.0, 50050.0)
+    window = some_observations(["1m_10"], base=bar)(return_base_ohlc=True)["base_features"]
+
+    assert list(window[-1]) == list(bar), "the last row must be the bar the caller asked for"
+    assert not np.array_equal(window[0], window[-1]), (
+        "first and last rows are identical, so nothing can tell which one the code read"
+    )
+
+
+def test_a_flat_account_is_none_not_a_zero_quantity():
+    """`a_position_status` unified two spellings, and only one of them means flat.
+
+    Six of the folded sites treated `0.0` as flat and six treated it as an open position
+    of size zero. The shared rule is `qty is None`; a `0.0` is a real (dust) position that
+    reaches `position_direction_from_status`. No caller passes 0 today, which is exactly
+    why the next one to try it needs this to be stated somewhere executable.
+    """
+    assert a_position_status(None)["position_status"] is None
+    assert a_position_status(0.0)["position_status"].qty == 0.0
 
 
 # --- the trade gate: one implementation, and the behaviour it exists for (#288) ----------
