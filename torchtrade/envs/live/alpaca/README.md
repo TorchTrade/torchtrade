@@ -2,12 +2,8 @@
 
 Live trading integration with Alpaca for **crypto spot** markets.
 
-> **Equities are not supported.** `AlpacaObservationClass` builds a `CryptoBarsRequest`
-> against a `CryptoHistoricalDataClient` (`observation.py`) and there is no
-> `StockHistoricalDataClient` anywhere in this package. The order side uses `TradingClient`,
-> which *would* accept an equity order -- so an env configured with `symbol="AAPL"`
-> constructs successfully and then starves for observations. Adding equities means giving
-> the observer a stock data path first.
+> **Equities are not supported.** `observation.py` fetches crypto bars only. An equity
+> symbol still constructs, because the order client accepts one, and then returns no data.
 
 ## Files
 
@@ -47,8 +43,7 @@ td = env.reset()  # a TensorDict, not a bare array
 
 - **Paper Trading**: Risk-free testing with simulated funds
 - **Fractional Quantities**: crypto orders are not rounded to whole units
-- **Bar Polling**: the observer fetches a date RANGE over REST each step -- there is no
-  WebSocket stream in this package
+- **Bar Polling**: REST, one date-range fetch per step
 - **Crypto Spot**: BTC/USD, ETH/USD and Alpaca's other crypto pairs
 
 ## Configuration
@@ -81,15 +76,13 @@ config = AlpacaTradingEnvConfig(
 - BTC/USD, ETH/USD, etc.
 
 ### US equities
-Not supported -- see the note at the top of this file.
+Not supported. See the note at the top.
 
 Check Alpaca docs for full list: https://alpaca.markets/docs/trading/
 
 ## Market Hours
 
-Alpaca's crypto venue trades 24/7, so there is no session to schedule around. (This file
-used to document equity sessions and an `extended_hours=True` flag; that flag does not
-exist anywhere in this package.)
+Crypto trades 24/7.
 
 ## Order Types
 
@@ -187,16 +180,15 @@ td = env.step(td)
 
 ## API Rate Limits
 
-Alpaca publishes 200 requests/minute for market data, orders and account.
+Alpaca allows 200 requests/minute for market data, orders and account.
 
-**This package does not throttle.** There is no rate limiting anywhere in
-`torchtrade/envs/live/` -- the only sleep in the live path is the bar wait in
-`core/live.py`. One env polling one symbol on a 1-minute bar stays well inside the limit;
-if you run many envs, or a sub-minute `execute_on`, budget the request rate yourself.
+**This package does not throttle.** One env on a 1-minute bar stays well inside that. Many
+envs, or a sub-minute `execute_on`, need your own request budget.
 
 ## Common Issues
 
-**No bars returned**: check the symbol is a crypto pair -- an equity symbol reaches a crypto data client and comes back empty
+**No bars returned**: check the symbol is a crypto pair. An equity symbol reaches a
+crypto data client and comes back empty.
 
 **"Insufficient funds"**: Not enough cash for order
 

@@ -162,30 +162,19 @@ checking by hand:
 - `torchtrade.envs.live.MarginMode` no longer exists. Use `BybitMarginMode`, which is what
   it meant, or the venue module. okx was already aliased this way.
 
-**Migrating from before #425 -- this one breaks checkpoints.** The four plain futures
-configs were folded into `BaseFuturesTradingConfig`, and the default `action_levels` was
-unified to `[-1, 0, 1]`. Before the fold, binance derived its default from
-`build_default_action_levels(allow_short=True)` while **bitget, bybit and okx hard-coded
-`[-1.0, -0.5, 0.0, 0.5, 1.0]`** -- so the same unset config produced a 3-action space on
-one venue and a 5-action space on the other three.
+**Migrating from before #425. This breaks checkpoints on bitget, bybit and okx.** Those
+three defaulted `action_levels` to `[-1.0, -0.5, 0.0, 0.5, 1.0]`; the shared default is
+now `[-1, 0, 1]`, which binance already used. `action_spec.n` sizes the policy head, so a
+5-way head will not load.
 
-`action_spec.n` is what a policy head is sized against, so on those three venues:
-
-- a checkpoint trained before #425 has a **5-way** head and will not load against the
-  3-way default;
-- to keep an existing checkpoint, pass the old list explicitly:
-  `BybitFuturesTradingEnvConfig(action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0], ...)`;
-- to keep the new default, retrain.
-
-binance is unaffected -- its default was already `[-1, 0, 1]`. The default is only a
-default: any list passing `validate_action_levels` (range [-1, 1], distinct, len >= 2)
-still works, and the fold is what makes the four venues agree on what an unset config means.
+To keep an existing checkpoint, pass the old list:
+`BybitFuturesTradingEnvConfig(action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0], ...)`. Otherwise
+retrain.
 
 ```python
-# The four FUTURES venues inherit `BaseFuturesTradingConfig` (`live/shared/futures_config.py`),
-# and their SLTP twins inherit `BaseFuturesSLTPConfig` (`live/shared/sltp_config.py`) -- a
-# venue subclass declares only its own margin surface. Alpaca's two configs are still
-# standalone. What they all have in common:
+# The four futures venues inherit `BaseFuturesTradingConfig`; their SLTP twins inherit
+# `BaseFuturesSLTPConfig` (both in `live/shared/`). A venue subclass declares only its own
+# margin surface. Alpaca's two configs are standalone. Common to all:
 #
 #   symbol, time_frames (a LIST), window_sizes (one per timeframe), execute_on,
 #   action_levels, done_on_bankruptcy, bankrupt_threshold, seed,
@@ -203,11 +192,11 @@ still works, and the fold is what makes the four venues agree on what an unset c
 ### Provider-Specific
 
 Alpaca's are standalone dataclasses. The four futures venues subclass
-`BaseFuturesTradingConfig` / `BaseFuturesSLTPConfig` and declare ONLY the fields below --
-a new venue that re-declares a shared field shadows the base default and stops tracking it,
-which is exactly how the action space came to differ 5-vs-3 between venues (#425).
-`test_every_plain_config_inherits_the_shared_fields` fails if one does. The fields that
-legitimately differ between exchanges:
+`BaseFuturesTradingConfig` / `BaseFuturesSLTPConfig` and declare only the fields below.
+Re-declaring a shared field shadows the base default and stops tracking it;
+`test_every_plain_config_inherits_the_shared_fields` fails if a venue does.
+
+The fields that differ between exchanges:
 
 **Alpaca:**
 ```python
@@ -301,15 +290,12 @@ env = AlpacaSLTPTorchTradingEnv(
 
 ### Error Handling
 
-- **API rate limits**: NOT handled. There is no throttling anywhere in
-  `torchtrade/envs/live/`; the only sleep in the live path is the bar wait in
-  `core/live.py`. Budget your own request rate if you run many envs.
-- **Invalid orders**: the executors RAISE (e.g. `binance/order_executor.py` raises
-  `ValueError` on a sub-minimum quantity). #414 and #420 tightened this deliberately --
-  an order the env believes it placed and the venue rejected is worse than a loud failure.
-- **Position desync**: handled. `_sync_position_from_exchange` reconciles the cache against
-  the venue before the duplicate-action guard, and NaNs the cached level on a divergence so
-  the agent can correct (#243/#245/#276).
+- **API rate limits**: not handled. Budget your own request rate.
+- **Invalid orders**: the executors raise. An order the env thinks it placed and the venue
+  rejected is worse than a loud failure (#414, #420).
+- **Position desync**: handled. `_sync_position_from_exchange` reconciles against the venue
+  before the duplicate-action guard, and clears the cached level on a divergence so the
+  agent can correct (#243).
 
 ## Real-Time Data
 
