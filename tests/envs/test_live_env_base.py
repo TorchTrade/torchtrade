@@ -288,6 +288,69 @@ def test_a_flat_account_is_none_not_a_zero_quantity():
 
 PLAIN_VENUES = [c.__module__.split(".")[-2] for c in PLAIN_FUTURES_ENVS]
 
+# alpaca included: it inherits SLTPMixin and now calls its initialiser too.
+SLTP_ENVS = [c for c in LIVE_ENVS if c.__module__.endswith(".env_sltp")]
+assert len(SLTP_ENVS) == 5, [c.__name__ for c in SLTP_ENVS]
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+# NOT [-1, 0, 1]: that is the default, so `Categorical(3)` hard-coded would satisfy it
+# and the row could not tell derived from constant -- the very thing this test exists for.
+@pytest.mark.parametrize("levels", [[0.0, 1.0], [-1.0, -0.5, 0.0, 0.5, 1.0]],
+                         ids=["two", "five"])
+def test_a_plain_env_sizes_its_action_spec_from_the_config_it_was_given(venue, levels):
+    """`action_spec.n` is DERIVED, not a constant that happens to match today.
+
+    Nothing constructed a plain futures env with non-default `action_levels`, so replacing
+    `Categorical(len(self.action_levels))` with `Categorical(3)` survived the whole suite on
+    main and on this branch -- indistinguishable from the real thing while every venue ships
+    a 3-level default. That is #425 one venue over: a checkpoint binds to `action_spec.n`.
+    """
+    env, _ = _real_futures_env(budget=0, venue=venue, action_levels=levels)
+
+    assert env.action_levels == levels
+    assert env.action_spec.n == len(levels), (
+        f"{venue} built a {env.action_spec.n}-action space from {len(levels)} levels"
+    )
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+@pytest.mark.parametrize("hold", [True, False], ids=["with-hold", "no-hold"])
+def test_the_hold_action_is_index_zero_only_when_the_config_asks_for_it(venue, hold):
+    """`include_hold_action` reached the shared map builder untested on every live venue.
+
+    Hardcoding it to True failed 0 of 4750 tests. It is not a cosmetic flag: with hold off,
+    HOLD leaves index 0 and EVERY index shifts down by one, so a policy trained without it
+    reads live action 0 as "open a long bracket" rather than "do nothing". That is #418's
+    shape (a map that threw the side away) at the one line this fold made single.
+    """
+    env, _ = _real_futures_env(budget=0, venue=venue, sltp=True, include_hold_action=hold)
+
+    assert (env.action_map[0] == (None, None, None)) is hold, (
+        f"{venue} action_map[0] is {env.action_map[0]} with include_hold_action={hold}"
+    )
+    assert env.action_spec.n == len(env.action_map)
+
+
+@pytest.mark.parametrize("venue", PLAIN_VENUES)
+@pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
+def test_a_live_env_keeps_the_reward_function_it_was_handed(venue, sltp):
+    """`reward_function or log_return_reward` had no test on the left of the `or`.
+
+    Dropping the caller's function entirely failed 0 of 3718 tests on the plain path and 0
+    of 4749 on the SLTP one -- both halves of this fold, neither covered. A silently ignored
+    reward function trains against a different objective than the one that was asked for.
+    """
+    def a_custom_reward(history):
+        return 0.0
+
+    env, _ = _real_futures_env(budget=0, venue=venue, sltp=sltp,
+                               reward_function=a_custom_reward)
+
+    assert env.reward_function is a_custom_reward, (
+        f"{venue} replaced the caller's reward function with {env.reward_function}"
+    )
+
 
 def _drive(venue, actions, prices, *, flatten_before_step=None, **config_kw):
     """Step `actions` at `prices`, mirroring each fill back so venue and env agree.
@@ -4773,7 +4836,7 @@ def test_each_venue_builds_its_observer_with_the_arguments_it_needs(venue, expec
     two roles and the other three must not, which is the actual contract.
     """
 
-    # The concrete plain env, not the exchange base: only the leaves assign `action_spec`,
+    # The concrete plain env, not the exchange base: only a leaf runs `_init_action_space`,
     # so a base builds into a half-env that fails later instead of at construction (#288).
     module = importlib.import_module(f"torchtrade.envs.live.{venue}.env")
     cls = _sole(module, "TorchTradingEnv")
@@ -4948,6 +5011,14 @@ _SHARED_METHOD_OWNERSHIP = [
     *((c, TorchTradeLiveEnv, "_record_and_score") for c in STEPPING_ENVS),
     *((c, TorchTradeFuturesLiveEnv, m)
       for c in PLAIN_FUTURES_ENVS for m in ("_step", "_reset", "_execute_trade_if_needed")),
+    # All FIVE plain envs, alpaca included -- it had the same three lines and is the
+    # reason this belongs on TorchTradeLiveEnv rather than the futures base.
+    *((c, TorchTradeLiveEnv, "_init_action_space") for c in NON_SLTP_ENVS),
+    # The bracket twin: bigger than the plain one (it builds the action MAP) and owned by
+    # the mixin that was already in every SLTP MRO. All FIVE, alpaca included -- it is
+    # spot, so it passes `short_positions=False` at the call site, which is where a venue
+    # difference belongs.
+    *((c, SLTPMixin, "_init_bracket_action_space") for c in SLTP_ENVS),
     # binance is absent by design: it EXTENDS the sizing via super() (min-notional refusal
     # and target rounding), which its own behavioural test pins.
     *((c, TorchTradeFuturesLiveEnv, "_calculate_fractional_position")
@@ -4995,6 +5066,8 @@ assert {(owner.__name__, method) for _, owner, method in _SHARED_METHOD_OWNERSHI
     ("TorchTradeFuturesLiveEnv", "_reset"),
     ("TorchTradeFuturesLiveEnv", "_calculate_fractional_position"),
     ("TorchTradeFuturesLiveEnv", "_execute_trade_if_needed"),
+    ("TorchTradeLiveEnv", "_init_action_space"),
+    ("SLTPMixin", "_init_bracket_action_space"),
     ("SLTPMixin", "_step"),
     ("SLTPMixin", "_reset"),
     ("SLTPMixin", "_resolve_action_tuple"),
@@ -5673,6 +5746,34 @@ def test_no_futures_env_reforks_a_shared_step_or_reset(cls, owner, method):
         f"{cls.__name__}.{method} resolves to {getattr(cls, method).__qualname__} rather "
         f"than {owner.__name__}.{method}; a private copy is where a shared fix silently "
         f"fails to land"
+    )
+
+
+@pytest.mark.parametrize("env_cls", STEPPING_ENVS, ids=lambda c: c.__name__)
+def test_every_live_env_actually_calls_its_shared_initialiser(env_cls):
+    """The ownership table cannot see a leaf that stops CALLING the shared method.
+
+    `getattr(cls, m) is getattr(owner, m)` is the right check for `_step`/`_reset`, which
+    the framework dispatches. It is a no-op for an initialiser the leaf calls explicitly: a
+    venue that inlines a faithful copy still RESOLVES to the shared one, so the table stays
+    green while the fold silently stops applying to it. Verified -- re-forking bybit's SLTP
+    tail that way passed all 4749 tests.
+
+    AST, not substring, for the reason the guard below records: a comment mentioning the
+    name would satisfy a grep. Parametrized over STEPPING_ENVS, which already asserts its
+    own length, so a leaf dropping out of discovery fails at collection rather than being
+    skipped silently.
+    """
+    want = "_init_bracket_action_space" if env_cls in SLTP_ENVS else "_init_action_space"
+    called = {
+        n.func.attr for n in ast.walk(ast.parse(textwrap.dedent(
+            inspect.getsource(env_cls.__init__))))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+    }
+    assert want in called, (
+        f"{env_cls.__name__}.__init__ never calls {want}; it inherits the shared "
+        f"initialiser but builds its own action space, which is the drift the fold "
+        f"exists to remove"
     )
 
 

@@ -4,7 +4,6 @@ from torchtrade.envs.utils.precision import decimals_for_step
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict
 
-from torchrl.data import Categorical
 
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import (
@@ -58,11 +57,7 @@ class BybitFuturesTorchTradingEnv(BybitBaseTorchTradingEnv):
     ):
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        self.reward_function = reward_function or log_return_reward
-
-        self.action_levels = config.action_levels
-        self.action_spec = Categorical(len(self.action_levels))
+        self._init_action_space(reward_function)
 
 
     def _execute_fractional_action(

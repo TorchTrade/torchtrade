@@ -22,6 +22,35 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTrading
 from .mocks import MockObserver, MockTrader
 
 
+@pytest.mark.parametrize("sltp", [False, True], ids=["plain", "sltp"])
+def test_alpaca_keeps_the_reward_function_it_was_handed(sltp):
+    """The shared initialisers' one caller the futures harness cannot reach.
+
+    `test_a_live_env_keeps_the_reward_function_it_was_handed` pins this for the four
+    futures venues, but it parametrizes over PLAIN_VENUES, which is futures-only. Dropping
+    `reward_function` at either of alpaca's two call sites failed 0 of 3710 tests, on main
+    and here -- so the venue whose call sites differ most was the one with no argument
+    coverage. The AST guard makes alpaca CALL the shared method; it says nothing about what
+    it passes (#288).
+    """
+    def a_custom_reward(history):
+        return 0.0
+
+    if sltp:
+        from torchtrade.envs.live.alpaca.env_sltp import (
+            AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig)
+        Env, Config = AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
+    else:
+        Env, Config = AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+
+    env = Env(config=Config(symbol="BTC/USD", window_sizes=[10], paper=True),
+              observer=MockObserver(window_sizes=[10]),
+              trader=MockTrader(initial_cash=10000.0),
+              reward_function=a_custom_reward)
+
+    assert env.reward_function is a_custom_reward
+
+
 class TestAlpacaTorchTradingEnvInitialization:
     """Tests for environment initialization."""
 

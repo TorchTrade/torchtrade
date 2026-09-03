@@ -3,8 +3,6 @@ from dataclasses import dataclass
 from typing import Optional, Callable
 
 
-from torchrl.data import Categorical
-
 from torchtrade.envs.live.binance.observation import BinanceObservationClass
 from torchtrade.envs.live.binance.order_executor import (
     BinanceFuturesOrderClass,
@@ -12,7 +10,6 @@ from torchtrade.envs.live.binance.order_executor import (
 )
 from torchtrade.envs.live.binance.utils import normalize_binance_timeframe_config
 from torchtrade.envs.live.binance.base import BinanceBaseTorchTradingEnv
-from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 
 
@@ -83,24 +80,6 @@ class BinanceFuturesSLTPTorchTradingEnv(SLTPMixin, BinanceBaseTorchTradingEnv):
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        # Set reward function
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        self.reward_function = reward_function or log_return_reward
-
-        # Create action map from SL/TP combinations
-        self.stoploss_levels = list(config.stoploss_levels)
-        self.takeprofit_levels = list(config.takeprofit_levels)
-        self.action_map = create_sltp_action_map(
-            self.stoploss_levels,
-            self.takeprofit_levels,
-            include_short_positions=config.include_short_positions,
-            include_hold_action=config.include_hold_action,
-            include_close_action=config.include_close_action
-        )
-
-        # Categorical action spec: 0=HOLD, 1..N = (side, SL, TP) combinations
-        self.action_spec = Categorical(len(self.action_map))
-
-        # Track active SL/TP levels for current position
-        self._reset_sltp_state()
+        self._init_bracket_action_space(
+            reward_function, include_short_positions=config.include_short_positions)
 

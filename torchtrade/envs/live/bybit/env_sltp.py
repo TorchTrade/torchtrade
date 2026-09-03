@@ -3,7 +3,6 @@ from torchtrade.envs.live.shared.sltp_config import BaseFuturesSLTPConfig
 from dataclasses import dataclass
 from typing import Optional, Callable
 
-from torchrl.data import Categorical
 
 from torchtrade.envs.live.bybit.observation import BybitObservationClass
 from torchtrade.envs.live.bybit.order_executor import (
@@ -13,7 +12,6 @@ from torchtrade.envs.live.bybit.order_executor import (
 )
 from torchtrade.envs.live.bybit.utils import normalize_bybit_timeframe_config
 from torchtrade.envs.live.bybit.base import BybitBaseTorchTradingEnv
-from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 
 
@@ -57,22 +55,8 @@ class BybitFuturesSLTPTorchTradingEnv(SLTPMixin, BybitBaseTorchTradingEnv):
     ):
         super().__init__(config, api_key, api_secret, feature_preprocessing_fn, observer, trader)
 
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        self.reward_function = reward_function or log_return_reward
-
-        self.stoploss_levels = list(config.stoploss_levels)
-        self.takeprofit_levels = list(config.takeprofit_levels)
-        self.action_map = create_sltp_action_map(
-            self.stoploss_levels,
-            self.takeprofit_levels,
-            include_short_positions=config.include_short_positions,
-            include_hold_action=config.include_hold_action,
-            include_close_action=config.include_close_action
-        )
-
-        self.action_spec = Categorical(len(self.action_map))
-
-        self._reset_sltp_state()
+        self._init_bracket_action_space(
+            reward_function, include_short_positions=config.include_short_positions)
 
     # `_step` already took the mark under the halt policy; never read again (#295).
     _PRICES_OFF_THREADED_MARK = True

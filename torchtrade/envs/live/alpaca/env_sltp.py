@@ -15,9 +15,7 @@ from torchtrade.envs.live.alpaca.utils import normalize_alpaca_timeframe_config
 from torchtrade.envs.live.alpaca.observation import AlpacaObservationClass
 from torchtrade.envs.live.alpaca.order_executor import AlpacaOrderClass, TradeMode
 from tensordict import TensorDictBase
-from torchrl.data import Categorical
 from torchtrade.envs.live.alpaca.base import AlpacaBaseTorchTradingEnv
-from torchtrade.envs.utils.action_maps import create_sltp_action_map
 from torchtrade.envs.utils.sltp_helpers import calculate_bracket_prices
 from torchtrade.envs.utils.sltp_mixin import SLTPMixin
 
@@ -114,26 +112,7 @@ class AlpacaSLTPTorchTradingEnv(SLTPMixin, AlpacaBaseTorchTradingEnv):
         if self.config.trade_mode == "fractional":
             self.trader.trade_mode = "notional"
 
-        # Set reward function
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        self.reward_function = reward_function or log_return_reward
-
-        # Create action map from SL/TP combinations
-        self.stoploss_levels = list(config.stoploss_levels)
-        self.takeprofit_levels = list(config.takeprofit_levels)
-        self.action_map = create_sltp_action_map(
-            self.stoploss_levels,
-            self.takeprofit_levels,
-            include_short_positions=False,
-            include_hold_action=config.include_hold_action,
-            include_close_action=config.include_close_action,
-        )
-
-        # Categorical action spec: 0=HOLD (if included), 1..N = SL/TP combinations
-        self.action_spec = Categorical(len(self.action_map))
-
-        # Track active SL/TP levels for current position
-        self._reset_sltp_state()
+        self._init_bracket_action_space(reward_function, include_short_positions=False)
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         """Execute one environment step."""

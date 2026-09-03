@@ -150,7 +150,7 @@ VENUES = ["binance", "bitget", "bybit", "okx"]
 
 
 def _real_futures_env(budget, venue="binance", sltp=False, position_status=None,
-                      **config_kw):
+                      reward_function=None, **config_kw):
     """A real futures env on mocks, for any of the four venues.
 
     Parametrised because round 3 fixed the sizing read on all four and tested it on
@@ -210,7 +210,8 @@ def _real_futures_env(budget, venue="binance", sltp=False, position_status=None,
                     execute_on="1m", max_unknown_status_steps=budget,
                     close_position_on_init=False, **config_kw)
     with patch("time.sleep"), patch.object(Env, "_wait_for_next_timestamp"):
-        env = Env(config=config, observer=observer, trader=trader)
+        env = Env(config=config, observer=observer, trader=trader,
+                  reward_function=reward_function)
     env._wait_for_next_timestamp = lambda: None
     return env, trader
 

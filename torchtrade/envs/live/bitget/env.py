@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, Callable, Dict
 
-from torchrl.data import Categorical
 
 from torchtrade.envs.live.bitget.observation import BitgetObservationClass
 from torchtrade.envs.live.bitget.order_executor import (
@@ -95,13 +94,7 @@ class BitgetFuturesTorchTradingEnv(BitgetBaseTorchTradingEnv):
         # Initialize base class (handles observer/trader, obs specs, portfolio value, etc.)
         super().__init__(config, api_key, api_secret, api_passphrase, feature_preprocessing_fn, observer, trader)
 
-        # Set reward function (default to log return reward)
-        from torchtrade.envs.core.default_rewards import log_return_reward
-        self.reward_function = reward_function or log_return_reward
-
-        # Define action space (environment-specific)
-        self.action_levels = config.action_levels
-        self.action_spec = Categorical(len(self.action_levels))
+        self._init_action_space(reward_function)
 
 
     def _execute_fractional_action(

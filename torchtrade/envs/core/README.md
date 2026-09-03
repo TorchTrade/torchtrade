@@ -188,9 +188,11 @@ env = SequentialTradingEnv(
 
 ### Specs
 
-There is no `_make_observation_space` / `_make_action_space` hook, and no gym `spaces` --
-gym is not a dependency of this package. Environments ASSIGN TorchRL specs, normally in
-`__init__`:
+There is no `_make_observation_space` hook and no gym `spaces` -- gym is not a dependency
+of this package. Environments ASSIGN TorchRL specs, normally in `__init__`. The five LIVE
+plain envs share that assignment via `TorchTradeLiveEnv._init_action_space`, and the five
+SLTP ones via `SLTPMixin._init_bracket_action_space` (#288); the offline envs assign
+directly:
 
 ```python
 import torch
