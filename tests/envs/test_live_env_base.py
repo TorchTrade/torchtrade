@@ -5756,8 +5756,8 @@ def test_every_live_env_actually_calls_its_shared_initialiser(env_cls):
     `getattr(cls, m) is getattr(owner, m)` is the right check for `_step`/`_reset`, which
     the framework dispatches. It is a no-op for an initialiser the leaf calls explicitly: a
     venue that inlines a faithful copy still RESOLVES to the shared one, so the table stays
-    green while the fold silently stops applying to it. Verified -- re-forking bybit's SLTP
-    tail that way passed all 4749 tests.
+    green while the fold silently stops applying to it. Verified: re-forking bybit's SLTP
+    tail that way leaves the whole suite green.
 
     AST, not substring, for the reason the guard below records: a comment mentioning the
     name would satisfy a grep. Parametrized over STEPPING_ENVS, which already asserts its
@@ -6889,7 +6889,7 @@ def test_the_notional_is_checked_against_the_quantity_the_venue_will_receive(ven
 
     Every venue formatter truncates to the lot step, so validating before that is the
     same "validated one number, sent another" bug this PR fixes on the plain path --
-    committed once inside the fix itself, and reverting it passed all 3514 tests.
+    committed once inside the fix itself, and reverting it leaves the suite green.
 
     The numbers are the ones from that commit message: step 0.001, floor 100, price
     60000. A quantity of 0.001666... is exactly 100.00 raw and 60.00 once floored, so

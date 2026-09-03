@@ -117,7 +117,7 @@ REJECTED_FLAG_CASES = [
     (SequentialTradingEnvSLTPConfig, {"margin_mode": MarginMode.CROSSED}),
     (OneStepTradingEnvConfig, {"margin_mode": MarginMode.CROSSED}),
     # The two the guard was ADDED for, and the two it was not tested on: removing
-    # `validate_offline_margin_mode` from the vectorized config passed all 4013 tests.
+    # `validate_offline_margin_mode` from the vectorized config left the suite green.
     (VectorizedSequentialTradingEnvConfig, {"margin_mode": MarginMode.CROSSED}),
     (VectorizedSequentialTradingEnvSLTPConfig, {"margin_mode": MarginMode.CROSSED}),
 ]

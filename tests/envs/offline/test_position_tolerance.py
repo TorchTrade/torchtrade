@@ -117,7 +117,7 @@ def test_both_engines_close_a_position_worth_less_than_the_floor(price):
 @pytest.mark.parametrize("gap_usd,expect_hold", [(0.50, True), (5.0, False)],
                          ids=["under-the-floor", "over-the-floor"])
 def test_the_vectorized_floor_holds_a_sub_dollar_resize(gap_usd, expect_hold):
-    """The vectorized floor had ZERO coverage: gutting it left all 2865 tests green.
+    """The vectorized floor had ZERO coverage: gutting it left the whole suite green.
 
     The sibling close test does not reach it -- a close sets target 0, which the exemption
     gives a tolerance of 0, so the floor is never consulted. Only a RESIZE consults it, and

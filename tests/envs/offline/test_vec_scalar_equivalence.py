@@ -286,7 +286,7 @@ class TestScalarVecEquivalenceResize:
         # position is open. Both engines drop that step before classifying it, so the
         # canonical ageing call is the only thing that ages the position -- and nothing
         # else in the suite ever enters that branch holding anything. Re-adding either
-        # engine's removed `hold_counter += 1` there passed all 691 offline tests.
+        # engine's removed `hold_counter += 1` there leaves the whole suite green.
         (5, [0.0, 0.5, 0.505, 1.0], [1, 2, 2, 1, 3]),
     ], ids=["oscillate-spot", "oscillate-levered", "oscillate-short", "through-flat",
             "tolerance-hold"])
