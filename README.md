@@ -190,12 +190,12 @@ paper-only** — see its entry.
 - **⚠️ Paper trading only — not live:** `dry_run=False` raises. `py-clob-client` is archived/non-functional (Polymarket moved to CLOB V2), and the env holds bets to resolution while Polymarket only releases collateral on an on-chain redeem no client exposes — so a live bot would drain to zero *while winning*. Reviving live needs the V2 port **and** a redemption workflow.
 - **Get Started:** [Browse markets at Polymarket](https://polymarket.com/)
 
-### 📈 Stock & Crypto API
+### 📈 Crypto Spot API
 
 **[Alpaca](https://alpaca.markets/)** - Commission-free trading API
 - **Supported by:** `AlpacaTorchTradingEnv`, `AlpacaSLTPTorchTradingEnv`
 - **Features:** Commission-free crypto spot, paper trading, real-time data
-- **Best for:** US markets, algorithmic trading
+- **Best for:** crypto spot, algorithmic trading
 - **Get Started:** [Sign up for Alpaca](https://alpaca.markets/signup)
 
 ---
@@ -364,8 +364,11 @@ env = SequentialTradingEnv(df, config)
 ```python
 import os
 
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+load_dotenv()  # reads the .env written above; os.getenv does not read files
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",

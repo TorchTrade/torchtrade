@@ -193,7 +193,12 @@ EOF
 ```
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+
+load_dotenv()  # reads the .env written above; os.getenv does not read files
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
@@ -203,7 +208,11 @@ config = AlpacaTradingEnvConfig(
     paper=True  # Start with paper trading!
 )
 
-env = AlpacaTorchTradingEnv(config)
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
 ```
 
 ### Binance (Crypto Futures)
