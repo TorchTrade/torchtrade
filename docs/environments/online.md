@@ -72,7 +72,12 @@ environments cover crypto spot only; the observer fetches crypto bars.
 ### AlpacaTorchTradingEnv
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+
+load_dotenv()
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
@@ -82,13 +87,22 @@ config = AlpacaTradingEnvConfig(
     paper=True,  # Paper trading (recommended!)
 )
 
-env = AlpacaTorchTradingEnv(config)
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
 ```
 
 ### AlpacaSLTPTorchTradingEnv
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
+
+load_dotenv()
 
 config = AlpacaSLTPTradingEnvConfig(
     symbol="BTC/USD",
@@ -100,7 +114,11 @@ config = AlpacaSLTPTradingEnvConfig(
     paper=True,
 )
 
-env = AlpacaSLTPTorchTradingEnv(config)
+env = AlpacaSLTPTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
 # Action space: HOLD + 4 SL/TP combinations = 5 actions
 ```
 
@@ -113,7 +131,12 @@ env = AlpacaSLTPTorchTradingEnv(config)
 ### BinanceFuturesTorchTradingEnv
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+
+load_dotenv()
 
 config = BinanceFuturesTradingEnvConfig(
     symbol="BTCUSDT",
@@ -124,13 +147,22 @@ config = BinanceFuturesTradingEnvConfig(
     demo=True,  # Testnet (recommended!)
 )
 
-env = BinanceFuturesTorchTradingEnv(config)
+env = BinanceFuturesTorchTradingEnv(
+    config,
+    api_key=os.getenv("BINANCE_API_KEY"),
+    api_secret=os.getenv("BINANCE_SECRET_KEY"),
+)
 ```
 
 ### BinanceFuturesSLTPTorchTradingEnv
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.binance import BinanceFuturesSLTPTorchTradingEnv, BinanceFuturesSLTPTradingEnvConfig
+
+load_dotenv()
 
 config = BinanceFuturesSLTPTradingEnvConfig(
     symbol="BTCUSDT",
@@ -159,7 +191,11 @@ config = BinanceFuturesSLTPTradingEnvConfig(
 #     position_fraction=0.1,
 # )
 
-env = BinanceFuturesSLTPTorchTradingEnv(config)
+env = BinanceFuturesSLTPTorchTradingEnv(
+    config,
+    api_key=os.getenv("BINANCE_API_KEY"),
+    api_secret=os.getenv("BINANCE_SECRET_KEY"),
+)
 # Action space: HOLD + 2×(2 SL × 3 TP) = 13 actions (long + short)
 ```
 
@@ -665,21 +701,21 @@ config = BinanceFuturesSLTPTradingEnvConfig(
     trade_mode="fractional",
     position_fraction=0.1,       # 10% of account balance
     leverage=5,
-    ...
+    # ... the rest of the config
 )
 
 # Notional: always trade $500 USD worth
 config = BinanceFuturesSLTPTradingEnvConfig(
     trade_mode="notional",
     quantity_per_trade=500.0,    # $500 per trade
-    ...
+    # ... the rest of the config
 )
 
 # Quantity: always trade exactly 0.001 BTC (default)
 config = BinanceFuturesSLTPTradingEnvConfig(
     trade_mode="quantity",       # default
     quantity_per_trade=0.001,
-    ...
+    # ... the rest of the config
 )
 ```
 
@@ -693,7 +729,7 @@ All live SLTP environments support `lock_position_until_sltp`. When enabled, age
 ```python
 config = BinanceFuturesSLTPTradingEnvConfig(
     lock_position_until_sltp=True,  # Positions exit only via SL/TP
-    ...
+    # ... the rest of the config
 )
 ```
 
