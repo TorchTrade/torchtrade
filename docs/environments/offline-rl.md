@@ -19,7 +19,7 @@ This approach is particularly valuable for:
 
 ## Example: IQL (Implicit Q-Learning)
 
-TorchTrade provides an example implementation of offline RL using **Implicit Q-Learning (IQL)** in `examples/offline/iql/`.
+TorchTrade provides an example implementation of offline RL using **Implicit Q-Learning (IQL)** in `examples/offline_rl/iql/`.
 
 ```python
 # Example: Training IQL on pre-collected dataset
@@ -43,7 +43,7 @@ for batch in replay_buffer:
     optimizer.step()
 ```
 
-For a complete implementation, see [examples/offline/iql/](https://github.com/TorchTrade/torchtrade/tree/main/examples/offline/iql).
+For a complete implementation, see [examples/offline_rl/iql/](https://github.com/TorchTrade/torchtrade/tree/main/examples/offline_rl/iql).
 
 ## Dataset Collection
 

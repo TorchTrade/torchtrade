@@ -74,15 +74,29 @@ Common types and enums.
 ```
 TorchTradeBaseEnv (base.py)
 ├── TorchTradeOfflineEnv (offline_base.py)
-│   ├── SequentialTradingEnv
-│   ├── SequentialTradingEnvSLTP
-│   ├── OneStepTradingEnv
-│   └── VectorizedSequentialTradingEnv(+SLTP)
+│   └── SequentialTradingEnv
+│       └── SequentialTradingEnvSLTP
+│           └── OneStepTradingEnv
 └── TorchTradeLiveEnv (live.py)
     ├── AlpacaBaseTorchTradingEnv
-    ├── BinanceBaseTorchTradingEnv
-    └── ...
+    │   ├── AlpacaTorchTradingEnv
+    │   └── AlpacaSLTPTorchTradingEnv
+    └── TorchTradeFuturesLiveEnv (futures_live_base.py)
+        ├── BinanceBaseTorchTradingEnv
+        ├── BitgetBaseTorchTradingEnv
+        ├── BybitBaseTorchTradingEnv
+        └── OKXBaseTorchTradingEnv
+            (each with a plain and an SLTP leaf)
 ```
+
+The offline side is a chain, not four siblings: `OneStepTradingEnv` inherits
+`SequentialTradingEnvSLTP`, which inherits `SequentialTradingEnv`. A change to
+`SequentialTradingEnv` reaches all three.
+
+Two families sit outside this tree and subclass TorchRL's `EnvBase` directly:
+`VectorizedSequentialTradingEnv(+SLTP)` and `PolymarketBetEnv`. They do not inherit
+`TorchTradeOfflineEnv` or `TorchTradeLiveEnv`, so shared changes must be applied to them
+by hand.
 
 ## Usage Examples
 

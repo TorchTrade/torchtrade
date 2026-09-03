@@ -367,3 +367,67 @@ def test_a_documented_block_calls_nothing_that_does_not_exist(earlier_blocks, bl
     assert not unknown, (
         f"calls names that exist nowhere in torchtrade: {sorted(unknown)}"
     )
+
+
+# A repo path in a doc, in either of the two forms one appears in: backticked
+# (`torchtrade/envs/offline/sampler.py`), anchored to the four real top-level directories
+# so ordinary prose in backticks cannot match; or inside a github tree/blob URL. Both
+# forms are needed: offline-rl.md named the same phantom twice, once each way.
+DOC_PATH = re.compile(r"`((?:torchtrade|examples|tests|benchmarks)/[\w./-]+)`")
+DOC_URL = re.compile(
+    r"https://github\.com/TorchTrade/torchtrade/(?:tree|blob)/main/([\w./-]+)"
+)
+
+
+def _documented_paths():
+    for path in _doc_sources():
+        text = path.read_text()
+        for pattern in (DOC_PATH, DOC_URL):
+            for match in pattern.finditer(text):
+                raw = match.group(1)
+                if "*" in raw:  # a glob is a pattern, not a path
+                    continue
+                yield pytest.param(raw, id=f"{path.relative_to(REPO)}::{raw}")
+
+
+DOC_PATHS = list(_documented_paths())
+
+
+def _tracked_paths():
+    """Every tracked file, plus every directory on the way to one. Checked against the
+    index and not the filesystem for the same reason `_doc_sources` is: an empty local
+    directory left over from a rename is not something a reader can clone. That is the
+    exact shape of the `examples/offline/iql` phantom, which still existed on the machine
+    that documented it.
+    """
+    listing = subprocess.run(["git", "ls-files"], cwd=REPO,
+                             capture_output=True, text=True, check=True)
+    known = set()
+    for line in listing.stdout.split("\n"):
+        if line.strip():
+            parts = pathlib.PurePosixPath(line.strip()).parts
+            known.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
+    return known
+
+
+TRACKED = _tracked_paths()
+
+
+@pytest.mark.parametrize("raw", DOC_PATHS)
+def test_a_documented_repo_path_is_tracked(raw):
+    """Kills the mutation that moves a file and leaves the docs naming the old location.
+    Three phantoms shipped this way: offline/base.py, offline/sampler.py and
+    examples/offline/iql. The import sweep above cannot see them, because a path in
+    backticks is not an import.
+
+    It does not cover the tree diagrams in the READMEs, which write bare names like
+    `longonly/` with no prefix to anchor on. Two phantom directories shipped there.
+    """
+    assert raw.rstrip("/") in TRACKED, f"documented path is not in the repo: {raw}"
+
+
+def test_the_path_sweep_found_paths_to_check():
+    """An empty parametrize passes silently, so a regex that stops matching would turn
+    the guard above into a no-op rather than a failure.
+    """
+    assert len(DOC_PATHS) > 25, f"only {len(DOC_PATHS)} documented paths found"

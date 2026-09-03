@@ -1,6 +1,6 @@
 # Understanding the Sampler
 
-The `MarketDataObservationSampler` (found in `torchtrade/envs/offline/sampler.py`) handles multi-timeframe data sampling in TorchTrade's offline environments. It resamples high-frequency data (1-minute bars) to multiple timeframes and creates synchronized observation windows while preventing lookahead bias. This allows RL agents to observe market patterns across different time scales simultaneously, from short-term momentum to long-term trends.
+The `MarketDataObservationSampler` (found in `torchtrade/envs/offline/infrastructure/sampler.py`) handles multi-timeframe data sampling in TorchTrade's offline environments. It resamples high-frequency data (1-minute bars) to multiple timeframes and creates synchronized observation windows while preventing lookahead bias. This allows RL agents to observe market patterns across different time scales simultaneously, from short-term momentum to long-term trends.
 
 ## What Is the Sampler?
 

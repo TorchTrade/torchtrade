@@ -51,4 +51,4 @@ All environments render **3 subplots**:
 | `return_fig` | bool | `False` | Return matplotlib figure instead of displaying |
 | `plot_bh_baseline` | bool | `True` | Show buy-and-hold baseline comparison |
 
-Implemented in `torchtrade/envs/offline/base.py`. Requires `matplotlib`.
+Implemented in `torchtrade/envs/core/offline_base.py`. Requires `matplotlib`.

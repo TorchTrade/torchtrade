@@ -10,14 +10,20 @@ torchtrade/envs/
 ├── utils/             # Shared utility functions and helpers
 ├── offline/           # Backtesting environments
 │   ├── infrastructure/    # Internal sampler and utilities
-│   ├── longonly/          # Long-only trading environments
-│   └── futures/           # Futures trading environments
+│   ├── sequential.py
+│   ├── sequential_sltp.py
+│   ├── onestep.py
+│   ├── vectorized_sequential.py
+│   └── vectorized_sequential_sltp.py
 ├── live/              # Live trading environments
 │   ├── shared/            # Shared components across providers
 │   ├── alpaca/            # Alpaca integration
 │   ├── binance/           # Binance Futures integration
 │   ├── bitget/            # Bitget Futures integration
-│   └── bybit/             # Bybit Futures integration
+│   ├── bybit/             # Bybit Futures integration
+│   ├── okx/               # OKX Futures integration
+│   └── polymarket/        # Polymarket prediction markets
+├── replay/            # Historical playback through the live pipeline
 └── transforms/        # TorchRL environment transforms
 ```
 
@@ -143,6 +149,9 @@ Multi-step environments where agents make decisions at each timestep:
 
 - `SequentialTradingEnv`: Unified sequential trading (spot or futures via `leverage` and `action_levels`)
 - `SequentialTradingEnvSLTP`: Sequential with stop-loss/take-profit bracket orders
+- `VectorizedSequentialTradingEnv`, `VectorizedSequentialTradingEnvSLTP`: batched variants.
+  They subclass `EnvBase` directly, not `TorchTradeOfflineEnv`, so a change to the shared
+  offline base does not reach them.
 
 ### One-Step Environments
 
@@ -162,12 +171,15 @@ Real-time trading environments with API integration:
 - `BitgetFuturesSLTPTorchTradingEnv`: Bitget with SL/TP
 - `BybitFuturesTorchTradingEnv`: Bybit Futures
 - `BybitFuturesSLTPTorchTradingEnv`: Bybit with SL/TP
+- `OKXFuturesTorchTradingEnv`: OKX Futures
+- `OKXFuturesSLTPTorchTradingEnv`: OKX with SL/TP
+- `PolymarketBetEnv`: prediction markets, with a `dry_run` paper path
 
 ## Design Principles
 
 1. **Clear Separation**: Core classes, utilities, and implementations are clearly separated
 2. **Consistent Naming**: All provider files follow the same naming conventions
-3. **Parallel Structure**: Offline longonly and futures mirror each other
+3. **Parallel Structure**: each live provider directory has the same layout
 4. **Import Flexibility**: Support both top-level and direct imports
 5. **Maintainability**: READMEs at each level explain purpose and usage
 
