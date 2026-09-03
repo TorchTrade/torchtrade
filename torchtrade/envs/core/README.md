@@ -86,8 +86,9 @@ TorchTradeBaseEnv (base.py)
         ├── BitgetBaseTorchTradingEnv
         ├── BybitBaseTorchTradingEnv
         └── OKXBaseTorchTradingEnv
-            (each with a plain and an SLTP leaf)
 ```
+
+Each of the four futures bases has a plain and an SLTP leaf, elided here.
 
 The offline side is a chain: `OneStepTradingEnv` inherits `SequentialTradingEnvSLTP`,
 which inherits `SequentialTradingEnv`. A change to `SequentialTradingEnv` reaches all
@@ -97,8 +98,8 @@ Two families sit outside this tree. `VectorizedSequentialTradingEnv` and
 `PolymarketBetEnv` subclass TorchRL's `EnvBase` directly, and
 `VectorizedSequentialTradingEnvSLTP` extends the plain vectorized env. None of them
 inherit `TorchTradeOfflineEnv` or `TorchTradeLiveEnv`, so a change to those bases must be
-applied to them by hand. They do still share the `utils/` modules and the reward
-functions in `core/default_rewards.py`.
+applied to them by hand. The vectorized pair still shares `utils/` and the batched reward
+in `core/default_rewards.py`; polymarket shares only `utils/termination.py`.
 
 ## Usage Examples
 

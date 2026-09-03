@@ -90,8 +90,9 @@ See [utils/README.md](utils/README.md) for details.
 
 Backtesting environments for strategy development and evaluation:
 
-- **Long-Only**: Traditional buy-and-hold style environments
-- **Futures**: Leveraged long/short futures environments
+- **Sequential**: `SequentialTradingEnv` and its SLTP and one-step variants. Spot or
+  futures is a config choice (`leverage`, `action_levels`), not a separate class.
+- **Vectorized**: batched variants of the sequential envs
 - **Infrastructure**: Internal sampling and utilities (not user-facing)
 
 See [the offline environments guide](../../docs/environments/offline.md) for details.
@@ -104,6 +105,8 @@ Production-ready environments for live trading:
 - **Binance**: Crypto futures trading
 - **Bitget**: Crypto futures trading
 - **Bybit**: Crypto futures trading
+- **OKX**: Crypto futures trading
+- **Polymarket**: Prediction markets, paper only
 - **Shared**: Common components (futures base observation)
 
 See [live/README.md](live/README.md) for details.

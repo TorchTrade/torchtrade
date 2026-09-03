@@ -24,12 +24,6 @@ python train.py
 python train.py env.train_envs=128 model.hidden_size=256 optim.lr=1e-4
 ```
 
-### Test Performance
-```bash
-# Compare vectorized vs standard
-python ../../benchmarks/bench_sequential.py --benchmark vectorized
-```
-
 ## Configuration
 
 ### Environment (`env/vectorized_sequential.yaml`)
