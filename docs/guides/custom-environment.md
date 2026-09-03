@@ -142,6 +142,8 @@ Extend `SequentialTradingEnv` to add custom features:
 ```python
 from torchtrade.envs.offline import SequentialTradingEnv, SequentialTradingEnvConfig
 from tensordict import TensorDict
+import numpy as np
+import pandas as pd
 import torch
 
 class CustomLongOnlyEnv(SequentialTradingEnv):
@@ -149,7 +151,7 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
     Extended SequentialTradingEnv with sentiment data.
     """
 
-    def __init__(self, df, config: SequentialTradingEnvConfig, sentiment_data: torch.Tensor):
+    def __init__(self, df, config: SequentialTradingEnvConfig, sentiment_data: pd.Series):
         super().__init__(df, config)
         self.sentiment_data = sentiment_data  # Timeseries sentiment scores
 
@@ -166,7 +168,7 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
 
         # `current_timestamp` is where the env is in the data. The sampler has no
         # index attribute.
-        obs["sentiment"] = torch.tensor([self.sentiment_data[self.current_timestamp]])
+        obs["sentiment"] = torch.tensor([self.sentiment_data.loc[self.current_timestamp]])
 
         return obs
 
@@ -174,7 +176,7 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
         """Add sentiment to step observations"""
         obs = super()._step(tensordict)
 
-        obs["sentiment"] = torch.tensor([self.sentiment_data[self.current_timestamp]])
+        obs["sentiment"] = torch.tensor([self.sentiment_data.loc[self.current_timestamp]])
 
         return obs
 
@@ -182,7 +184,7 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
 import pandas as pd
 
 df = pd.read_csv("prices.csv")
-sentiment = torch.randn(len(df))  # Random sentiment scores
+sentiment = pd.Series(np.random.randn(len(df)), index=pd.to_datetime(df["timestamp"]))
 
 config = SequentialTradingEnvConfig(
     time_frames=["1min", "5min"],
@@ -223,8 +225,10 @@ class CustomEnv(SequentialTradingEnv):
 Always update observation specs when adding new fields:
 
 ```python
-# In __init__
-self._observation_spec["new_field"] = Unbounded(shape=(N,))
+# In __init__. The spec is locked, so it is rebuilt and reassigned, never mutated.
+spec = self.observation_spec.clone()
+spec["new_field"] = Unbounded(shape=(N,))
+self.observation_spec = spec
 ```
 
 ### 3. State Management
@@ -331,7 +335,7 @@ td["action"] = env.action_spec.rand()
 td = env.step(td)
 assert env.observation_spec.is_in(td["next"].select(*env.observation_spec.keys())), \
     "Step observation doesn't match spec"
-assert env.reward_spec.is_in(obs["reward"]), "Reward doesn't match spec"
+assert env.reward_spec.is_in(td["next", "reward"]), "Reward doesn't match spec"
 ```
 
 ### 2. Episode Completion
@@ -381,7 +385,7 @@ print(f"Reward range: [{min(rewards):.2f}, {max(rewards):.2f}]")
 
 | Issue | Problem | Solution |
 |-------|---------|----------|
-| **Spec mismatch** | Observation shape != spec shape | Update `_observation_spec` in `__init__` |
+| **Spec mismatch** | Observation shape != spec shape | Reassign `observation_spec` in `__init__` |
 | **Forgotten batch_size** | TensorDict missing batch_size | Always pass `batch_size=self.batch_size` |
 | **Missing done signal** | Episode never ends | Set `done=True` in terminal state |
 | **Mutable state** | State persists across episodes | Reset ALL state variables in `_reset()` |

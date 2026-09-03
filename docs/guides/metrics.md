@@ -68,7 +68,7 @@ from torchtrade.metrics import compute_all_metrics
 # Run evaluation rollout
 td = env.reset()
 while True:
-    td["action"] = policy(td)
+    td = policy(td)
     td = env.step(td)
     if td["next", "done"].item():
         break
