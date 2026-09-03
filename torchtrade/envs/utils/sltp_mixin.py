@@ -263,9 +263,9 @@ class SLTPMixin:
         shared method reaching for a field that may not be there.
 
         Bigger and more drift-prone than the plain twin this landed alongside: the action
-        MAP is built here, and `action_spec.n` is what a checkpoint binds to, so four
-        copies of `create_sltp_action_map(...)` are four chances for the venues to disagree
-        about how many actions a policy has (#288).
+        MAP is built here, and `action_spec.n` is what a checkpoint binds to, so the five
+        copies of `create_sltp_action_map(...)` this replaced were five chances for the
+        venues to disagree about how many actions a policy has (#288).
         """
         self.reward_function = reward_function or log_return_reward
         self.stoploss_levels = list(self.config.stoploss_levels)
