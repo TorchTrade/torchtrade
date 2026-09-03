@@ -99,15 +99,7 @@ See [the offline environments guide](../../docs/environments/offline.md) for det
 
 ### Live Environments (`live/`)
 
-Production-ready environments for live trading:
-
-- **Alpaca**: US equities and crypto spot trading
-- **Binance**: Crypto futures trading
-- **Bitget**: Crypto futures trading
-- **Bybit**: Crypto futures trading
-- **OKX**: Crypto futures trading
-- **Polymarket**: Prediction markets, paper only
-- **Shared**: Common components (futures base observation)
+Production-ready environments for live trading. The tree above lists the venues.
 
 See [live/README.md](live/README.md) for details.
 

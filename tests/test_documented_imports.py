@@ -387,6 +387,8 @@ GITHUB_URL = re.compile(
     re.IGNORECASE,
 )
 RELATIVE_LINK = re.compile(r"\]\((?!https?:|#|mailto:)([^)\s#]+)(?:#[^)\s]*)?\)")
+SHELL_FENCE = re.compile(r"```(?:bash|sh|shell|console)\n(.*?)```", re.S)
+FENCE_PATH = re.compile(rf"(?<![\w/.-])((?:{_TOP_LEVEL})/[\w./-]+)")
 
 
 def _documented_paths():
@@ -394,19 +396,22 @@ def _documented_paths():
     which is why CONFIG_KWARGS dedupes too.
 
     Link targets are relative to their own file, so they are resolved against it and then
-    made repo-relative. The other two forms are already repo-relative.
+    made repo-relative. The other three forms are already repo-relative.
     """
     found = []
     for source in _doc_sources():
         text = source.read_text()
         for pattern in (BACKTICKED_PATH, GITHUB_URL):
             found += [(source, match.group(1)) for match in pattern.finditer(text)]
+        for fence in SHELL_FENCE.findall(text):
+            found += [(source, path) for path in FENCE_PATH.findall(fence)]
         for match in RELATIVE_LINK.finditer(text):
             target = (source.parent / match.group(1)).resolve()
             if target.is_relative_to(REPO):
                 found.append((source, str(target.relative_to(REPO))))
-    return [pytest.param(raw, id=f"{source.relative_to(REPO)}::{raw}")
-            for source, raw in dict.fromkeys((s, r.rstrip("/")) for s, r in found)]
+    deduped = dict.fromkeys((source, path.rstrip("/")) for source, path in found)
+    return [pytest.param(path, id=f"{source.relative_to(REPO)}::{path}")
+            for source, path in deduped]
 
 
 DOCUMENTED_PATHS = _documented_paths()
@@ -425,16 +430,14 @@ def _tracked_paths():
 @pytest.mark.parametrize("documented_path", DOCUMENTED_PATHS)
 def test_a_documented_repo_path_is_tracked(documented_path):
     """Kills the mutation that moves a file and leaves the docs naming the old location.
-    Twelve phantom references shipped this way: offline/base.py, offline/sampler.py,
-    examples/offline/iql named twice, a nonexistent offline/README.md linked four times,
-    and a nonexistent docs/examples.md linked four times.
-
     Checked against the index, not the filesystem: the examples/offline/iql phantom still
     existed as an empty directory on the machine that documented it, and an untracked
     directory is one a reader who clones does not get.
 
-    Uncovered forms, each of which has carried a phantom: the ASCII trees in the READMEs,
-    bare filenames in backticks, paths inside shell fences, and link anchors.
+    Still uncovered: the ASCII trees in the READMEs, bare filenames in backticks, and
+    link anchors. The trees are the gap that matters, and a correct checker for them is
+    not cheap: they are display-rooted at the README's own directory, and some entries are
+    placeholders or generated output.
     """
     assert documented_path in _tracked_paths(), (
         f"documented path is not in the repo: {documented_path}"
@@ -442,22 +445,24 @@ def test_a_documented_repo_path_is_tracked(documented_path):
 
 
 def test_each_path_form_still_finds_paths():
-    """Floors just under the real counts, per form. One floor over the total does not
-    work: with the github-URL form dead, the other two still cleared it while a third of
-    the sweep was gone.
+    """Floors just under the real counts, one per form. A single floor over the total
+    does not work: killing the github-URL form leaves the other forms clearing it while a
+    fifth of the sweep is dead.
 
     A fully empty parametrize ERRORS on this pytest rather than passing, so partial
     shrinkage, not silence, is what these catch.
     """
-    counts = {}
-    for source in _doc_sources():
-        text = source.read_text()
-        for name, pattern in (("backtick", BACKTICKED_PATH), ("url", GITHUB_URL),
-                              ("link", RELATIVE_LINK)):
-            counts[name] = counts.get(name, 0) + len(pattern.findall(text))
+    texts = [source.read_text() for source in _doc_sources()]
+    fences = ["\n".join(SHELL_FENCE.findall(text)) for text in texts]
+    counts = {name: sum(len(pattern.findall(text)) for text in bodies)
+              for name, pattern, bodies in (("backtick", BACKTICKED_PATH, texts),
+                                            ("url", GITHUB_URL, texts),
+                                            ("link", RELATIVE_LINK, texts),
+                                            ("fence", FENCE_PATH, fences))}
     assert counts["backtick"] > 28, counts
     assert counts["url"] > 30, counts
     assert counts["link"] > 80, counts
+    assert counts["fence"] > 30, counts
 
 
 # The class-hierarchy diagram in core/README.md, parsed by indentation: a class's parent
@@ -468,12 +473,14 @@ TREE_LINE = re.compile(r"^([\s│├└─]*)([A-Z]\w+)")
 
 
 def _documented_edges():
-    found = TREE_BLOCK.search(HIERARCHY_DOC.read_text())
+    tree_block = TREE_BLOCK.search(HIERARCHY_DOC.read_text())
     # Without this the whole module dies at import on `NoneType has no attribute group`,
     # naming neither the file nor the reason, and every other sweep here dies with it.
-    assert found, f"no TorchTradeBaseEnv tree block in {HIERARCHY_DOC.relative_to(REPO)}"
+    assert tree_block, (
+        f"no TorchTradeBaseEnv tree block in {HIERARCHY_DOC.relative_to(REPO)}"
+    )
     edges, open_parents = [], []          # (column, name), columns strictly increasing
-    for line in found.group(1).split("\n"):
+    for line in tree_block.group(1).split("\n"):
         match = TREE_LINE.match(line)
         if not match:
             continue
@@ -482,7 +489,7 @@ def _documented_edges():
             open_parents.pop()
         if open_parents:
             parent = open_parents[-1][1]
-            edges.append(pytest.param(parent, name, id=f"{parent}->{name}"))
+            edges.append((parent, name))
         open_parents.append((column, name))
     return edges
 
@@ -515,7 +522,8 @@ def _env_classes():
     return found
 
 
-@pytest.mark.parametrize("parent,child", DOCUMENTED_EDGES)
+@pytest.mark.parametrize("parent,child", DOCUMENTED_EDGES,
+                         ids=[f"{p}->{c}" for p, c in DOCUMENTED_EDGES])
 def test_a_documented_hierarchy_edge_is_a_real_base(parent, child):
     """The diagram drew the offline envs as four siblings when they are a chain, and hung
     the four futures venues off TorchTradeLiveEnv when they route through
@@ -535,9 +543,10 @@ def test_every_intermediate_env_class_is_in_the_diagram():
     intermediates are required: the concrete leaves are elided deliberately, which the
     diagram says in words.
     """
-    drawn = {n for e in DOCUMENTED_EDGES for n in e.values} | {"TorchTradeBaseEnv"}
+    drawn = {n for edge in DOCUMENTED_EDGES for n in edge} | {"TorchTradeBaseEnv"}
     intermediate = {n for n, c in _env_classes().items() if _package_subclasses(c)}
-    assert not intermediate - drawn, f"missing from the diagram: {sorted(intermediate - drawn)}"
+    missing = intermediate - drawn
+    assert not missing, f"missing from the diagram: {sorted(missing)}"
 
 
 @pytest.mark.parametrize("module,name,base", [

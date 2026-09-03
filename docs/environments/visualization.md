@@ -1,6 +1,6 @@
 # Visualizing Episode History
 
-All offline environments support **`render_history()`** to visualize episode performance after training or evaluation. The method automatically detects the environment type and renders appropriate plots.
+The three sequential offline environments support **`render_history()`** to visualize episode performance after training or evaluation. The method automatically detects the environment type and renders appropriate plots. The vectorized environments do not have it.
 
 ## Overview
 
