@@ -121,10 +121,20 @@ Mixin class for adding SL/TP functionality to environments.
 ```python
 from torchtrade.envs.utils import SLTPMixin
 
-# SLTPMixin is small and deliberately so: SIDE_DIRECTION, _record_sltp_position,
-# _reset_sltp_state and _sync_position_from_exchange. It does NOT own bracket pricing,
-# trigger detection or the exit -- those live in the environment, because whether a
-# bracket fired is a question about the bar's high and low, which the mixin cannot see.
+# SLTPMixin owns the SLTP step for the four FUTURES venues: _step, _reset,
+# _execute_trade_if_needed (places the bracket), _bracket_entry_price, _close_action and
+# _mark_flat (the exit), and _init_bracket_action_space (builds action_map and action_spec).
+#
+# Alpaca inherits the mixin but overrides _step and _execute_trade_if_needed with its own
+# spot implementations; it takes _reset, _close_action and the rest from here.
+#
+# The mixin does not own trigger detection on any venue: whether a bracket fired is a
+# question about the bar's high and low, which it cannot see.
+#
+# Venue variation is deliberate and sits in two places. _bracket_entry_price is one shared
+# method branching on the class flag _PRICES_OFF_THREADED_MARK (bybit and okx price off the
+# mark, binance and bitget off their own candle close, #409/#295). okx is the only leaf
+# overriding _resolve_bracket_quantity, to refuse a sub-minimum bracket.
 class MyEnvWithSLTP(SLTPMixin):
     def _open(self, side):
         # Records the position the ACTION targets, never the order side (#276): a long

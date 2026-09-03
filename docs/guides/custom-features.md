@@ -124,7 +124,7 @@ def normalized_preprocessing(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index()
 
 config = SequentialTradingEnvConfig(
-    ...
+    # ... the rest of the config
 )
 ```
 
@@ -270,6 +270,8 @@ Binance klines include extra market microstructure data:
 These allow you to derive sentiment and microstructure features without additional API calls:
 
 ```python
+import os
+
 def binance_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     # Taker buy ratio: proportion of volume from aggressive buyers
@@ -289,6 +291,8 @@ def binance_features(df: pd.DataFrame) -> pd.DataFrame:
 env = BinanceFuturesTorchTradingEnv(
     config=config,
     feature_preprocessing_fn=binance_features,
+    api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
 )
 ```
 

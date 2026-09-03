@@ -65,7 +65,7 @@ from torchtrade.envs.core.default_rewards import (
 )
 
 config = SequentialTradingEnvConfig(
-    ...
+    # ... the rest of the config
 )
 ```
 

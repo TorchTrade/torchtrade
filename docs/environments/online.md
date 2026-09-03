@@ -13,7 +13,7 @@ Online environments connect to real trading APIs for paper trading or live execu
 
 **Supported Exchanges:**
 
-- **[Alpaca](https://alpaca.markets/)** - Commission-free US stocks and crypto with paper trading
+- **[Alpaca](https://alpaca.markets/)** - Crypto spot with paper trading
 - **[Binance](https://accounts.binance.com/register?ref=25015935)** - Cryptocurrency futures with high leverage and testnet
 - **[Bitget](https://share.bitget.com/u/VGN302X2)** - Cryptocurrency futures with competitive fees and testnet
 - **[Bybit](https://www.bybit.eu/invite?ref=MX42GRV)** - Cryptocurrency derivatives with native bracket orders and testnet
@@ -24,8 +24,8 @@ Online environments connect to real trading APIs for paper trading or live execu
 
 | Environment | Exchange | Asset Type | Futures | Leverage | Bracket Orders |
 |-------------|----------|------------|---------|----------|----------------|
-| **AlpacaTorchTradingEnv** | Alpaca | Crypto/Stocks | - | - | - |
-| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto/Stocks | - | - | Yes |
+| **AlpacaTorchTradingEnv** | Alpaca | Crypto | - | - | - |
+| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto | - | - | Yes |
 | **BinanceFuturesTorchTradingEnv** | Binance | Crypto | Yes | Yes | - |
 | **BinanceFuturesSLTPTorchTradingEnv** | Binance | Crypto | Yes | Yes | Yes |
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | Yes | Yes | - |
@@ -66,12 +66,18 @@ Live environments use a **query-first pattern**: they query the actual exchange 
 
 ## Alpaca Environments
 
-[Alpaca](https://alpaca.markets/) provides commission-free trading for US stocks and cryptocurrencies with paper trading support.
+[Alpaca](https://alpaca.markets/) offers commission-free trading with paper support. These
+environments cover crypto spot only; the observer fetches crypto bars.
 
 ### AlpacaTorchTradingEnv
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+
+load_dotenv()
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
@@ -81,13 +87,22 @@ config = AlpacaTradingEnvConfig(
     paper=True,  # Paper trading (recommended!)
 )
 
-env = AlpacaTorchTradingEnv(config)
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
 ```
 
 ### AlpacaSLTPTorchTradingEnv
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaSLTPTorchTradingEnv, AlpacaSLTPTradingEnvConfig
+
+load_dotenv()
 
 config = AlpacaSLTPTradingEnvConfig(
     symbol="BTC/USD",
@@ -99,7 +114,11 @@ config = AlpacaSLTPTradingEnvConfig(
     paper=True,
 )
 
-env = AlpacaSLTPTorchTradingEnv(config)
+env = AlpacaSLTPTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
 # Action space: HOLD + 4 SL/TP combinations = 5 actions
 ```
 
@@ -112,7 +131,12 @@ env = AlpacaSLTPTorchTradingEnv(config)
 ### BinanceFuturesTorchTradingEnv
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv, BinanceFuturesTradingEnvConfig
+
+load_dotenv()
 
 config = BinanceFuturesTradingEnvConfig(
     symbol="BTCUSDT",
@@ -123,13 +147,22 @@ config = BinanceFuturesTradingEnvConfig(
     demo=True,  # Testnet (recommended!)
 )
 
-env = BinanceFuturesTorchTradingEnv(config)
+env = BinanceFuturesTorchTradingEnv(
+    config,
+    api_key=os.getenv("BINANCE_API_KEY"),
+    api_secret=os.getenv("BINANCE_SECRET_KEY"),
+)
 ```
 
 ### BinanceFuturesSLTPTorchTradingEnv
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.binance import BinanceFuturesSLTPTorchTradingEnv, BinanceFuturesSLTPTradingEnvConfig
+
+load_dotenv()
 
 config = BinanceFuturesSLTPTradingEnvConfig(
     symbol="BTCUSDT",
@@ -158,7 +191,11 @@ config = BinanceFuturesSLTPTradingEnvConfig(
 #     position_fraction=0.1,
 # )
 
-env = BinanceFuturesSLTPTorchTradingEnv(config)
+env = BinanceFuturesSLTPTorchTradingEnv(
+    config,
+    api_key=os.getenv("BINANCE_API_KEY"),
+    api_secret=os.getenv("BINANCE_SECRET_KEY"),
+)
 # Action space: HOLD + 2×(2 SL × 3 TP) = 13 actions (long + short)
 ```
 
@@ -664,21 +701,21 @@ config = BinanceFuturesSLTPTradingEnvConfig(
     trade_mode="fractional",
     position_fraction=0.1,       # 10% of account balance
     leverage=5,
-    ...
+    # ... the rest of the config
 )
 
 # Notional: always trade $500 USD worth
 config = BinanceFuturesSLTPTradingEnvConfig(
     trade_mode="notional",
     quantity_per_trade=500.0,    # $500 per trade
-    ...
+    # ... the rest of the config
 )
 
 # Quantity: always trade exactly 0.001 BTC (default)
 config = BinanceFuturesSLTPTradingEnvConfig(
     trade_mode="quantity",       # default
     quantity_per_trade=0.001,
-    ...
+    # ... the rest of the config
 )
 ```
 
@@ -692,7 +729,7 @@ All live SLTP environments support `lock_position_until_sltp`. When enabled, age
 ```python
 config = BinanceFuturesSLTPTradingEnvConfig(
     lock_position_until_sltp=True,  # Positions exit only via SL/TP
-    ...
+    # ... the rest of the config
 )
 ```
 
@@ -749,8 +786,8 @@ Each exchange requires API keys stored in a `.env` file:
 
 ```bash
 # Alpaca (https://alpaca.markets/signup)
-API_KEY=your_alpaca_api_key
-SECRET_KEY=your_alpaca_secret_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
 
 # Binance (https://www.binance.com/en/my/settings/api-management)
 BINANCE_API_KEY=your_binance_api_key
@@ -782,7 +819,7 @@ OKX_PASSPHRASE=your_okx_passphrase
 
 | Feature | Alpaca | Binance | Bitget | Bybit | OKX | Polymarket |
 |---------|--------|---------|--------|-------|-----|------------|
-| **Asset Types** | Stocks, Crypto | Crypto | Crypto | Crypto | Crypto | Prediction markets |
+| **Asset Types** | Crypto | Crypto | Crypto | Crypto | Crypto | Prediction markets |
 | **Futures** | - | Yes | Yes | Yes | Yes | - |
 | **Max Leverage** | 1x | 125x | 125x | 100x | 125x | 1x |
 | **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) | Yes (Demo) | Yes (dry_run — the ONLY mode) |

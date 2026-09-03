@@ -21,14 +21,16 @@ class SLTPMixin:
     """Shared behaviour for every env that places stop-loss / take-profit brackets.
 
     As of #288 this owns the STEP ITSELF, not just helpers: `_step` and `_reset` were
-    four copies, 100% identical within each venue pair. All five SLTP envs inherit them
-    -- alpaca included, which is why deleting its own `_reset` mattered: with both in the
-    MRO, `_reset_sltp_state` ran twice per reset.
+    four copies, 100% identical within each venue pair. The four futures venues inherit
+    both. Alpaca inherits `_reset` and keeps its own spot `_step`; deleting alpaca's
+    `_reset` mattered because with both in the MRO, `_reset_sltp_state` ran twice.
 
-    Two venue-specific pieces remain, both deliberate: `_bracket_entry_price` (bybit and
-    okx use the mark `_step` already acquired under the halt policy; binance and bitget
-    price off their own candle close -- #409/#295), and okx's `_resolve_bracket_quantity`
-    override, which refuses a sub-minimum bracket instead of letting the venue reject it.
+    Venue variation is deliberate and lives in two places. `_bracket_entry_price` is one
+    shared method here, branching on the class flag `_PRICES_OFF_THREADED_MARK`: bybit and
+    okx use the mark `_step` already acquired under the halt policy, binance and bitget
+    price off their own candle close (#409/#295). okx is the only leaf that overrides
+    `_resolve_bracket_quantity`, refusing a sub-minimum bracket instead of letting the
+    venue reject it.
 
     Required of the inheriting class -- the full list, because owning `_step` means this
     mixin now depends on the whole live-env surface, not just SLTP state:
@@ -289,10 +291,10 @@ class SLTPMixin:
         """Place the bracket. One copy for all four futures SLTP venues (#288).
 
         `current_price` is the mark `_step` acquired, passed by the venues that price off
-        it and ignored by the ones that read their own candle -- see
-        `_bracket_entry_price`, the price source. okx additionally varies
-        `_resolve_bracket_quantity` (sub-minimum refusal), so there are two seams,
-        not one -- this PR's own structural test exempts the second by name.
+        it and ignored by the ones that read their own candle. See `_bracket_entry_price`
+        for that split. okx also varies `_resolve_bracket_quantity` (sub-minimum refusal),
+        so there are two seams, not one, and the structural test exempts the second by
+        name.
 
         Args:
             action_tuple: (side, stop_loss_pct, take_profit_pct); (None, None, None) is HOLD.

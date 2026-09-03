@@ -74,10 +74,19 @@ for batch in collector:
 ### From Real Online Environments
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 
+load_dotenv()
+
 # Collect real trading data (paper trading recommended)
-env = AlpacaTorchTradingEnv(config)
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
 
 # Record interactions
 for episode in range(num_episodes):
