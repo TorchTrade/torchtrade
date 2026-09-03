@@ -168,7 +168,10 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
 
         # `current_timestamp` is where the env is in the data. The sampler has no
         # index attribute.
-        obs["sentiment"] = torch.tensor([self.sentiment_data.loc[self.current_timestamp]])
+        obs["sentiment"] = torch.tensor(
+            [self.sentiment_data.loc[self.current_timestamp]],
+            dtype=self.observation_spec["sentiment"].dtype,
+        )
 
         return obs
 
@@ -176,7 +179,10 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
         """Add sentiment to step observations"""
         obs = super()._step(tensordict)
 
-        obs["sentiment"] = torch.tensor([self.sentiment_data.loc[self.current_timestamp]])
+        obs["sentiment"] = torch.tensor(
+            [self.sentiment_data.loc[self.current_timestamp]],
+            dtype=self.observation_spec["sentiment"].dtype,
+        )
 
         return obs
 
