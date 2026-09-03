@@ -36,7 +36,7 @@ fig.savefig("episode_history.png")
 
 ## Visualization Types
 
-All environments render **3 subplots**:
+All three listed environments render **3 subplots**:
 
 1. **Price History with Actions**: Shows the asset price over time with long/short actions marked as green upward triangles (long/buy) and red downward triangles (short/sell). Position closes are shown as orange (long close) and cyan (short close) markers.
 2. **Portfolio Value vs Buy-and-Hold**: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy.
