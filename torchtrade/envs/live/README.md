@@ -7,7 +7,7 @@ Production-ready environments for live trading with real market data and order e
 ```
 live/
 ├── shared/      # Shared components (futures base observation)
-├── alpaca/      # Alpaca (US equities & crypto spot)
+├── alpaca/      # Alpaca (crypto spot)
 ├── binance/     # Binance Futures (crypto)
 ├── bitget/      # Bitget Futures (crypto)
 ├── bybit/       # Bybit Futures (crypto, cross/isolated margin)
@@ -18,9 +18,10 @@ live/
 ## Supported Providers
 
 ### Alpaca (`alpaca/`)
-- **Markets**: US equities, crypto spot
+- **Markets**: crypto spot. Equities are not supported: the observer fetches crypto bars
+  only, so an equity symbol constructs and then returns no data.
 - **Environments**: `AlpacaTorchTradingEnv`, `AlpacaSLTPTorchTradingEnv`
-- **Features**: Paper trading, fractional shares, extended hours
+- **Features**: paper trading, fractional quantities
 
 ### Binance (`binance/`)
 - **Markets**: Crypto futures (USDT-margined)
@@ -61,7 +62,7 @@ from torchtrade.envs.live.alpaca.env import AlpacaTorchTradingEnv, AlpacaTrading
 
 config = AlpacaTradingEnvConfig(
     paper=True,  # Use paper trading for testing
-    symbol="AAPL",
+    symbol="BTC/USD",
     time_frames=["1Min"],
     window_sizes=[10],
     execute_on="1Min",
@@ -162,10 +163,11 @@ checking by hand:
 - `torchtrade.envs.live.MarginMode` no longer exists. Use `BybitMarginMode`, which is what
   it meant, or the venue module. okx was already aliased this way.
 
-**Migrating from before #425. This breaks checkpoints on bitget, bybit and okx.** Those
-three defaulted `action_levels` to `[-1.0, -0.5, 0.0, 0.5, 1.0]`; the shared default is
-now `[-1, 0, 1]`, which binance already used. `action_spec.n` sizes the policy head, so a
-5-way head will not load.
+**Migrating from before #425.** This breaks bitget, bybit and okx checkpoints trained on
+the old default, meaning a config that never set `action_levels`. Those three defaulted to
+`[-1.0, -0.5, 0.0, 0.5, 1.0]`; the shared default is now `[-1, 0, 1]`, which binance
+already used. `action_spec.n` sizes the policy head, so a 5-way head will not load. A
+config that passed `action_levels` explicitly is unaffected.
 
 To keep an existing checkpoint, pass the old list:
 `BybitFuturesTradingEnvConfig(action_levels=[-1.0, -0.5, 0.0, 0.5, 1.0], ...)`. Otherwise
@@ -291,8 +293,9 @@ env = AlpacaSLTPTorchTradingEnv(
 ### Error Handling
 
 - **API rate limits**: not handled. Budget your own request rate.
-- **Invalid orders**: the executors raise. An order the env thinks it placed and the venue
-  rejected is worse than a loud failure (#414, #420).
+- **Invalid orders**: two paths. Pre-submission argument checks raise, so a sub-minimum
+  quantity or a limit order with no price fails loudly (#414, #420). A rejection from the
+  venue is logged and returned as `False`, and the env treats the trade as not executed.
 - **Position desync**: handled. `_sync_position_from_exchange` reconciles against the venue
   before the duplicate-action guard, and clears the cached level on a divergence so the
   agent can correct (#243).
@@ -547,7 +550,7 @@ def test_alpaca_connection():
     """Test connection to Alpaca paper trading"""
     config = AlpacaTradingEnvConfig(
         paper=True,
-        symbol="SPY",
+        symbol="BTC/USD",
     )
 
     env = AlpacaTorchTradingEnv(

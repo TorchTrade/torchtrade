@@ -311,8 +311,8 @@ source .venv/bin/activate  # Unix/macOS
 
 # 5. For live trading, create .env file
 cat > .env << EOF
-API_KEY=your_alpaca_api_key
-SECRET_KEY=your_alpaca_secret_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
 BINANCE_API_KEY=your_binance_api_key
 BINANCE_SECRET_KEY=your_binance_secret_key
 BYBIT_API_KEY=your_bybit_api_key

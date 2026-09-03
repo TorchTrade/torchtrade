@@ -43,7 +43,8 @@ td = env.reset()  # a TensorDict, not a bare array
 
 - **Paper Trading**: Risk-free testing with simulated funds
 - **Fractional Quantities**: crypto orders are not rounded to whole units
-- **Bar Polling**: REST, one date-range fetch per step
+- **Bar Polling**: REST. `get_observations()` makes one date-range fetch per configured
+  timeframe, each call.
 - **Crypto Spot**: BTC/USD, ETH/USD and Alpaca's other crypto pairs
 
 ## Configuration
@@ -91,7 +92,7 @@ Crypto trades 24/7.
 action = 1  # action 0 is flat/HOLD; 1..N open a position
 ```
 
-**Time-in-Force**: Day orders (default), good-til-canceled (GTC) optional
+**Time-in-Force**: the executor defaults to `ioc`. The SLTP bracket order passes `gtc`.
 
 ## Example: Paper Trading
 
@@ -180,10 +181,11 @@ td = env.step(td)
 
 ## API Rate Limits
 
-Alpaca allows 200 requests/minute for market data, orders and account.
+Alpaca's limits depend on the API and the plan; check
+<https://docs.alpaca.markets/docs/rate-limit> for your account.
 
-**This package does not throttle.** One env on a 1-minute bar stays well inside that. Many
-envs, or a sub-minute `execute_on`, need your own request budget.
+**This package does not throttle.** One env on a 1-minute bar is unlikely to reach any of
+them. Many envs, or a sub-minute `execute_on`, need your own request budget.
 
 ## Common Issues
 

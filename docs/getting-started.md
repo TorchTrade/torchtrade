@@ -180,15 +180,15 @@ env = SequentialTradingEnvSLTP(df, config)
 
 For live trading with real exchanges, you'll need API credentials.
 
-### Alpaca (US Stocks & Crypto)
+### Alpaca (Crypto Spot)
 
 Alpaca offers commission-free paper trading for testing strategies without risk. See [Alpaca Paper Trading Docs](https://docs.alpaca.markets/docs/paper-trading) for API credentials setup.
 
 ```bash
 # Create .env file
 cat > .env << EOF
-API_KEY=your_alpaca_api_key
-SECRET_KEY=your_alpaca_secret_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
 EOF
 ```
 

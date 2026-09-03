@@ -13,7 +13,7 @@ Online environments connect to real trading APIs for paper trading or live execu
 
 **Supported Exchanges:**
 
-- **[Alpaca](https://alpaca.markets/)** - Commission-free US stocks and crypto with paper trading
+- **[Alpaca](https://alpaca.markets/)** - Crypto spot with paper trading
 - **[Binance](https://accounts.binance.com/register?ref=25015935)** - Cryptocurrency futures with high leverage and testnet
 - **[Bitget](https://share.bitget.com/u/VGN302X2)** - Cryptocurrency futures with competitive fees and testnet
 - **[Bybit](https://www.bybit.eu/invite?ref=MX42GRV)** - Cryptocurrency derivatives with native bracket orders and testnet
@@ -66,7 +66,8 @@ Live environments use a **query-first pattern**: they query the actual exchange 
 
 ## Alpaca Environments
 
-[Alpaca](https://alpaca.markets/) provides commission-free trading for US stocks and cryptocurrencies with paper trading support.
+[Alpaca](https://alpaca.markets/) offers commission-free trading with paper support. These
+environments cover crypto spot only; the observer fetches crypto bars.
 
 ### AlpacaTorchTradingEnv
 
@@ -749,8 +750,8 @@ Each exchange requires API keys stored in a `.env` file:
 
 ```bash
 # Alpaca (https://alpaca.markets/signup)
-API_KEY=your_alpaca_api_key
-SECRET_KEY=your_alpaca_secret_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
 
 # Binance (https://www.binance.com/en/my/settings/api-management)
 BINANCE_API_KEY=your_binance_api_key
