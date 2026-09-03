@@ -1,11 +1,12 @@
 # Core Base Classes
 
-This directory contains the fundamental base classes that all TorchTrade environments inherit from.
+This directory contains the base classes of the shared TorchTrade environment hierarchy.
+Two families sit outside it; see Class Hierarchy below.
 
 ## Module Overview
 
 ### `base.py`
-Root base class for all environments.
+Root of the shared environment hierarchy.
 
 **Key Classes:**
 - `TorchTradeBaseEnv`: Abstract base class defining the core environment interface
@@ -17,7 +18,7 @@ Root base class for all environments.
 - Render and logging interfaces
 
 ### `offline_base.py`
-Base class for all backtesting environments.
+Base class for the sequential backtesting environments.
 
 **Key Classes:**
 - `TorchTradeOfflineEnv`: Extends `TorchTradeBaseEnv` for offline simulations
@@ -29,7 +30,7 @@ Base class for all backtesting environments.
 - Fast-forward execution
 
 ### `live.py`
-Base class for all live trading environments.
+Base class for the live exchange environments.
 
 **Key Classes:**
 - `TorchTradeLiveEnv`: Extends `TorchTradeBaseEnv` for live trading
@@ -74,15 +75,32 @@ Common types and enums.
 ```
 TorchTradeBaseEnv (base.py)
 ├── TorchTradeOfflineEnv (offline_base.py)
-│   ├── SequentialTradingEnv
-│   ├── SequentialTradingEnvSLTP
-│   ├── OneStepTradingEnv
-│   └── VectorizedSequentialTradingEnv(+SLTP)
+│   └── SequentialTradingEnv
+│       └── SequentialTradingEnvSLTP
+│           └── OneStepTradingEnv
 └── TorchTradeLiveEnv (live.py)
     ├── AlpacaBaseTorchTradingEnv
-    ├── BinanceBaseTorchTradingEnv
-    └── ...
+    │   ├── AlpacaTorchTradingEnv
+    │   └── AlpacaSLTPTorchTradingEnv
+    └── TorchTradeFuturesLiveEnv (live/shared/futures_live_base.py)
+        ├── BinanceBaseTorchTradingEnv
+        ├── BitgetBaseTorchTradingEnv
+        ├── BybitBaseTorchTradingEnv
+        └── OKXBaseTorchTradingEnv
 ```
+
+Each of the four futures bases has a plain and an SLTP leaf, elided here.
+
+The offline side is a chain: `OneStepTradingEnv` inherits `SequentialTradingEnvSLTP`,
+which inherits `SequentialTradingEnv`. A change to `SequentialTradingEnv` reaches all
+three.
+
+Two families sit outside this tree. `VectorizedSequentialTradingEnv` and
+`PolymarketBetEnv` subclass TorchRL's `EnvBase` directly, and
+`VectorizedSequentialTradingEnvSLTP` extends the plain vectorized env. None of them
+inherit `TorchTradeOfflineEnv` or `TorchTradeLiveEnv`, so a change to those bases must be
+applied to them by hand. The vectorized pair still shares `utils/` and the batched reward
+in `core/default_rewards.py`; polymarket shares only `utils/termination.py`.
 
 ## Usage Examples
 
@@ -266,6 +284,6 @@ def test_env():
 ## See Also
 
 - [Utilities Documentation](../utils/README.md)
-- [Offline Environments](../offline/README.md)
+- [Offline Environments](../../../docs/environments/offline.md)
 - [Live Environments](../live/README.md)
 - [Main README](../README.md)

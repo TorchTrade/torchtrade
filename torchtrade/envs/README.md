@@ -9,15 +9,16 @@ torchtrade/envs/
 ├── core/              # Base classes and fundamental abstractions
 ├── utils/             # Shared utility functions and helpers
 ├── offline/           # Backtesting environments
-│   ├── infrastructure/    # Internal sampler and utilities
-│   ├── longonly/          # Long-only trading environments
-│   └── futures/           # Futures trading environments
+│   └── infrastructure/    # Internal sampler and utilities
 ├── live/              # Live trading environments
 │   ├── shared/            # Shared components across providers
 │   ├── alpaca/            # Alpaca integration
 │   ├── binance/           # Binance Futures integration
 │   ├── bitget/            # Bitget Futures integration
-│   └── bybit/             # Bybit Futures integration
+│   ├── bybit/             # Bybit Futures integration
+│   ├── okx/               # OKX Futures integration
+│   └── polymarket/        # Polymarket prediction markets
+├── replay/            # Historical playback through the live pipeline
 └── transforms/        # TorchRL environment transforms
 ```
 
@@ -62,13 +63,14 @@ env = AlpacaTorchTradingEnv(config, api_key="your_key", api_secret="your_secret"
 
 ### Core (`core/`)
 
-Contains the fundamental base classes that all environments inherit from:
+Contains the base classes of the shared environment hierarchy:
 
-- **TorchTradeBaseEnv**: Root base class for all environments
-- **TorchTradeOfflineEnv**: Base for backtesting environments
-- **TorchTradeLiveEnv**: Base for live trading environments
+- **TorchTradeBaseEnv**: Root of the shared hierarchy
+- **TorchTradeOfflineEnv**: Base for the sequential backtesting environments
+- **TorchTradeLiveEnv**: Base for the live exchange environments
 - **PositionState**: State management for positions
-- **HistoryTracker**: Episode history used by every environment
+- **HistoryTracker**: Episode history. Built by `offline_base.py`, `futures_live_base.py`
+  and `alpaca/base.py`, so the vectorized envs and polymarket do not have one
 - **default_rewards**: the built-in reward functions
 
 See [core/README.md](core/README.md) for details.
@@ -89,21 +91,16 @@ See [utils/README.md](utils/README.md) for details.
 
 Backtesting environments for strategy development and evaluation:
 
-- **Long-Only**: Traditional buy-and-hold style environments
-- **Futures**: Leveraged long/short futures environments
+- **Sequential**: `SequentialTradingEnv` and its SLTP and one-step variants. Spot or
+  futures is a config choice (`leverage`, `action_levels`), not a separate class.
+- **Vectorized**: batched variants of the sequential envs
 - **Infrastructure**: Internal sampling and utilities (not user-facing)
 
-See [offline/README.md](offline/README.md) for details.
+See [the offline environments guide](../../docs/environments/offline.md) for details.
 
 ### Live Environments (`live/`)
 
-Production-ready environments for live trading:
-
-- **Alpaca**: crypto spot trading
-- **Binance**: Crypto futures trading
-- **Bitget**: Crypto futures trading
-- **Bybit**: Crypto futures trading
-- **Shared**: Common components (futures base observation)
+Production-ready environments for live trading. The tree above lists the venues.
 
 See [live/README.md](live/README.md) for details.
 
@@ -143,6 +140,9 @@ Multi-step environments where agents make decisions at each timestep:
 
 - `SequentialTradingEnv`: Unified sequential trading (spot or futures via `leverage` and `action_levels`)
 - `SequentialTradingEnvSLTP`: Sequential with stop-loss/take-profit bracket orders
+- `VectorizedSequentialTradingEnv`, `VectorizedSequentialTradingEnvSLTP`: batched
+  variants. They sit outside the `TorchTradeOfflineEnv` hierarchy; see
+  [core/README.md](core/README.md).
 
 ### One-Step Environments
 
@@ -162,12 +162,15 @@ Real-time trading environments with API integration:
 - `BitgetFuturesSLTPTorchTradingEnv`: Bitget with SL/TP
 - `BybitFuturesTorchTradingEnv`: Bybit Futures
 - `BybitFuturesSLTPTorchTradingEnv`: Bybit with SL/TP
+- `OKXFuturesTorchTradingEnv`: OKX Futures
+- `OKXFuturesSLTPTorchTradingEnv`: OKX with SL/TP
+- `PolymarketBetEnv`: prediction markets, paper only. `dry_run=False` raises
 
 ## Design Principles
 
 1. **Clear Separation**: Core classes, utilities, and implementations are clearly separated
 2. **Consistent Naming**: All provider files follow the same naming conventions
-3. **Parallel Structure**: Offline longonly and futures mirror each other
+3. **Parallel Structure**: the five exchange directories share one file layout
 4. **Import Flexibility**: Support both top-level and direct imports
 5. **Maintainability**: READMEs at each level explain purpose and usage
 
@@ -202,5 +205,5 @@ When adding new environments or utilities:
 
 - [Core Base Classes](core/README.md)
 - [Utilities Documentation](utils/README.md)
-- [Offline Environments Guide](offline/README.md)
+- [Offline Environments Guide](../../docs/environments/offline.md)
 - [Live Environments Guide](live/README.md)

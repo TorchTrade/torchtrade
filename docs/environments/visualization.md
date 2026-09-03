@@ -1,10 +1,10 @@
 # Visualizing Episode History
 
-All offline environments support **`render_history()`** to visualize episode performance after training or evaluation. The method automatically detects the environment type and renders appropriate plots.
+The three sequential offline environments support **`render_history()`** to visualize episode performance after training or evaluation. The method automatically detects the environment type and renders appropriate plots. The vectorized environments do not have it.
 
 ## Overview
 
-The `render_history()` method is inherited from the `TorchTradeOfflineEnv` base class and provides consistent visualization across all 3 offline environments:
+The `render_history()` method is inherited from the `TorchTradeOfflineEnv` base class and provides consistent visualization across the three:
 
 - **SequentialTradingEnv**
 - **SequentialTradingEnvSLTP**
@@ -36,7 +36,7 @@ fig.savefig("episode_history.png")
 
 ## Visualization Types
 
-All environments render **3 subplots**:
+All three listed environments render **3 subplots**:
 
 1. **Price History with Actions**: Shows the asset price over time with long/short actions marked as green upward triangles (long/buy) and red downward triangles (short/sell). Position closes are shown as orange (long close) and cyan (short close) markers.
 2. **Portfolio Value vs Buy-and-Hold**: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy.
@@ -51,4 +51,4 @@ All environments render **3 subplots**:
 | `return_fig` | bool | `False` | Return matplotlib figure instead of displaying |
 | `plot_bh_baseline` | bool | `True` | Show buy-and-hold baseline comparison |
 
-Implemented in `torchtrade/envs/offline/base.py`. Requires `matplotlib`.
+Implemented in `torchtrade/envs/core/offline_base.py`. Requires `matplotlib`.

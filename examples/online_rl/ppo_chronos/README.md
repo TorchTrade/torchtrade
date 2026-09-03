@@ -53,7 +53,7 @@ model:
 ### Train the agent
 
 ```bash
-cd examples/online/ppo_chronos
+cd examples/online_rl/ppo_chronos
 python train.py
 ```
 

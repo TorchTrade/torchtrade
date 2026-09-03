@@ -1,6 +1,6 @@
 # Understanding the Sampler
 
-The `MarketDataObservationSampler` (found in `torchtrade/envs/offline/sampler.py`) handles multi-timeframe data sampling in TorchTrade's offline environments. It resamples high-frequency data (1-minute bars) to multiple timeframes and creates synchronized observation windows while preventing lookahead bias. This allows RL agents to observe market patterns across different time scales simultaneously, from short-term momentum to long-term trends.
+The `MarketDataObservationSampler` (found in `torchtrade/envs/offline/infrastructure/sampler.py`) handles multi-timeframe data sampling in TorchTrade's offline environments. It resamples high-frequency data (1-minute bars) to multiple timeframes and creates synchronized observation windows while preventing lookahead bias. This allows RL agents to observe market patterns across different time scales simultaneously, from short-term momentum to long-term trends.
 
 ## What Is the Sampler?
 
@@ -341,7 +341,7 @@ Choose window sizes based on the information needed:
 
 ## Technical Reference
 
-- **Source**: [`torchtrade/envs/offline/infrastructure/sampler.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/envs/offline/infrastructure/sampler.py)
+- **Source**: [`torchtrade/envs/offline/infrastructure/sampler.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/offline/infrastructure/sampler.py)
 - **Resampling Logic**: Uses pandas `resample().agg()` with OHLCV aggregation rules (auxiliary columns use `"last"`)
 - **Column Order**: OHLCV always occupies positions 0-4 regardless of input column order
 - **Indexing**: Execution times mapped to 1-minute bar indices, then resampled timeframes aligned

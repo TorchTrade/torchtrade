@@ -12,7 +12,7 @@ live/
 ├── bitget/      # Bitget Futures (crypto)
 ├── bybit/       # Bybit Futures (crypto, cross/isolated margin)
 ├── okx/         # OKX Futures (crypto, bybit-derived)
-└── polymarket/  # Polymarket prediction markets (has a dry_run paper path)
+└── polymarket/  # Polymarket prediction markets (paper only)
 ```
 
 ## Supported Providers
@@ -46,7 +46,7 @@ live/
 ### Polymarket (`polymarket/`)
 - **Markets**: Prediction markets
 - **Components**: `PolymarketBetEnv`, `MarketScanner`, `PolymarketOrderExecutor`
-- **Features**: `dry_run` paper path
+- **Features**: paper only. `dry_run=False` raises
 
 No environment on any venue models funding fees -- see the note in `binance/README.md`.
 

@@ -232,6 +232,6 @@ See the SLTPMixin section above for the real surface.
 ## See Also
 
 - [Core Base Classes](../core/README.md)
-- [Offline Environments](../offline/README.md)
+- [Offline Environments](../../../docs/environments/offline.md)
 - [Live Environments](../live/README.md)
 - [Main README](../README.md)
