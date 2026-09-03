@@ -1,11 +1,12 @@
 # Core Base Classes
 
-This directory contains the fundamental base classes that all TorchTrade environments inherit from.
+This directory contains the base classes of the shared TorchTrade environment hierarchy.
+Two families sit outside it; see Class Hierarchy below.
 
 ## Module Overview
 
 ### `base.py`
-Root base class for all environments.
+Root of the shared environment hierarchy.
 
 **Key Classes:**
 - `TorchTradeBaseEnv`: Abstract base class defining the core environment interface
@@ -17,7 +18,7 @@ Root base class for all environments.
 - Render and logging interfaces
 
 ### `offline_base.py`
-Base class for all backtesting environments.
+Base class for the sequential backtesting environments.
 
 **Key Classes:**
 - `TorchTradeOfflineEnv`: Extends `TorchTradeBaseEnv` for offline simulations
@@ -29,7 +30,7 @@ Base class for all backtesting environments.
 - Fast-forward execution
 
 ### `live.py`
-Base class for all live trading environments.
+Base class for the live exchange environments.
 
 **Key Classes:**
 - `TorchTradeLiveEnv`: Extends `TorchTradeBaseEnv` for live trading

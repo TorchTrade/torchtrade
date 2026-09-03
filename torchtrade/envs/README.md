@@ -63,13 +63,14 @@ env = AlpacaTorchTradingEnv(config, api_key="your_key", api_secret="your_secret"
 
 ### Core (`core/`)
 
-Contains the fundamental base classes that all environments inherit from:
+Contains the base classes of the shared environment hierarchy:
 
-- **TorchTradeBaseEnv**: Root base class for all environments
-- **TorchTradeOfflineEnv**: Base for backtesting environments
-- **TorchTradeLiveEnv**: Base for live trading environments
+- **TorchTradeBaseEnv**: Root of the shared hierarchy
+- **TorchTradeOfflineEnv**: Base for the sequential backtesting environments
+- **TorchTradeLiveEnv**: Base for the live exchange environments
 - **PositionState**: State management for positions
-- **HistoryTracker**: Episode history used by every environment
+- **HistoryTracker**: Episode history. Built by `offline_base.py`, `futures_live_base.py`
+  and `alpaca/base.py`, so the vectorized envs and polymarket do not have one
 - **default_rewards**: the built-in reward functions
 
 See [core/README.md](core/README.md) for details.

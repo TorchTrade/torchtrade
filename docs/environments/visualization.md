@@ -4,7 +4,7 @@ The three sequential offline environments support **`render_history()`** to visu
 
 ## Overview
 
-The `render_history()` method is inherited from the `TorchTradeOfflineEnv` base class and provides consistent visualization across all 3 offline environments:
+The `render_history()` method is inherited from the `TorchTradeOfflineEnv` base class and provides consistent visualization across the three:
 
 - **SequentialTradingEnv**
 - **SequentialTradingEnvSLTP**
