@@ -681,10 +681,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#alpaca-us-stocks-crypto" class="md-nav__link">
+  <a href="#alpaca-crypto-spot" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Alpaca (US Stocks &amp; Crypto)
+        Alpaca (Crypto Spot)
       
     </span>
   </a>
@@ -1590,10 +1590,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#alpaca-us-stocks-crypto" class="md-nav__link">
+  <a href="#alpaca-crypto-spot" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Alpaca (US Stocks &amp; Crypto)
+        Alpaca (Crypto Spot)
       
     </span>
   </a>
@@ -1793,25 +1793,34 @@
 </span></code></pre></div>
 <h2 id="live-trading-setup">Live Trading Setup<a class="headerlink" href="#live-trading-setup" title="Permanent link">&para;</a></h2>
 <p>For live trading with real exchanges, you'll need API credentials.</p>
-<h3 id="alpaca-us-stocks-crypto">Alpaca (US Stocks &amp; Crypto)<a class="headerlink" href="#alpaca-us-stocks-crypto" title="Permanent link">&para;</a></h3>
+<h3 id="alpaca-crypto-spot">Alpaca (Crypto Spot)<a class="headerlink" href="#alpaca-crypto-spot" title="Permanent link">&para;</a></h3>
 <p>Alpaca offers commission-free paper trading for testing strategies without risk. See <a href="https://docs.alpaca.markets/docs/paper-trading">Alpaca Paper Trading Docs</a> for API credentials setup.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Create .env file</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>cat<span class="w"> </span>&gt;<span class="w"> </span>.env<span class="w"> </span><span class="s">&lt;&lt; EOF</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s">API_KEY=your_alpaca_api_key</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="s">SECRET_KEY=your_alpaca_secret_key</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="s">ALPACA_API_KEY=your_alpaca_api_key</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="s">ALPACA_SECRET_KEY=your_alpaca_secret_key</span>
 </span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="s">EOF</span>
 </span></code></pre></div>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.live.alpaca</span><span class="w"> </span><span class="kn">import</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">,</span> <span class="n">AlpacaTradingEnvConfig</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
 </span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">AlpacaTradingEnvConfig</span><span class="p">(</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">"BTC/USD"</span><span class="p">,</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">"1Min"</span><span class="p">,</span> <span class="s2">"5Min"</span><span class="p">],</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">"5Min"</span><span class="p">,</span>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="n">paper</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Start with paper trading!</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="p">)</span>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
-</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="n">env</span> <span class="o">=</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">dotenv</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_dotenv</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.live.alpaca</span><span class="w"> </span><span class="kn">import</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">,</span> <span class="n">AlpacaTradingEnvConfig</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">load_dotenv</span><span class="p">()</span>  <span class="c1"># reads the .env written above; os.getenv does not read files</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">config</span> <span class="o">=</span> <span class="n">AlpacaTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">"BTC/USD"</span><span class="p">,</span>
+</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">"1Min"</span><span class="p">,</span> <span class="s2">"5Min"</span><span class="p">],</span>
+</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+</span><span id="__span-11-12"><a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">"5Min"</span><span class="p">,</span>
+</span><span id="__span-11-13"><a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>    <span class="n">paper</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Start with paper trading!</span>
+</span><span id="__span-11-14"><a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="p">)</span>
+</span><span id="__span-11-15"><a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>
+</span><span id="__span-11-16"><a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="n">env</span> <span class="o">=</span> <span class="n">AlpacaTorchTradingEnv</span><span class="p">(</span>
+</span><span id="__span-11-17"><a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>    <span class="n">config</span><span class="p">,</span>
+</span><span id="__span-11-18"><a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"ALPACA_API_KEY"</span><span class="p">),</span>
+</span><span id="__span-11-19"><a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a>    <span class="n">api_secret</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"ALPACA_SECRET_KEY"</span><span class="p">),</span>
+</span><span id="__span-11-20"><a id="__codelineno-11-20" name="__codelineno-11-20" href="#__codelineno-11-20"></a><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="binance-crypto-futures">Binance (Crypto Futures)<a class="headerlink" href="#binance-crypto-futures" title="Permanent link">&para;</a></h3>
 <p>If you want to trade on Binance, register <a href="https://accounts.binance.com/register?ref=25015935">here</a> in case you have no account. Binance also allows for demo trading, see <a href="https://www.binance.com/en/square/post/14316321292186">here</a>.</p>
@@ -1819,21 +1828,30 @@
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nv">BINANCE_API_KEY</span><span class="o">=</span>your_binance_api_key
 </span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="nv">BINANCE_SECRET_KEY</span><span class="o">=</span>your_binance_secret_key
 </span></code></pre></div>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.live.binance</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    <span class="n">BinanceFuturesTorchTradingEnv</span><span class="p">,</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    <span class="n">BinanceFuturesTradingEnvConfig</span>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="p">)</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesTradingEnvConfig</span><span class="p">(</span>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">"BTCUSDT"</span><span class="p">,</span>
-</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">"1m"</span><span class="p">,</span> <span class="s2">"5m"</span><span class="p">],</span>
-</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
-</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">"1m"</span><span class="p">,</span>
-</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>                        <span class="c1"># 5x leverage</span>
-</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                         <span class="c1"># Use testnet</span>
-</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="p">)</span>
-</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>
-</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="n">env</span> <span class="o">=</span> <span class="n">BinanceFuturesTorchTradingEnv</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">dotenv</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_dotenv</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.live.binance</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    <span class="n">BinanceFuturesTorchTradingEnv</span><span class="p">,</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    <span class="n">BinanceFuturesTradingEnvConfig</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="p">)</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="n">load_dotenv</span><span class="p">()</span>  <span class="c1"># reads the .env written above; os.getenv does not read files</span>
+</span><span id="__span-13-10"><a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>
+</span><span id="__span-13-11"><a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="n">config</span> <span class="o">=</span> <span class="n">BinanceFuturesTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-13-12"><a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    <span class="n">symbol</span><span class="o">=</span><span class="s2">"BTCUSDT"</span><span class="p">,</span>
+</span><span id="__span-13-13"><a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">"1m"</span><span class="p">,</span> <span class="s2">"5m"</span><span class="p">],</span>
+</span><span id="__span-13-14"><a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>    <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">12</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+</span><span id="__span-13-15"><a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a>    <span class="n">execute_on</span><span class="o">=</span><span class="s2">"1m"</span><span class="p">,</span>
+</span><span id="__span-13-16"><a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>    <span class="n">leverage</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>                        <span class="c1"># 5x leverage</span>
+</span><span id="__span-13-17"><a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a>    <span class="n">demo</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                         <span class="c1"># Use testnet</span>
+</span><span id="__span-13-18"><a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="p">)</span>
+</span><span id="__span-13-19"><a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a>
+</span><span id="__span-13-20"><a id="__codelineno-13-20" name="__codelineno-13-20" href="#__codelineno-13-20"></a><span class="n">env</span> <span class="o">=</span> <span class="n">BinanceFuturesTorchTradingEnv</span><span class="p">(</span>
+</span><span id="__span-13-21"><a id="__codelineno-13-21" name="__codelineno-13-21" href="#__codelineno-13-21"></a>    <span class="n">config</span><span class="p">,</span>
+</span><span id="__span-13-22"><a id="__codelineno-13-22" name="__codelineno-13-22" href="#__codelineno-13-22"></a>    <span class="n">api_key</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"BINANCE_API_KEY"</span><span class="p">),</span>
+</span><span id="__span-13-23"><a id="__codelineno-13-23" name="__codelineno-13-23" href="#__codelineno-13-23"></a>    <span class="n">api_secret</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s2">"BINANCE_SECRET_KEY"</span><span class="p">),</span>
+</span><span id="__span-13-24"><a id="__codelineno-13-24" name="__codelineno-13-24" href="#__codelineno-13-24"></a><span class="p">)</span>
 </span></code></pre></div>
 <p><strong>Note</strong>: Alpaca and Binance are just two examples of live environments/brokers that TorchTrade supports. For more details on all available exchanges and configurations, see <strong><a href="../environments/online/">Online Environments</a></strong>. We're always open to including additional brokers - if you'd like to request support for a new exchange, please <a href="https://github.com/TorchTrade/torchtrade/issues">create an issue</a> or contact us directly at torchtradecontact@gmail.com.</p>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
