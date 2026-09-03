@@ -110,10 +110,10 @@ TorchTrade's offline RL support is compatible with any offline RL algorithm from
 
 ## Next Steps
 
-- **[IQL Example](../examples.md#offline-training)** - Complete offline RL implementation
+- **[IQL Example](../examples/index.md#offline-rl)** - Complete offline RL implementation
 - **[Offline Environments](offline.md)** - Environments for dataset collection
 - **[Online Environments](online.md)** - Live trading for data collection
-- **[Examples](../examples.md)** - Browse all training examples
+- **[Examples](../examples/index.md)** - Browse all training examples
 
 ## References
 

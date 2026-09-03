@@ -9,12 +9,7 @@ torchtrade/envs/
 ├── core/              # Base classes and fundamental abstractions
 ├── utils/             # Shared utility functions and helpers
 ├── offline/           # Backtesting environments
-│   ├── infrastructure/    # Internal sampler and utilities
-│   ├── sequential.py
-│   ├── sequential_sltp.py
-│   ├── onestep.py
-│   ├── vectorized_sequential.py
-│   └── vectorized_sequential_sltp.py
+│   └── infrastructure/    # Internal sampler and utilities
 ├── live/              # Live trading environments
 │   ├── shared/            # Shared components across providers
 │   ├── alpaca/            # Alpaca integration
@@ -99,7 +94,7 @@ Backtesting environments for strategy development and evaluation:
 - **Futures**: Leveraged long/short futures environments
 - **Infrastructure**: Internal sampling and utilities (not user-facing)
 
-See [offline/README.md](offline/README.md) for details.
+See [the offline environments guide](../../docs/environments/offline.md) for details.
 
 ### Live Environments (`live/`)
 
@@ -149,9 +144,9 @@ Multi-step environments where agents make decisions at each timestep:
 
 - `SequentialTradingEnv`: Unified sequential trading (spot or futures via `leverage` and `action_levels`)
 - `SequentialTradingEnvSLTP`: Sequential with stop-loss/take-profit bracket orders
-- `VectorizedSequentialTradingEnv`, `VectorizedSequentialTradingEnvSLTP`: batched variants.
-  They subclass `EnvBase` directly, not `TorchTradeOfflineEnv`, so a change to the shared
-  offline base does not reach them.
+- `VectorizedSequentialTradingEnv`, `VectorizedSequentialTradingEnvSLTP`: batched
+  variants. They sit outside the `TorchTradeOfflineEnv` hierarchy; see
+  [core/README.md](core/README.md).
 
 ### One-Step Environments
 
@@ -173,13 +168,13 @@ Real-time trading environments with API integration:
 - `BybitFuturesSLTPTorchTradingEnv`: Bybit with SL/TP
 - `OKXFuturesTorchTradingEnv`: OKX Futures
 - `OKXFuturesSLTPTorchTradingEnv`: OKX with SL/TP
-- `PolymarketBetEnv`: prediction markets, with a `dry_run` paper path
+- `PolymarketBetEnv`: prediction markets, paper only. `dry_run=False` raises
 
 ## Design Principles
 
 1. **Clear Separation**: Core classes, utilities, and implementations are clearly separated
 2. **Consistent Naming**: All provider files follow the same naming conventions
-3. **Parallel Structure**: each live provider directory has the same layout
+3. **Parallel Structure**: the five exchange directories share one file layout
 4. **Import Flexibility**: Support both top-level and direct imports
 5. **Maintainability**: READMEs at each level explain purpose and usage
 
@@ -214,5 +209,5 @@ When adding new environments or utilities:
 
 - [Core Base Classes](core/README.md)
 - [Utilities Documentation](utils/README.md)
-- [Offline Environments Guide](offline/README.md)
+- [Offline Environments Guide](../../docs/environments/offline.md)
 - [Live Environments Guide](live/README.md)

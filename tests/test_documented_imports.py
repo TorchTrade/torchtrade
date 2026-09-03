@@ -23,15 +23,19 @@ IMPORT_LINE = re.compile(r"^from (torchtrade[\w.]*) import (?:\(([^)]*)\)|([^\n(
 PY_BLOCK = re.compile(r"```python\n(.*?)```", re.S)
 
 
+@functools.lru_cache(maxsize=None)
+def _git_ls_files(pattern=None):
+    """Tracked paths from the index, not the filesystem. Anyone's untracked local notes
+    must not fail the suite, and an empty directory left behind by a rename is not
+    something a reader can clone."""
+    argv = ["git", "ls-files"] + ([pattern] if pattern else [])
+    listing = subprocess.run(argv, cwd=REPO, capture_output=True, text=True, check=True)
+    return tuple(line for line in listing.stdout.splitlines() if line.strip())
+
+
+@functools.lru_cache(maxsize=None)
 def _doc_sources():
-    """Tracked markdown only. Sourcing from the index rather than the filesystem keeps
-    anyone's untracked local notes from failing the suite, without hardcoding a
-    directory name that only exists on one machine."""
-    listing = subprocess.run(["git", "ls-files", "*.md"], cwd=REPO,
-                             capture_output=True, text=True, check=True)
-    for line in listing.stdout.split("\n"):
-        if line.strip():
-            yield REPO / line.strip()
+    return tuple(REPO / line for line in _git_ls_files("*.md"))
 
 
 def _documented_imports():
@@ -369,65 +373,179 @@ def test_a_documented_block_calls_nothing_that_does_not_exist(earlier_blocks, bl
     )
 
 
-# A repo path in a doc, in either of the two forms one appears in: backticked
-# (`torchtrade/envs/offline/sampler.py`), anchored to the four real top-level directories
-# so ordinary prose in backticks cannot match; or inside a github tree/blob URL. Both
-# forms are needed: offline-rl.md named the same phantom twice, once each way.
-DOC_PATH = re.compile(r"`((?:torchtrade|examples|tests|benchmarks)/[\w./-]+)`")
-DOC_URL = re.compile(
-    r"https://github\.com/TorchTrade/torchtrade/(?:tree|blob)/main/([\w./-]+)"
+# The three ways a doc names a repo file: backticked (`torchtrade/envs/core/live.py`),
+# inside a github tree/blob URL, and as a markdown link target. All three have shipped a
+# phantom. The prefix alternation is built from git rather than hardcoded, so it cannot
+# claim a directory the repo does not have.
+_TOP_LEVEL = "|".join(sorted({p.split("/")[0] for p in _git_ls_files() if "/" in p}))
+BACKTICKED_PATH = re.compile(rf"`((?:{_TOP_LEVEL})/[\w./-]+)`")
+GITHUB_URL = re.compile(
+    r"https://github\.com/TorchTrade/torchtrade/(?:tree|blob)/main/([\w./-]+)",
+    re.IGNORECASE,
 )
+RELATIVE_LINK = re.compile(r"\]\((?!https?:|#|mailto:)([^)\s#]+)(?:#[^)\s]*)?\)")
 
 
 def _documented_paths():
+    """Every repo path the docs name, as (source, repo-relative path) pairs.
+
+    Link targets are relative to their own file, so they are resolved against it and then
+    made repo-relative. The other two forms are already repo-relative.
+    """
+    seen = set()
     for path in _doc_sources():
         text = path.read_text()
-        for pattern in (DOC_PATH, DOC_URL):
+        for pattern in (BACKTICKED_PATH, GITHUB_URL):
             for match in pattern.finditer(text):
-                raw = match.group(1)
-                if "*" in raw:  # a glob is a pattern, not a path
-                    continue
-                yield pytest.param(raw, id=f"{path.relative_to(REPO)}::{raw}")
+                yield from _one(seen, path, match.group(1))
+        for match in RELATIVE_LINK.finditer(text):
+            target = (path.parent / match.group(1)).resolve()
+            if target.is_relative_to(REPO):
+                yield from _one(seen, path, str(target.relative_to(REPO)))
+
+
+def _one(seen, source, raw):
+    """One param per (source, path). A doc that names the same phantom twice is one fix,
+    and CONFIG_KWARGS already dedupes for the same reason."""
+    raw = raw.rstrip("/")
+    key = (source, raw)
+    if key not in seen:
+        seen.add(key)
+        yield pytest.param(raw, id=f"{source.relative_to(REPO)}::{raw}")
 
 
 DOC_PATHS = list(_documented_paths())
 
 
+@functools.lru_cache(maxsize=None)
 def _tracked_paths():
-    """Every tracked file, plus every directory on the way to one. Checked against the
-    index and not the filesystem for the same reason `_doc_sources` is: an empty local
-    directory left over from a rename is not something a reader can clone. That is the
-    exact shape of the `examples/offline/iql` phantom, which still existed on the machine
-    that documented it.
-    """
-    listing = subprocess.run(["git", "ls-files"], cwd=REPO,
-                             capture_output=True, text=True, check=True)
+    """Tracked files plus every directory on the way to one."""
     known = set()
-    for line in listing.stdout.split("\n"):
-        if line.strip():
-            parts = pathlib.PurePosixPath(line.strip()).parts
-            known.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
-    return known
+    for line in _git_ls_files():
+        path = pathlib.PurePosixPath(line)
+        known.update(str(p) for p in (path, *path.parents))
+    return known - {"."}
 
 
-TRACKED = _tracked_paths()
-
-
-@pytest.mark.parametrize("raw", DOC_PATHS)
-def test_a_documented_repo_path_is_tracked(raw):
+@pytest.mark.parametrize("documented_path", DOC_PATHS)
+def test_a_documented_repo_path_is_tracked(documented_path):
     """Kills the mutation that moves a file and leaves the docs naming the old location.
-    Three phantoms shipped this way: offline/base.py, offline/sampler.py and
-    examples/offline/iql. The import sweep above cannot see them, because a path in
-    backticks is not an import.
+    Nine phantoms shipped this way: offline/base.py, offline/sampler.py,
+    examples/offline/iql (twice), a nonexistent offline/README.md linked from three
+    READMEs, and a nonexistent docs/examples.md linked from two guides.
 
-    It does not cover the tree diagrams in the READMEs, which write bare names like
-    `longonly/` with no prefix to anchor on. Two phantom directories shipped there.
+    Checked against the index, not the filesystem: the examples/offline/iql phantom still
+    existed as an empty directory on the machine that documented it.
+
+    Three forms are still unchecked, all of which have carried a phantom: the ASCII trees
+    in the READMEs, bare filenames in backticks, and paths inside shell fences.
     """
-    assert raw.rstrip("/") in TRACKED, f"documented path is not in the repo: {raw}"
+    assert documented_path in _tracked_paths(), (
+        f"documented path is not in the repo: {documented_path}"
+    )
 
 
-def test_the_path_sweep_found_paths_to_check():
-    """An empty parametrize passes silently, so a regex that stops matching would turn
-    the guard above into a no-op rather than a failure.
+def test_each_path_form_still_finds_paths():
+    """Floors just under the real counts. A single floor over the total does not work
+    here: dropping the github-URL form entirely still left 31 of 65, which cleared a
+    `> 25` guard while half the sweep was dead.
+
+    A fully empty parametrize ERRORS on this pytest rather than passing, so partial
+    shrinkage, not silence, is what this catches.
     """
-    assert len(DOC_PATHS) > 25, f"only {len(DOC_PATHS)} documented paths found"
+    counts = {}
+    for source in _doc_sources():
+        text = source.read_text()
+        for name, pattern in (("backtick", BACKTICKED_PATH), ("url", GITHUB_URL),
+                              ("link", RELATIVE_LINK)):
+            counts[name] = counts.get(name, 0) + len(pattern.findall(text))
+    assert counts["backtick"] > 28, counts
+    assert counts["url"] > 30, counts
+    assert counts["link"] > 80, counts
+
+
+# The class-hierarchy diagram in core/README.md, parsed by indentation: a class's parent
+# is the nearest line above it that starts further left.
+HIERARCHY_DOC = REPO / "torchtrade" / "envs" / "core" / "README.md"
+TREE_BLOCK = re.compile(r"```\n(TorchTradeBaseEnv.*?)```", re.S)
+TREE_LINE = re.compile(r"^([\s│├└─]*)([A-Z]\w+)")
+
+
+def _documented_edges():
+    block = TREE_BLOCK.search(HIERARCHY_DOC.read_text()).group(1)
+    edges, open_at = [], {}
+    for line in block.split("\n"):
+        match = TREE_LINE.match(line)
+        if not match:
+            continue
+        column, name = len(match.group(1)), match.group(2)
+        outer = [c for c in open_at if c < column]
+        if outer:
+            edges.append(pytest.param(open_at[max(outer)], name,
+                                      id=f"{open_at[max(outer)]}->{name}"))
+        open_at = {c: n for c, n in open_at.items() if c < column}
+        open_at[column] = name
+    return edges
+
+
+DOCUMENTED_EDGES = _documented_edges()
+
+
+def _env_classes():
+    """Name -> class, over the whole walked package. `_package_names` does the walking;
+    without it `__subclasses__` sees only what other tests happened to import."""
+    _package_names()
+    found, stack = {}, [importlib.import_module("torchtrade.envs.core.base").TorchTradeBaseEnv]
+    while stack:
+        cls = stack.pop()
+        if cls.__name__ not in found:
+            found[cls.__name__] = cls
+            stack.extend(cls.__subclasses__())
+    return found
+
+
+@pytest.mark.parametrize("parent,child", DOCUMENTED_EDGES)
+def test_a_documented_hierarchy_edge_is_a_real_base(parent, child):
+    """The diagram drew the offline envs as four siblings when they are a chain, and hung
+    the four futures venues off TorchTradeLiveEnv when they route through
+    TorchTradeFuturesLiveEnv.
+
+    Direct bases, not issubclass: issubclass(OneStepTradingEnv, TorchTradeOfflineEnv) is
+    True, so an issubclass check passes the sibling version unchanged and tests nothing.
+    """
+    classes = _env_classes()
+    assert child in classes, f"diagram names a class that does not exist: {child}"
+    bases = [b.__name__ for b in classes[child].__bases__]
+    assert parent in bases, f"{child} is drawn under {parent}, real bases are {bases}"
+
+
+def test_every_intermediate_env_class_is_in_the_diagram():
+    """A venue added without updating the diagram is how it drifted the first time. Only
+    intermediates are required: the concrete leaves are elided deliberately, which the
+    diagram says in words.
+    """
+    classes = _env_classes()
+    drawn = {n for e in DOCUMENTED_EDGES for n in e.values} | {"TorchTradeBaseEnv"}
+    intermediate = {n for n, c in classes.items() if c.__subclasses__()}
+    assert not intermediate - drawn, f"missing from the diagram: {sorted(intermediate - drawn)}"
+
+
+@pytest.mark.parametrize("name", ["VectorizedSequentialTradingEnv",
+                                  "VectorizedSequentialTradingEnvSLTP",
+                                  "PolymarketBetEnv"])
+def test_the_envs_documented_as_outside_the_hierarchy_really_are(name):
+    """core/README.md tells the reader these do not inherit the shared bases, so a change
+    to those bases must be applied by hand. If someone reparents one, that warning turns
+    into a lie about money-moving code and nothing else would notice.
+    """
+    _package_names()
+    base = importlib.import_module("torchtrade.envs.core.base").TorchTradeBaseEnv
+    cls = _env_classes().get(name) or getattr(
+        importlib.import_module("torchtrade.envs"), name, None)
+    if cls is None:
+        for mod in ["torchtrade.envs.offline.vectorized_sequential",
+                    "torchtrade.envs.offline.vectorized_sequential_sltp",
+                    "torchtrade.envs.live.polymarket.env"]:
+            cls = cls or getattr(importlib.import_module(mod), name, None)
+    assert cls is not None, f"{name} does not exist"
+    assert not issubclass(cls, base), f"{name} now inherits TorchTradeBaseEnv"

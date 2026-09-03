@@ -341,7 +341,7 @@ Choose window sizes based on the information needed:
 
 ## Technical Reference
 
-- **Source**: [`torchtrade/envs/offline/infrastructure/sampler.py`](https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/envs/offline/infrastructure/sampler.py)
+- **Source**: [`torchtrade/envs/offline/infrastructure/sampler.py`](https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/offline/infrastructure/sampler.py)
 - **Resampling Logic**: Uses pandas `resample().agg()` with OHLCV aggregation rules (auxiliary columns use `"last"`)
 - **Column Order**: OHLCV always occupies positions 0-4 regardless of input column order
 - **Indexing**: Execution times mapped to 1-minute bar indices, then resampled timeframes aligned

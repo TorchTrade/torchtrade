@@ -81,7 +81,7 @@ TorchTradeBaseEnv (base.py)
     ├── AlpacaBaseTorchTradingEnv
     │   ├── AlpacaTorchTradingEnv
     │   └── AlpacaSLTPTorchTradingEnv
-    └── TorchTradeFuturesLiveEnv (futures_live_base.py)
+    └── TorchTradeFuturesLiveEnv (live/shared/futures_live_base.py)
         ├── BinanceBaseTorchTradingEnv
         ├── BitgetBaseTorchTradingEnv
         ├── BybitBaseTorchTradingEnv
@@ -89,14 +89,16 @@ TorchTradeBaseEnv (base.py)
             (each with a plain and an SLTP leaf)
 ```
 
-The offline side is a chain, not four siblings: `OneStepTradingEnv` inherits
-`SequentialTradingEnvSLTP`, which inherits `SequentialTradingEnv`. A change to
-`SequentialTradingEnv` reaches all three.
+The offline side is a chain: `OneStepTradingEnv` inherits `SequentialTradingEnvSLTP`,
+which inherits `SequentialTradingEnv`. A change to `SequentialTradingEnv` reaches all
+three.
 
-Two families sit outside this tree and subclass TorchRL's `EnvBase` directly:
-`VectorizedSequentialTradingEnv(+SLTP)` and `PolymarketBetEnv`. They do not inherit
-`TorchTradeOfflineEnv` or `TorchTradeLiveEnv`, so shared changes must be applied to them
-by hand.
+Two families sit outside this tree. `VectorizedSequentialTradingEnv` and
+`PolymarketBetEnv` subclass TorchRL's `EnvBase` directly, and
+`VectorizedSequentialTradingEnvSLTP` extends the plain vectorized env. None of them
+inherit `TorchTradeOfflineEnv` or `TorchTradeLiveEnv`, so a change to those bases must be
+applied to them by hand. They do still share the `utils/` modules and the reward
+functions in `core/default_rewards.py`.
 
 ## Usage Examples
 
@@ -280,6 +282,6 @@ def test_env():
 ## See Also
 
 - [Utilities Documentation](../utils/README.md)
-- [Offline Environments](../offline/README.md)
+- [Offline Environments](../../../docs/environments/offline.md)
 - [Live Environments](../live/README.md)
 - [Main README](../README.md)

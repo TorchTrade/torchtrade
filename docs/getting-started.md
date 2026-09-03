@@ -116,7 +116,7 @@ uv run python examples/online_rl/ppo/train.py \
     loss.gamma=0.95
 ```
 
-See the **[Examples](examples.md)** page for all available algorithms (PPO, DQN, IQL, DSAC, GRPO) and usage guides.
+See the **[Examples](examples/index.md)** page for all available algorithms (PPO, DQN, IQL, DSAC, GRPO) and usage guides.
 
 ## Common Use Cases
 
@@ -240,7 +240,7 @@ env = BinanceFuturesTorchTradingEnv(config)
 
 - **[Offline Environments](environments/offline.md)** - Deep dive into backtesting environments
 - **[Online Environments](environments/online.md)** - Live trading with exchange APIs
-- **[Examples](examples.md)** - Training scripts for all algorithms
+- **[Examples](examples/index.md)** - Training scripts for all algorithms
 
 ??? tip "Troubleshooting"
     - **"No module named 'torchtrade'"** → Activate the venv: `source .venv/bin/activate`
