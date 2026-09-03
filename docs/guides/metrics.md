@@ -66,12 +66,13 @@ import torch
 from torchtrade.metrics import compute_all_metrics
 
 # Run evaluation rollout
-obs = env.reset()
-done = False
-while not done:
-    action = policy(obs)
-    obs = env.step(action)
-    done = obs["done"].item()
+td = env.reset()
+while True:
+    td["action"] = policy(td)
+    td = env.step(td)
+    if td["next", "done"].item():
+        break
+    td = td["next"]
 
 # Get history from environment
 history = env.history  # HistoryTracker instance

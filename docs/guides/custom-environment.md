@@ -21,7 +21,7 @@ TorchTrade environments inherit from TorchRL's `EnvBase`:
 ```
 EnvBase (TorchRL)
     ↓
-BaseTorchTradeEnv (Abstract base - optional)
+TorchTradeBaseEnv (abstract base, optional)
     ↓
 YourCustomEnv
 ```
@@ -66,13 +66,15 @@ class SimpleCustomEnv(EnvBase):
         self.entry_price = 0.0
 
         # Define specs
-        self._observation_spec = Composite({
+        # Public names. Assigning `self._observation_spec` raises: TorchRL routes
+        # spec assignment through the property.
+        self.observation_spec = Composite({
             "price": Unbounded(shape=(1,)),
             "position": Unbounded(shape=(1,)),
         })
 
-        self._action_spec = Categorical(n=3)
-        self._reward_spec = Unbounded(shape=(1,))
+        self.action_spec = Categorical(n=3)
+        self.reward_spec = Unbounded(shape=(1,))
 
     def _reset(self, tensordict=None, **kwargs):
         """Reset to initial state"""
@@ -122,12 +124,13 @@ class SimpleCustomEnv(EnvBase):
 prices = torch.randn(1000).cumsum(0) + 100  # Random walk prices
 env = SimpleCustomEnv(prices, batch_size=[])
 
-obs = env.reset()
+td = env.reset()
 for _ in range(100):
-    action = env.action_spec.rand()  # Random action
-    obs = env.step(action)
-    if obs["done"]:
+    td["action"] = env.action_spec.rand()
+    td = env.step(td)                 # step takes and returns a TensorDict
+    if td["next", "done"]:
         break
+    td = td["next"]                   # the next observation
 ```
 
 ---
@@ -150,17 +153,20 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
         super().__init__(df, config)
         self.sentiment_data = sentiment_data  # Timeseries sentiment scores
 
-        # Extend observation spec
-        from torchrl.data import Unbounded
-        self._observation_spec["sentiment"] = Unbounded(shape=(1,))
+        # Rebuild the spec with the extra key. The spec is a property, so it is
+        # assigned whole rather than mutated in place.
+        from torchrl.data import Composite, Unbounded
+        self.observation_spec = Composite(
+            **self.observation_spec, sentiment=Unbounded(shape=(1,))
+        )
 
     def _reset(self, tensordict=None, **kwargs):
         """Add sentiment to observations"""
         obs = super()._reset(tensordict, **kwargs)
 
-        # Add current sentiment
-        sentiment_idx = self.sampler.reset_index
-        obs["sentiment"] = torch.tensor([self.sentiment_data[sentiment_idx].item()])
+        # `current_timestamp` is where the env is in the data. The sampler has no
+        # index attribute.
+        obs["sentiment"] = torch.tensor([self.sentiment_data[self.current_timestamp]])
 
         return obs
 
@@ -168,9 +174,7 @@ class CustomLongOnlyEnv(SequentialTradingEnv):
         """Add sentiment to step observations"""
         obs = super()._step(tensordict)
 
-        # Add current sentiment
-        sentiment_idx = self.sampler.current_index
-        obs["sentiment"] = torch.tensor([self.sentiment_data[sentiment_idx].item()])
+        obs["sentiment"] = torch.tensor([self.sentiment_data[self.current_timestamp]])
 
         return obs
 
@@ -189,8 +193,8 @@ config = SequentialTradingEnvConfig(
 env = CustomLongOnlyEnv(df, config, sentiment)
 
 # Policy network sees sentiment in observations
-obs = env.reset()
-print(obs.keys())  # [..., 'sentiment']
+td = env.reset()
+print(td.keys())  # [..., 'sentiment']
 ```
 
 ---
@@ -317,13 +321,16 @@ Verify specs match actual outputs:
 env = CustomEnv(...)
 
 # Check reset
-obs = env.reset()
-assert env.observation_spec.is_in(obs), "Reset observation doesn't match spec"
+td = env.reset()
+assert env.observation_spec.is_in(td.select(*env.observation_spec.keys())), \
+    "Reset observation doesn't match spec"
 
 # Check step
-action = env.action_spec.rand()
-obs = env.step(action)
-assert env.observation_spec.is_in(obs), "Step observation doesn't match spec"
+td = env.reset()
+td["action"] = env.action_spec.rand()
+td = env.step(td)
+assert env.observation_spec.is_in(td["next"].select(*env.observation_spec.keys())), \
+    "Step observation doesn't match spec"
 assert env.reward_spec.is_in(obs["reward"]), "Reward doesn't match spec"
 ```
 
@@ -333,14 +340,15 @@ Ensure episodes terminate correctly:
 
 ```python
 env = CustomEnv(...)
-obs = env.reset()
+td = env.reset()
 
 for i in range(10000):  # Safety limit
-    action = env.action_spec.rand()
-    obs = env.step(action)
-    if obs["done"]:
+    td["action"] = env.action_spec.rand()
+    td = env.step(td)
+    if td["next", "done"]:
         print(f"Episode ended at step {i}")
         break
+    td = td["next"]
 else:
     raise AssertionError("Episode never ended!")
 ```
@@ -352,12 +360,15 @@ Check reward values are reasonable:
 ```python
 rewards = []
 for episode in range(100):
-    obs = env.reset()
+    td = env.reset()
     episode_reward = 0
-    while not obs["done"]:
-        action = env.action_spec.rand()
-        obs = env.step(action)
-        episode_reward += obs["reward"].item()
+    while True:
+        td["action"] = env.action_spec.rand()
+        td = env.step(td)
+        episode_reward += td["next", "reward"].item()
+        if td["next", "done"]:
+            break
+        td = td["next"]
     rewards.append(episode_reward)
 
 print(f"Mean reward: {sum(rewards)/len(rewards):.2f}")
