@@ -293,9 +293,11 @@ env = AlpacaSLTPTorchTradingEnv(
 ### Error Handling
 
 - **API rate limits**: not handled. Budget your own request rate.
-- **Invalid orders**: two paths. Pre-submission argument checks raise, so a sub-minimum
-  quantity or a limit order with no price fails loudly (#414, #420). A rejection from the
-  venue is logged and returned as `False`, and the env treats the trade as not executed.
+- **Invalid orders**: the executor returns `False` and the env treats the trade as not
+  executed. Where the argument check sits differs by venue: bybit and okx validate before
+  the `try`, so a bad argument raises out of `trade()`; alpaca and binance validate inside
+  it, so the same mistake is logged and returns `False` (#414, #420). Do not rely on an
+  exception to catch a malformed order.
 - **Position desync**: handled. `_sync_position_from_exchange` reconciles against the venue
   before the duplicate-action guard, and clears the cached level on a divergence so the
   agent can correct (#243).

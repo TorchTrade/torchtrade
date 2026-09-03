@@ -24,8 +24,8 @@ Online environments connect to real trading APIs for paper trading or live execu
 
 | Environment | Exchange | Asset Type | Futures | Leverage | Bracket Orders |
 |-------------|----------|------------|---------|----------|----------------|
-| **AlpacaTorchTradingEnv** | Alpaca | Crypto/Stocks | - | - | - |
-| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto/Stocks | - | - | Yes |
+| **AlpacaTorchTradingEnv** | Alpaca | Crypto | - | - | - |
+| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto | - | - | Yes |
 | **BinanceFuturesTorchTradingEnv** | Binance | Crypto | Yes | Yes | - |
 | **BinanceFuturesSLTPTorchTradingEnv** | Binance | Crypto | Yes | Yes | Yes |
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | Yes | Yes | - |
@@ -783,7 +783,7 @@ OKX_PASSPHRASE=your_okx_passphrase
 
 | Feature | Alpaca | Binance | Bitget | Bybit | OKX | Polymarket |
 |---------|--------|---------|--------|-------|-----|------------|
-| **Asset Types** | Stocks, Crypto | Crypto | Crypto | Crypto | Crypto | Prediction markets |
+| **Asset Types** | Crypto | Crypto | Crypto | Crypto | Crypto | Prediction markets |
 | **Futures** | - | Yes | Yes | Yes | Yes | - |
 | **Max Leverage** | 1x | 125x | 125x | 100x | 125x | 1x |
 | **Paper Trading** | Yes | Yes (Testnet) | Yes (Testnet) | Yes (Testnet) | Yes (Demo) | Yes (dry_run — the ONLY mode) |

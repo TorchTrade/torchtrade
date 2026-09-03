@@ -133,8 +133,8 @@ TorchTrade supports live trading with major exchanges:
 
 | Environment | Exchange | Asset Type | Futures | Leverage | Bracket Orders |
 |-------------|----------|------------|---------|----------|----------------|
-| **AlpacaTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ❌ |
-| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ✅ |
+| **AlpacaTorchTradingEnv** | Alpaca | Crypto | ❌ | ❌ | ❌ |
+| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto | ❌ | ❌ | ✅ |
 | **BinanceFuturesTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ❌ |
 | **BinanceFuturesSLTPTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ✅ |
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ❌ |
@@ -194,7 +194,7 @@ paper-only** — see its entry.
 
 **[Alpaca](https://alpaca.markets/)** - Commission-free trading API
 - **Supported by:** `AlpacaTorchTradingEnv`, `AlpacaSLTPTorchTradingEnv`
-- **Features:** Commission-free stocks & crypto, paper trading, real-time data
+- **Features:** Commission-free crypto spot, paper trading, real-time data
 - **Best for:** US markets, algorithmic trading
 - **Get Started:** [Sign up for Alpaca](https://alpaca.markets/signup)
 
@@ -362,6 +362,8 @@ env = SequentialTradingEnv(df, config)
 ### Live Trading with Alpaca
 
 ```python
+import os
+
 from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
@@ -376,8 +378,12 @@ config = AlpacaTradingEnvConfig(
     paper=True  # Start with paper trading!
 )
 
-env = AlpacaTorchTradingEnv(config)
-# See examples/live/alpaca/collect_live.py
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
+# See examples/online_rl/ppo/live.py
 ```
 
 ### LLM-Based Trading

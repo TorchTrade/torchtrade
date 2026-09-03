@@ -79,7 +79,7 @@ config = AlpacaTradingEnvConfig(
 ### US equities
 Not supported. See the note at the top.
 
-Check Alpaca docs for full list: https://alpaca.markets/docs/trading/
+Check Alpaca docs for the full list: <https://docs.alpaca.markets/>
 
 ## Market Hours
 
@@ -174,15 +174,13 @@ td = env.step(td)
 ## Best Practices
 
 1. **Start with paper trading**: Test thoroughly before live trading
-2. **Verify market hours**: Don't trade when market is closed
-3. **Handle holidays**: Market closed on US holidays
-4. **Monitor positions**: Check Alpaca dashboard regularly
-5. **Use stop-losses**: Protect against large losses
+2. **Monitor positions**: Check Alpaca dashboard regularly
+3. **Use stop-losses**: Protect against large losses
 
 ## API Rate Limits
 
 Alpaca's limits depend on the API and the plan; check
-<https://docs.alpaca.markets/docs/rate-limit> for your account.
+<https://docs.alpaca.markets/> for your account.
 
 **This package does not throttle.** One env on a 1-minute bar is unlikely to reach any of
 them. Many envs, or a sub-minute `execute_on`, need your own request budget.
@@ -200,9 +198,8 @@ crypto data client and comes back empty.
 
 ## Resources
 
-- [Alpaca Documentation](https://alpaca.markets/docs/)
-- [Paper Trading Dashboard](https://paper-api.alpaca.markets/)
-- [Market Calendar](https://alpaca.markets/docs/market-hours/)
+- [Alpaca Documentation](https://docs.alpaca.markets/)
+- [Paper Trading Dashboard](https://app.alpaca.markets/paper/dashboard/overview)
 
 ## See Also
 
