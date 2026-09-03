@@ -217,7 +217,7 @@ After reorder:      [open, high, low, close, volume, funding_rate, basis]
     [0-5]:  NaN → 0.001 (last of [0.001, NaN, NaN, NaN, NaN])
     [5-10]: NaN → forward-filled to 0.001
     [10-15]: NaN → forward-filled to 0.001
-    ...
+    # ... the rest of the config
     [60-65]: 0.002 (new value arrives)
     ```
 

@@ -99,7 +99,7 @@ See [offline/README.md](offline/README.md) for details.
 
 Production-ready environments for live trading:
 
-- **Alpaca**: US equities and crypto spot trading
+- **Alpaca**: crypto spot trading
 - **Binance**: Crypto futures trading
 - **Bitget**: Crypto futures trading
 - **Bybit**: Crypto futures trading

@@ -165,6 +165,8 @@ The Binance observation class exposes all fields from Binance klines to your cus
 These extra fields allow you to derive sentiment features without additional API calls:
 
 ```python
+import os
+
 from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv
 
 def my_preprocessing(df):
@@ -183,6 +185,8 @@ def my_preprocessing(df):
 env = BinanceFuturesTorchTradingEnv(
     config=config,
     feature_preprocessing_fn=my_preprocessing,
+    api_key=os.environ["BINANCE_API_KEY"],
+    api_secret=os.environ["BINANCE_SECRET_KEY"],
 )
 ```
 

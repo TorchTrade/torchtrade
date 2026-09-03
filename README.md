@@ -133,8 +133,8 @@ TorchTrade supports live trading with major exchanges:
 
 | Environment | Exchange | Asset Type | Futures | Leverage | Bracket Orders |
 |-------------|----------|------------|---------|----------|----------------|
-| **AlpacaTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ❌ |
-| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto/Stocks | ❌ | ❌ | ✅ |
+| **AlpacaTorchTradingEnv** | Alpaca | Crypto | ❌ | ❌ | ❌ |
+| **AlpacaSLTPTorchTradingEnv** | Alpaca | Crypto | ❌ | ❌ | ✅ |
 | **BinanceFuturesTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ❌ |
 | **BinanceFuturesSLTPTorchTradingEnv** | Binance | Crypto | ✅ | ✅ (1-125x) | ✅ |
 | **BitgetFuturesTorchTradingEnv** | Bitget | Crypto | ✅ | ✅ (1-125x) | ❌ |
@@ -190,12 +190,12 @@ paper-only** — see its entry.
 - **⚠️ Paper trading only — not live:** `dry_run=False` raises. `py-clob-client` is archived/non-functional (Polymarket moved to CLOB V2), and the env holds bets to resolution while Polymarket only releases collateral on an on-chain redeem no client exposes — so a live bot would drain to zero *while winning*. Reviving live needs the V2 port **and** a redemption workflow.
 - **Get Started:** [Browse markets at Polymarket](https://polymarket.com/)
 
-### 📈 Stock & Crypto API
+### 📈 Crypto Spot API
 
 **[Alpaca](https://alpaca.markets/)** - Commission-free trading API
 - **Supported by:** `AlpacaTorchTradingEnv`, `AlpacaSLTPTorchTradingEnv`
-- **Features:** Commission-free stocks & crypto, paper trading, real-time data
-- **Best for:** US markets, algorithmic trading
+- **Features:** Commission-free crypto spot, paper trading, real-time data
+- **Best for:** crypto spot, algorithmic trading
 - **Get Started:** [Sign up for Alpaca](https://alpaca.markets/signup)
 
 ---
@@ -311,8 +311,8 @@ source .venv/bin/activate  # Unix/macOS
 
 # 5. For live trading, create .env file
 cat > .env << EOF
-API_KEY=your_alpaca_api_key
-SECRET_KEY=your_alpaca_secret_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
 BINANCE_API_KEY=your_binance_api_key
 BINANCE_SECRET_KEY=your_binance_secret_key
 BYBIT_API_KEY=your_bybit_api_key
@@ -362,8 +362,13 @@ env = SequentialTradingEnv(df, config)
 ### Live Trading with Alpaca
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+load_dotenv()  # reads the .env written above; os.getenv does not read files
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
@@ -376,8 +381,12 @@ config = AlpacaTradingEnvConfig(
     paper=True  # Start with paper trading!
 )
 
-env = AlpacaTorchTradingEnv(config)
-# See examples/live/alpaca/collect_live.py
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
+# See examples/online_rl/ppo/live.py
 ```
 
 ### LLM-Based Trading

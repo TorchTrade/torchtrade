@@ -116,7 +116,7 @@ chronos_transform = ChronosEmbeddingTransform(
     out_keys=[out_key],
     model_name=cfg.model.chronos_model,
     aggregation="mean",  # Options: "mean", "max", "concat"
-    ...
+    # ... the rest of the config
 )
 ```
 
@@ -133,7 +133,7 @@ chronos_transform = ChronosEmbeddingTransform(
     in_keys=[market_key],
     out_keys=[out_key],
     del_keys=False,  # Keep raw market data
-    ...
+    # ... the rest of the config
 )
 ```
 

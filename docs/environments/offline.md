@@ -255,21 +255,21 @@ config = SequentialTradingEnvSLTPConfig(
     leverage=5,
     stoploss_levels=[-0.02, -0.05],
     takeprofit_levels=[0.03, 0.06],
-    ...
+    # ... the rest of the config
 )
 
 # Notional: always trade $500 USD worth
 config = SequentialTradingEnvSLTPConfig(
     trade_mode="notional",
     quantity_per_trade=500.0,    # $500 per trade
-    ...
+    # ... the rest of the config
 )
 
 # Quantity: always trade exactly 0.05 BTC
 config = SequentialTradingEnvSLTPConfig(
     trade_mode="quantity",
     quantity_per_trade=0.05,     # 0.05 BTC per trade
-    ...
+    # ... the rest of the config
 )
 ```
 
@@ -285,7 +285,7 @@ When `lock_position_until_sltp=True`, the agent's actions are ignored while a po
 ```python
 config = SequentialTradingEnvSLTPConfig(
     lock_position_until_sltp=True,  # Ignore actions while in position
-    ...
+    # ... the rest of the config
 )
 ```
 

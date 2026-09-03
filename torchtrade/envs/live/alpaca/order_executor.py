@@ -165,7 +165,7 @@ class AlpacaOrderClass:
         order_type: str = "market",
         limit_price: Optional[float] = None,
         stop_price: Optional[float] = None,
-        time_in_force: str = "ioc", # gtc
+        time_in_force: str = "ioc",
         take_profit: Optional[float] = None,
         stop_loss: Optional[float] = None,
     ) -> bool:
@@ -178,7 +178,7 @@ class AlpacaOrderClass:
             order_type: "market", "limit", or "stop_limit"
             limit_price: Required for limit and stop_limit orders
             stop_price: Required for stop_limit orders
-            time_in_force: Time in force for the order (default: "gtc")
+            time_in_force: Time in force for the order. Anything but "gtc" maps to IOC.
 
         Returns:
             bool: True if order was submitted successfully, False otherwise

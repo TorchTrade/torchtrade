@@ -180,20 +180,25 @@ env = SequentialTradingEnvSLTP(df, config)
 
 For live trading with real exchanges, you'll need API credentials.
 
-### Alpaca (US Stocks & Crypto)
+### Alpaca (Crypto Spot)
 
 Alpaca offers commission-free paper trading for testing strategies without risk. See [Alpaca Paper Trading Docs](https://docs.alpaca.markets/docs/paper-trading) for API credentials setup.
 
 ```bash
 # Create .env file
 cat > .env << EOF
-API_KEY=your_alpaca_api_key
-SECRET_KEY=your_alpaca_secret_key
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
 EOF
 ```
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv, AlpacaTradingEnvConfig
+
+load_dotenv()  # reads the .env written above; os.getenv does not read files
 
 config = AlpacaTradingEnvConfig(
     symbol="BTC/USD",
@@ -203,7 +208,11 @@ config = AlpacaTradingEnvConfig(
     paper=True  # Start with paper trading!
 )
 
-env = AlpacaTorchTradingEnv(config)
+env = AlpacaTorchTradingEnv(
+    config,
+    api_key=os.getenv("ALPACA_API_KEY"),
+    api_secret=os.getenv("ALPACA_SECRET_KEY"),
+)
 ```
 
 ### Binance (Crypto Futures)
@@ -217,10 +226,15 @@ BINANCE_SECRET_KEY=your_binance_secret_key
 ```
 
 ```python
+import os
+
+from dotenv import load_dotenv
 from torchtrade.envs.live.binance import (
     BinanceFuturesTorchTradingEnv,
     BinanceFuturesTradingEnvConfig
 )
+
+load_dotenv()  # reads the .env written above; os.getenv does not read files
 
 config = BinanceFuturesTradingEnvConfig(
     symbol="BTCUSDT",
@@ -231,7 +245,11 @@ config = BinanceFuturesTradingEnvConfig(
     demo=True,                         # Use testnet
 )
 
-env = BinanceFuturesTorchTradingEnv(config)
+env = BinanceFuturesTorchTradingEnv(
+    config,
+    api_key=os.getenv("BINANCE_API_KEY"),
+    api_secret=os.getenv("BINANCE_SECRET_KEY"),
+)
 ```
 
 **Note**: Alpaca and Binance are just two examples of live environments/brokers that TorchTrade supports. For more details on all available exchanges and configurations, see **[Online Environments](environments/online.md)**. We're always open to including additional brokers - if you'd like to request support for a new exchange, please [create an issue](https://github.com/TorchTrade/torchtrade/issues) or contact us directly at torchtradecontact@gmail.com.
