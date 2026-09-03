@@ -121,10 +121,15 @@ Mixin class for adding SL/TP functionality to environments.
 ```python
 from torchtrade.envs.utils import SLTPMixin
 
-# SLTPMixin is small and deliberately so: SIDE_DIRECTION, _record_sltp_position,
-# _reset_sltp_state and _sync_position_from_exchange. It does NOT own bracket pricing,
-# trigger detection or the exit -- those live in the environment, because whether a
-# bracket fired is a question about the bar's high and low, which the mixin cannot see.
+# SLTPMixin is NOT small any more. It owns the step itself: _step, _reset,
+# _execute_trade_if_needed (places the bracket), _bracket_entry_price, _close_action and
+# _mark_flat (the exit), _init_bracket_action_space (builds action_map and action_spec),
+# plus SIDE_DIRECTION, _resolve_action_tuple, _record_sltp_position, _reset_sltp_state and
+# _sync_position_from_exchange -- 13 members, five SLTP envs. #411 moved the step in, #419
+# the executors, #428 the action space. What it still does NOT own is TRIGGER DETECTION:
+# whether a bracket fired is a question about the bar's high and low, which the mixin
+# cannot see. Two venue seams stay in the leaves: _bracket_entry_price differs by venue
+# (#409/#295) and okx overrides _resolve_bracket_quantity to refuse a sub-minimum bracket.
 class MyEnvWithSLTP(SLTPMixin):
     def _open(self, side):
         # Records the position the ACTION targets, never the order side (#276): a long

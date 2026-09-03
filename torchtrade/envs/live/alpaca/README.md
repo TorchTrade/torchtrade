@@ -1,6 +1,13 @@
 # Alpaca Trading Environment
 
-Live trading integration with Alpaca for US equities and crypto spot markets.
+Live trading integration with Alpaca for **crypto spot** markets.
+
+> **Equities are not supported.** `AlpacaObservationClass` builds a `CryptoBarsRequest`
+> against a `CryptoHistoricalDataClient` (`observation.py`) and there is no
+> `StockHistoricalDataClient` anywhere in this package. The order side uses `TradingClient`,
+> which *would* accept an equity order -- so an env configured with `symbol="AAPL"`
+> constructs successfully and then starves for observations. Adding equities means giving
+> the observer a stock data path first.
 
 ## Files
 
@@ -26,7 +33,7 @@ config = AlpacaTradingEnvConfig(
     paper=True,
     close_position_on_init=True,
     close_position_on_reset=False,
-    symbol="AAPL",
+    symbol="BTC/USD",
     time_frames=["1Min"],
     window_sizes=[10],
     execute_on="1Min",
@@ -39,10 +46,10 @@ td = env.reset()  # a TensorDict, not a bare array
 ## Features
 
 - **Paper Trading**: Risk-free testing with simulated funds
-- **Fractional Shares**: Buy partial shares (e.g., 0.5 shares of AAPL)
-- **Extended Hours**: Trade during pre-market and after-hours
-- **Real-time Data**: WebSocket streaming for live prices
-- **Multiple Assets**: Stocks, ETFs, and crypto (BTC, ETH, etc.)
+- **Fractional Quantities**: crypto orders are not rounded to whole units
+- **Bar Polling**: the observer fetches a date RANGE over REST each step -- there is no
+  WebSocket stream in this package
+- **Crypto Spot**: BTC/USD, ETH/USD and Alpaca's other crypto pairs
 
 ## Configuration
 
@@ -70,23 +77,19 @@ config = AlpacaTradingEnvConfig(
 
 ## Supported Symbols
 
-### US Equities
-- Stocks: AAPL, GOOGL, MSFT, TSLA, etc.
-- ETFs: SPY, QQQ, IWM, etc.
+### Crypto spot
+- BTC/USD, ETH/USD, etc.
 
-### Crypto
-- BTC/USD, ETH/USD, etc. (spot trading only)
+### US equities
+Not supported -- see the note at the top of this file.
 
 Check Alpaca docs for full list: https://alpaca.markets/docs/trading/
 
 ## Market Hours
 
-**Regular Hours:**
-- 9:30 AM - 4:00 PM ET (Monday-Friday)
-
-**Extended Hours** (with `extended_hours=True`):
-- Pre-market: 4:00 AM - 9:30 AM ET
-- After-hours: 4:00 PM - 8:00 PM ET
+Alpaca's crypto venue trades 24/7, so there is no session to schedule around. (This file
+used to document equity sessions and an `extended_hours=True` flag; that flag does not
+exist anywhere in this package.)
 
 ## Order Types
 
@@ -110,7 +113,7 @@ config = AlpacaTradingEnvConfig(
     paper=True,
     close_position_on_init=True,
     close_position_on_reset=False,
-    symbol="SPY",
+    symbol="BTC/USD",
     time_frames=["1Min"],
     window_sizes=[10],
     execute_on="1Min",
@@ -118,8 +121,8 @@ config = AlpacaTradingEnvConfig(
 
 env = AlpacaTorchTradingEnv(
     config,
-    api_key=os.environ["ALPACA_KEY"],
-    api_secret=os.environ["ALPACA_SECRET"],
+    api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
 )
 
 # Trading loop
@@ -152,7 +155,7 @@ config = AlpacaSLTPTradingEnvConfig(
     paper=True,
     close_position_on_init=True,
     close_position_on_reset=False,
-    symbol="AAPL",
+    symbol="BTC/USD",
     time_frames=["1Min"],
     window_sizes=[10],
     execute_on="1Min",
@@ -162,8 +165,8 @@ config = AlpacaSLTPTradingEnvConfig(
 
 env = AlpacaSLTPTorchTradingEnv(
     config,
-    api_key=os.environ["ALPACA_KEY"],
-    api_secret=os.environ["ALPACA_SECRET"],
+    api_key=os.environ["ALPACA_API_KEY"],
+    api_secret=os.environ["ALPACA_SECRET_KEY"],
 )
 td = env.reset()
 
@@ -184,15 +187,16 @@ td = env.step(td)
 
 ## API Rate Limits
 
-- **Market Data**: 200 requests/minute
-- **Orders**: 200 requests/minute
-- **Account**: 200 requests/minute
+Alpaca publishes 200 requests/minute for market data, orders and account.
 
-Environments handle rate limiting automatically.
+**This package does not throttle.** There is no rate limiting anywhere in
+`torchtrade/envs/live/` -- the only sleep in the live path is the bar wait in
+`core/live.py`. One env polling one symbol on a 1-minute bar stays well inside the limit;
+if you run many envs, or a sub-minute `execute_on`, budget the request rate yourself.
 
 ## Common Issues
 
-**"Market is closed"**: Check market hours and holidays
+**No bars returned**: check the symbol is a crypto pair -- an equity symbol reaches a crypto data client and comes back empty
 
 **"Insufficient funds"**: Not enough cash for order
 
