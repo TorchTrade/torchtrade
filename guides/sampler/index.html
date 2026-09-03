@@ -1399,7 +1399,7 @@
 
 
 <h1 id="understanding-the-sampler">Understanding the Sampler<a class="headerlink" href="#understanding-the-sampler" title="Permanent link">&para;</a></h1>
-<p>The <code>MarketDataObservationSampler</code> (found in <code>torchtrade/envs/offline/sampler.py</code>) handles multi-timeframe data sampling in TorchTrade's offline environments. It resamples high-frequency data (1-minute bars) to multiple timeframes and creates synchronized observation windows while preventing lookahead bias. This allows RL agents to observe market patterns across different time scales simultaneously, from short-term momentum to long-term trends.</p>
+<p>The <code>MarketDataObservationSampler</code> (found in <code>torchtrade/envs/offline/infrastructure/sampler.py</code>) handles multi-timeframe data sampling in TorchTrade's offline environments. It resamples high-frequency data (1-minute bars) to multiple timeframes and creates synchronized observation windows while preventing lookahead bias. This allows RL agents to observe market patterns across different time scales simultaneously, from short-term momentum to long-term trends.</p>
 <h2 id="what-is-the-sampler">What Is the Sampler?<a class="headerlink" href="#what-is-the-sampler" title="Permanent link">&para;</a></h2>
 <p>The sampler:</p>
 <ol>
@@ -1794,7 +1794,7 @@ already has, because the <code>execute_on</code> window's own close is the execu
 <hr />
 <h2 id="technical-reference">Technical Reference<a class="headerlink" href="#technical-reference" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Source</strong>: <a href="https://github.com/TorchTrade/TorchTrade/blob/main/torchtrade/envs/offline/infrastructure/sampler.py"><code>torchtrade/envs/offline/infrastructure/sampler.py</code></a></li>
+<li><strong>Source</strong>: <a href="https://github.com/TorchTrade/torchtrade/blob/main/torchtrade/envs/offline/infrastructure/sampler.py"><code>torchtrade/envs/offline/infrastructure/sampler.py</code></a></li>
 <li><strong>Resampling Logic</strong>: Uses pandas <code>resample().agg()</code> with OHLCV aggregation rules (auxiliary columns use <code>"last"</code>)</li>
 <li><strong>Column Order</strong>: OHLCV always occupies positions 0-4 regardless of input column order</li>
 <li><strong>Indexing</strong>: Execution times mapped to 1-minute bar indices, then resampled timeframes aligned</li>

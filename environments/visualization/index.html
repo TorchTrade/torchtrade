@@ -1309,9 +1309,9 @@
 
 
 <h1 id="visualizing-episode-history">Visualizing Episode History<a class="headerlink" href="#visualizing-episode-history" title="Permanent link">&para;</a></h1>
-<p>All offline environments support <strong><code>render_history()</code></strong> to visualize episode performance after training or evaluation. The method automatically detects the environment type and renders appropriate plots.</p>
+<p>The three sequential offline environments support <strong><code>render_history()</code></strong> to visualize episode performance after training or evaluation. The method automatically detects the environment type and renders appropriate plots. The vectorized environments do not have it.</p>
 <h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
-<p>The <code>render_history()</code> method is inherited from the <code>TorchTradeOfflineEnv</code> base class and provides consistent visualization across all 3 offline environments:</p>
+<p>The <code>render_history()</code> method is inherited from the <code>TorchTradeOfflineEnv</code> base class and provides consistent visualization across the three:</p>
 <ul>
 <li><strong>SequentialTradingEnv</strong></li>
 <li><strong>SequentialTradingEnvSLTP</strong></li>
@@ -1338,7 +1338,7 @@
 </span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="n">fig</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="s2">"episode_history.png"</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="visualization-types">Visualization Types<a class="headerlink" href="#visualization-types" title="Permanent link">&para;</a></h2>
-<p>All environments render <strong>3 subplots</strong>:</p>
+<p>All three listed environments render <strong>3 subplots</strong>:</p>
 <ol>
 <li><strong>Price History with Actions</strong>: Shows the asset price over time with long/short actions marked as green upward triangles (long/buy) and red downward triangles (short/sell). Position closes are shown as orange (long close) and cyan (short close) markers.</li>
 <li><strong>Portfolio Value vs Buy-and-Hold</strong>: Compares your agent's portfolio value against a simple buy-and-hold baseline strategy.</li>
@@ -1370,7 +1370,7 @@
 </tr>
 </tbody>
 </table>
-<p>Implemented in <code>torchtrade/envs/offline/base.py</code>. Requires <code>matplotlib</code>.</p>
+<p>Implemented in <code>torchtrade/envs/core/offline_base.py</code>. Requires <code>matplotlib</code>.</p>
 
 
 

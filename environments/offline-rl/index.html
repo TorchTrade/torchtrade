@@ -1445,7 +1445,7 @@
 - Developing policies when live interaction is expensive or dangerous
 - Bootstrapping learning before deploying to real markets</p>
 <h2 id="example-iql-implicit-q-learning">Example: IQL (Implicit Q-Learning)<a class="headerlink" href="#example-iql-implicit-q-learning" title="Permanent link">&para;</a></h2>
-<p>TorchTrade provides an example implementation of offline RL using <strong>Implicit Q-Learning (IQL)</strong> in <code>examples/offline/iql/</code>.</p>
+<p>TorchTrade provides an example implementation of offline RL using <strong>Implicit Q-Learning (IQL)</strong> in <code>examples/offline_rl/iql/</code>.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Example: Training IQL on pre-collected dataset</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
 </span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchrl.collectors</span><span class="w"> </span><span class="kn">import</span> <span class="n">Collector</span>
@@ -1466,7 +1466,7 @@
 </span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>    <span class="n">loss</span><span class="o">.</span><span class="n">backward</span><span class="p">()</span>
 </span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>    <span class="n">optimizer</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
 </span></code></pre></div>
-<p>For a complete implementation, see <a href="https://github.com/TorchTrade/torchtrade/tree/main/examples/offline/iql">examples/offline/iql/</a>.</p>
+<p>For a complete implementation, see <a href="https://github.com/TorchTrade/torchtrade/tree/main/examples/offline_rl/iql">examples/offline_rl/iql/</a>.</p>
 <h2 id="dataset-collection">Dataset Collection<a class="headerlink" href="#dataset-collection" title="Permanent link">&para;</a></h2>
 <h3 id="from-offline-environments">From Offline Environments<a class="headerlink" href="#from-offline-environments" title="Permanent link">&para;</a></h3>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">SequentialTradingEnv</span><span class="p">,</span> <span class="n">SequentialTradingEnvConfig</span>
@@ -1533,10 +1533,10 @@
 </ul>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong><a href="../examples.md#offline-training">IQL Example</a></strong> - Complete offline RL implementation</li>
+<li><strong><a href="../../examples/#offline-rl">IQL Example</a></strong> - Complete offline RL implementation</li>
 <li><strong><a href="../offline/">Offline Environments</a></strong> - Environments for dataset collection</li>
 <li><strong><a href="../online/">Online Environments</a></strong> - Live trading for data collection</li>
-<li><strong><a href="../examples.md">Examples</a></strong> - Browse all training examples</li>
+<li><strong><a href="../../examples/">Examples</a></strong> - Browse all training examples</li>
 </ul>
 <h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
 <ul>
