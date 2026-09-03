@@ -233,7 +233,7 @@ self.observation_spec = spec
 
 ### 3. State Management
 
-TorchTrade provides structured state management classes for consistent state handling across all environments. See **[State Management](../environments/offline.md#state-management)** for full details.
+TorchTrade provides structured state management classes for consistent state handling across all environments. See **[State Management](../environments/offline.md#account-state)** for full details.
 
 **Quick Reference - PositionState**:
 

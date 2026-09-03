@@ -59,7 +59,7 @@ win_metrics = compute_win_rate(returns)
 
 ## Usage with HistoryTracker
 
-Every TorchTrade environment records episode data in a `HistoryTracker` (see [State Management](../environments/offline.md#state-management)). After a rollout, extract the history and feed it to the metrics:
+Every TorchTrade environment records episode data in a `HistoryTracker` (see [State Management](../environments/offline.md#account-state)). After a rollout, extract the history and feed it to the metrics:
 
 ```python
 import torch
