@@ -1,7 +1,8 @@
 """TorchTrade: reinforcement learning environments for trading."""
 
-# Kept in step with pyproject.toml by tests/test_version_pin.py -- two files
-# holding one number is exactly the shape that drifts.
+# The single source. Hatchling reads it from here (`[tool.hatch.version]`), so
+# pyproject.toml declares the version dynamic rather than repeating the number.
+# tests/test_version_pin.py guards that, because it was three copies once.
 __version__ = "0.1.0"
 
 from torchtrade.envs.offline import (
