@@ -2,6 +2,13 @@
 
 TorchTrade provides a collection of example training scripts to help you get started. These examples are designed for **inspiration and learning** - use them as starting points to build your own custom training pipelines.
 
+The scripts need a few packages the library itself does not import (hydra, scikit-learn,
+tqdm, python-dotenv):
+
+```bash
+uv sync --extra examples
+```
+
 ## Design Philosophy
 
 TorchTrade examples closely follow the structure of [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), enabling **near plug-and-play compatibility** with any TorchRL algorithm. This means:
