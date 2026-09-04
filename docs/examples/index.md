@@ -9,6 +9,9 @@ tqdm, python-dotenv):
 uv sync --extra examples
 ```
 
+The commands below use `uv run`, which picks that environment up without activating it.
+If you prefer a bare `python`, activate first with `source .venv/bin/activate`.
+
 ## Design Philosophy
 
 TorchTrade examples closely follow the structure of [TorchRL's SOTA implementations](https://github.com/pytorch/rl/tree/main/sota-implementations), enabling **near plug-and-play compatibility** with any TorchRL algorithm. This means:
@@ -118,7 +121,7 @@ By centralizing all parameters in YAML, you can easily experiment with different
 
 ```bash
 # Override multiple parameters
-python train.py env.symbol="ETH/USD" optim.lr=1e-4 loss.gamma=0.95
+uv run python train.py env.symbol="ETH/USD" optim.lr=1e-4 loss.gamma=0.95
 ```
 
 **Example config.yaml** (PPO):
@@ -342,13 +345,13 @@ All policy gradient methods converge well below 10% after 5 epochs. CE (purple, 
 
 ```bash
 # Run with defaults (5 epochs, eta=1.0, mean baseline)
-python examples/losses/dg_mnist.py
+uv run python examples/losses/dg_mnist.py
 
 # Sweep eta temperature
-python examples/losses/dg_mnist.py --eta 0.3
+uv run python examples/losses/dg_mnist.py --eta 0.3
 
 # Skip plotting
-python examples/losses/dg_mnist.py --no-plot
+uv run python examples/losses/dg_mnist.py --no-plot
 ```
 
 ### Live Trading
@@ -367,13 +370,13 @@ Located alongside each algorithm in `examples/online_rl/`:
 **Usage:**
 ```bash
 # Train offline first
-python examples/online_rl/dqn/train.py
+uv run python examples/online_rl/dqn/train.py
 
 # Deploy trained weights to Binance testnet
-python examples/online_rl/dqn/live.py --weights dqn_policy_100.pth --demo
+uv run python examples/online_rl/dqn/live.py --weights dqn_policy_100.pth --demo
 
 # Deploy PPO to Alpaca paper trading
-python examples/online_rl/ppo/live.py --weights ppo_policy_100.pth --paper
+uv run python examples/online_rl/ppo/live.py --weights ppo_policy_100.pth --paper
 ```
 
 ### Transforms
