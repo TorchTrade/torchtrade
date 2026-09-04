@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "torchtrade"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Reinforcement learning environments for trading applications"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,12 +18,17 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
+    # Imported directly by the package. They arrive transitively via torchrl and
+    # alpaca-py today, which is not a contract: floors verified by running the suite
+    # against numpy 1.26.4 / pandas 2.1.4. torch's floor is torchrl 0.13's own.
+    "torch>=2.1.0",
+    "numpy>=1.26",
+    "pandas>=2.1",
     "alpaca-py",
     "python-binance",
     "ccxt>=4.0.0", # Replaced python-bitget with ccxt for V2 API support
     "pybit>=5.0.0",
     "python-okx>=0.3.0",
-    "python-dotenv",
     # RL stack pinned in lockstep (torchrl + tensordict MUST move together — a
     # skew is what silently broke CI before this pin). torchrl 0.13 removed the
     # `SyncDataCollector` alias (use `Collector`); torch floor (2.1.0) is met by 2.9.0.
@@ -31,15 +36,19 @@ dependencies = [
     "torchrl>=0.13.2,<0.14",
     "tensordict>=0.13,<0.14",
     "wandb",
-    "tqdm",
-    "hydra-core",
     "matplotlib",
     "ta",
-    "datasets",
-    "scikit-learn>=1.6.1",  # Used by example training scripts for StandardScaler
+    "datasets>=3.0",  # <3 calls pyarrow.PyExtensionType, removed in pyarrow 25
 ]
 
 [project.optional-dependencies]
+examples = [
+    # Not imported anywhere under torchtrade/; only the scripts in examples/ use them.
+    "python-dotenv",
+    "tqdm",
+    "hydra-core",
+    "scikit-learn>=1.6.1",
+]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -74,8 +83,8 @@ empty_parameter_set_mark = "fail_at_collect"
 "Bug Reports" = "https://github.com/TorchTrade/torchtrade/issues"
 "Source" = "https://github.com/TorchTrade/torchtrade"
 
-[tool.hatch.metadata]
-allow-direct-references = true
+[tool.hatch.version]
+path = "torchtrade/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["torchtrade"]

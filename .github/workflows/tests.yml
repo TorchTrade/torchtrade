@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install --system torch --index-url https://download.pytorch.org/whl/cpu
-          uv pip install --system -e ".[dev,chronos]"
+          uv pip install --system -e ".[dev,chronos,examples]"
 
       - name: Login to HuggingFace
         env:
@@ -59,3 +59,60 @@ jobs:
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # The installed artifact, not the repo. `pytest` above runs with the repo on
+  # sys.path, so it cannot see a dependency the package imports but never declares:
+  # numpy, pandas and torch were undeclared and arrived transitively, and `datasets`
+  # had no floor at all, which resolved to a version that dies on
+  # `pyarrow.PyExtensionType`. Installing the wheel with only its declared runtime
+  # deps, then importing from a directory that is not the checkout, is what catches
+  # that class.
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Build the wheel
+        run: uv build --wheel --out-dir dist .
+
+      - name: Install it alone, into a clean environment
+        run: |
+          uv venv --python 3.11 /tmp/wheelenv
+          uv pip install --python /tmp/wheelenv/bin/python dist/*.whl
+
+      - name: Import and drive an env from outside the checkout
+        run: |
+          mkdir -p /tmp/probe && cd /tmp/probe
+          /tmp/wheelenv/bin/python - <<'PY'
+          import numpy as np, pandas as pd, torchtrade
+          from importlib.metadata import version
+
+          assert "site-packages" in torchtrade.__file__, torchtrade.__file__
+          print("torchtrade", version("torchtrade"), "from", torchtrade.__file__)
+
+          from torchtrade.envs.offline.sequential import (
+              SequentialTradingEnv, SequentialTradingEnvConfig,
+          )
+          n = 3000
+          close = 100 + np.cumsum(np.random.randn(n) * 0.1)
+          df = pd.DataFrame({
+              "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min", tz="UTC"),
+              "open": close, "high": close + 0.5, "low": close - 0.5,
+              "close": close, "volume": np.random.rand(n) * 10,
+          })
+          env = SequentialTradingEnv(df=df, config=SequentialTradingEnvConfig(
+              time_frames=["1Min"], window_sizes=[10], execute_on="1Min", symbol="BTC/USD"))
+          td = env.reset()
+          td["action"] = env.action_spec.rand()
+          env.step(td)
+
+          from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv       # noqa: F401
+          from torchtrade.envs.live.binance import BinanceFuturesTorchTradingEnv  # noqa: F401
+          from torchtrade.envs.replay import ReplayObserver                   # noqa: F401
+          print("offline env stepped; live and replay imports resolved")
+          PY
