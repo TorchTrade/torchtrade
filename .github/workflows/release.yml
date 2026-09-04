@@ -1,0 +1,107 @@
+name: Release
+
+# Tag-driven. `git tag v0.1.0 && git push origin v0.1.0` builds, verifies and
+# publishes that tag. workflow_dispatch runs everything except the PyPI upload, so the
+# build and the clean-install check can be exercised without spending a version number.
+#
+# A PyPI version can never be re-uploaded or replaced, only yanked, so `verify` runs
+# the same clean-room install the test workflow does before `publish` is allowed to
+# start.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: The tag must match the version the package declares
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          declared=$(grep -oP '^__version__ = "\K[^"]+' torchtrade/__init__.py)
+          echo "tag=$tag declared=$declared"
+          if [ "$tag" != "$declared" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match __version__ $declared"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: uv build --out-dir dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Install the wheel alone and drive an env from outside any checkout
+        run: |
+          uv venv --python 3.11 /tmp/relenv
+          uv pip install --python /tmp/relenv/bin/python dist/*.whl
+          mkdir -p /tmp/relprobe && cd /tmp/relprobe
+          /tmp/relenv/bin/python - <<'PY'
+          import numpy as np, pandas as pd, torchtrade
+          from importlib.metadata import version
+
+          assert "site-packages" in torchtrade.__file__, torchtrade.__file__
+          print("torchtrade", version("torchtrade"))
+
+          from torchtrade.envs.offline.sequential import (
+              SequentialTradingEnv, SequentialTradingEnvConfig,
+          )
+          n = 3000
+          close = 100 + np.cumsum(np.random.randn(n) * 0.1)
+          df = pd.DataFrame({
+              "timestamp": pd.date_range("2024-01-01", periods=n, freq="1min", tz="UTC"),
+              "open": close, "high": close + 0.5, "low": close - 0.5,
+              "close": close, "volume": np.random.rand(n) * 10,
+          })
+          env = SequentialTradingEnv(df=df, config=SequentialTradingEnvConfig(
+              time_frames=["1Min"], window_sizes=[10], execute_on="1Min", symbol="BTC/USD"))
+          td = env.reset()
+          td["action"] = env.action_spec.rand()
+          env.step(td)
+
+          from torchtrade.envs.live.alpaca import AlpacaTorchTradingEnv       # noqa: F401
+          from torchtrade.envs.replay import ReplayObserver                   # noqa: F401
+          print("offline env stepped; live and replay imports resolved")
+          PY
+
+  publish:
+    # Tags only. workflow_dispatch stops after verify, so a rehearsal cannot spend a
+    # version number.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write   # Trusted Publishing; there is no API token to leak
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

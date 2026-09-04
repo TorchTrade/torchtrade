@@ -88,3 +88,19 @@ path = "torchtrade/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["torchtrade"]
+
+# Without this hatchling ships everything not in .gitignore, which swept up untracked
+# working directories: .superpowers (agent scaffolding), local_verify, benchmarks, plus
+# 1MB of docs/images. An sdist is for building the package, so it carries the package,
+# its tests and the metadata.
+[tool.hatch.build.targets.sdist]
+include = [
+    "torchtrade/",
+    "tests/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+# hatchling force-includes any README*, which otherwise ships five examples/*/README.md
+# with none of the examples they describe.
+exclude = ["examples/"]
