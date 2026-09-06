@@ -1,0 +1,134 @@
+name: Release
+
+# `git tag v0.1.0 && git push origin v0.1.0` builds, verifies and publishes that tag.
+# workflow_dispatch runs build and verify only; `publish` requires a pushed tag, so a
+# rehearsal cannot upload. That gate is on the EVENT as well as the ref, because the
+# dispatch ref picker offers tags too, and a dispatch on `v0.1.0` would otherwise pass a
+# ref-only check.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# build and verify need nothing but the code. `publish` re-grants what it needs.
+permissions:
+  contents: read
+
+# One release at a time. A per-ref group would put two different tags in two different
+# groups and let them race, which is the case worth serialising.
+concurrency:
+  group: release-pypi
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # for the ancestry check below
+
+      # tests.yml runs on pushes to main and on PRs into it. A tag push matches
+      # neither trigger, so without this a tag on any commit on any branch publishes
+      # code the suite has never seen, and it succeeds rather than failing.
+      - name: The tag must point at a commit that is on main
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          git fetch --quiet origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_SHA is not on origin/main, so tests.yml never ran it"
+            exit 1
+          fi
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: The tag must match the version the package declares
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          # `|| true`: steps run under `bash -e`, so a non-matching grep would abort here
+          # and the error below would never print.
+          declared=$(grep -E '^__version__' torchtrade/__init__.py | cut -d'"' -f2 || true)
+          echo "tag=$tag declared=$declared"
+          if [ -z "$declared" ]; then
+            echo "::error::no __version__ found in torchtrade/__init__.py"
+            exit 1
+          fi
+          if [ "$tag" != "$declared" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match __version__ $declared"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: uv build --out-dir dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      # For .github/scripts/smoke_installed.py. The probe runs from /tmp, so the
+      # checkout is never on sys.path.
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Metadata must be renderable by PyPI
+        run: uv tool run --from twine twine check dist/*
+
+      - name: The wheel installs with only its declared deps and works
+        run: |
+          uv venv --python 3.11 /tmp/wheelenv
+          uv pip install --python /tmp/wheelenv/bin/python dist/*.whl
+          mkdir -p /tmp/probe && cd /tmp/probe
+          /tmp/wheelenv/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_installed.py"
+
+      # The sdist is published too, and this PR is what stopped it being the hatchling
+      # default, so the include list is exactly what could break it. Installing it
+      # builds the wheel from it, which is what pip does for a source install.
+      - name: The sdist builds and works too
+        run: |
+          uv venv --python 3.11 /tmp/sdistenv
+          uv pip install --python /tmp/sdistenv/bin/python dist/*.tar.gz
+          mkdir -p /tmp/probe && cd /tmp/probe
+          /tmp/sdistenv/bin/python "$GITHUB_WORKSPACE/.github/scripts/smoke_installed.py"
+
+  publish:
+    # A pushed tag, not merely a tag-shaped ref: workflow_dispatch can select a tag.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # SHA-pinned, not @release/v1, which is a mutable BRANCH. This is the only step
+      # that can mint a PyPI token for the project, and a bad release there cannot be
+      # undone. The other actions run in jobs whose worst case is a rejected artifact.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33  # v1.14.2
+        with:
+          packages-dir: dist/
+          # twine uploads one file at a time. If the wheel lands and the sdist fails on
+          # a network blip, the version exists half-uploaded and a plain retry dies on
+          # the file already there.
+          skip-existing: true

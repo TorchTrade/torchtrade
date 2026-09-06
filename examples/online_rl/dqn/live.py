@@ -105,7 +105,7 @@ def make_live_env(
     env = BinanceFuturesTorchTradingEnv(
         config,
         api_key=os.getenv("BINANCE_API_KEY", ""),
-        api_secret=os.getenv("BINANCE_SECRET", ""),
+        api_secret=os.getenv("BINANCE_SECRET_KEY", ""),
         feature_preprocessing_fn=custom_preprocessing,
     )
 
