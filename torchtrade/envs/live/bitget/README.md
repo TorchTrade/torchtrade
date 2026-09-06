@@ -31,9 +31,9 @@ config = BitgetFuturesTradingEnvConfig(
 
 env = BitgetFuturesTorchTradingEnv(
     # Credentials are CONSTRUCTOR arguments, not config fields.
-    config, api_key=os.environ["BITGET_API_KEY"],
-    api_secret=os.environ["BITGET_SECRET"],
-    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+    config, api_key=os.environ["BITGETACCESSAPIKEY"],
+    api_secret=os.environ["BITGETSECRETKEY"],
+    api_passphrase=os.environ["BITGETPASSPHRASE"],
 )
 obs = env.reset()
 ```
@@ -150,9 +150,9 @@ config = BitgetFuturesTradingEnvConfig(
 
 env = BitgetFuturesTorchTradingEnv(
     # Credentials are CONSTRUCTOR arguments, not config fields.
-    config, api_key=os.environ["BITGET_API_KEY"],
-    api_secret=os.environ["BITGET_SECRET"],
-    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+    config, api_key=os.environ["BITGETACCESSAPIKEY"],
+    api_secret=os.environ["BITGETSECRETKEY"],
+    api_passphrase=os.environ["BITGETPASSPHRASE"],
 )
 td = env.reset()
 
@@ -187,9 +187,9 @@ config = BitgetFuturesSLTPTradingEnvConfig(
 
 env = BitgetFuturesSLTPTorchTradingEnv(
     # Credentials are CONSTRUCTOR arguments, not config fields.
-    config, api_key=os.environ["BITGET_API_KEY"],
-    api_secret=os.environ["BITGET_SECRET"],
-    api_passphrase=os.environ["BITGET_PASSPHRASE"],
+    config, api_key=os.environ["BITGETACCESSAPIKEY"],
+    api_secret=os.environ["BITGETSECRETKEY"],
+    api_passphrase=os.environ["BITGETPASSPHRASE"],
 )
 obs = env.reset()
 ```

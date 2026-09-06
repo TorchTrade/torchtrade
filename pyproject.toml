@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27,<2"]
 build-backend = "hatchling.build"
 
 [project]
@@ -89,14 +89,15 @@ path = "torchtrade/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["torchtrade"]
 
-# Without this hatchling ships everything not in .gitignore, which swept up untracked
-# working directories: .superpowers (agent scaffolding), local_verify, benchmarks, plus
-# 1MB of docs/images. An sdist is for building the package, so it carries the package,
-# its tests and the metadata.
+# hatchling defaults to shipping everything not gitignored, which swept in untracked
+# working directories and 1MB of doc images. This is an allowlist instead.
+#
+# No tests/: they are 2.1MB and they cannot run from an unpacked sdist anyway.
+# test_documented_imports shells out to `git ls-files` and test_examples resolves
+# REPO_ROOT/examples, neither of which exists there.
 [tool.hatch.build.targets.sdist]
 include = [
     "torchtrade/",
-    "tests/",
     "README.md",
     "LICENSE",
     "pyproject.toml",
