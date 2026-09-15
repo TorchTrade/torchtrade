@@ -333,9 +333,7 @@ env = OneStepTradingEnv(df, config)
 
 ## PortfolioTradingEnv
 
-Allocates a portfolio across N assets and cash. `N` comes from the data, so the same code
-runs 3 or 500 assets. `VectorizedPortfolioTradingEnv` steps `num_envs` lanes at once and
-matches the scalar env to 1e-9.
+Allocates a portfolio across N assets and cash, with `N` read from the data. `VectorizedPortfolioTradingEnv` steps `num_envs` lanes at once, and its portfolio value matches the scalar env to 1e-9.
 
 ```python
 from torchtrade.envs.offline import PortfolioTradingEnv, PortfolioTradingEnvConfig
@@ -384,7 +382,7 @@ bias. Choose the universe from data before the test window.
 
 ## Visualization
 
-All offline environments support `render_history()` to visualize episode performance:
+The single-asset offline environments support `render_history()` to visualize episode performance:
 
 ```python
 env.render_history()  # Display after running an episode
