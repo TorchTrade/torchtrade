@@ -39,6 +39,7 @@ dependencies = [
     "matplotlib",
     "ta",
     "datasets>=3.0",  # <3 calls pyarrow.PyExtensionType, removed in pyarrow 25
+    "huggingface_hub",
 ]
 
 [project.optional-dependencies]

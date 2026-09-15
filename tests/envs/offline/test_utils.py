@@ -10,6 +10,7 @@ from torchtrade.envs.offline.infrastructure.utils import (
     TimeFrameUnit,
     tf_to_timedelta,
     compute_periods_per_year_crypto,
+    load_portfolio_dataset,
     parse_timeframe_string,
 )
 
@@ -638,3 +639,27 @@ class TestTimeFrameComparison:
 
         # Lower timeframes (if they existed) shouldn't be offset
         # (Though this scenario doesn't typically occur)
+
+
+class TestLoadPortfolioDataset:
+    """Tests for load_portfolio_dataset."""
+
+    def test_reads_each_file_at_the_pinned_revision(self, monkeypatch, tmp_path):
+        """Each frame comes from its own file, fetched as a dataset at the requested revision."""
+        files = {"ohlcv_1h.parquet": "bars", "instruments.parquet": "instruments", "funding.parquet": "funding"}
+        for filename, source in files.items():
+            pd.DataFrame({"source": [source]}).to_parquet(tmp_path / filename)
+        calls = []
+
+        def fake_download(repo_id, filename, **kwargs):
+            calls.append((repo_id, filename, kwargs))
+            return str(tmp_path / filename)
+
+        monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_download)
+        bars, instruments, funding = load_portfolio_dataset("org/repo", revision="vTEST")
+
+        assert [df["source"].item() for df in (bars, instruments, funding)] == ["bars", "instruments", "funding"]
+        assert sorted(filename for _, filename, _ in calls) == sorted(files)
+        for repo_id, _, kwargs in calls:
+            assert repo_id == "org/repo"
+            assert kwargs.get("repo_type") == "dataset" and kwargs.get("revision") == "vTEST"
