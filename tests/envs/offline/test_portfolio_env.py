@@ -404,7 +404,7 @@ def test_random_start_is_seed_reproducible(vectorized):
         env.reset()
         assert not torch.equal(env._idx, starts)
         env.set_seed(0)
-        env.reset()
+        td = env.reset()
         assert torch.equal(env._pvs, cash)
         assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], starts)
         td["action"] = torch.tensor([1.0, 0.0, 0.0, 0.0]).expand(64, -1)
