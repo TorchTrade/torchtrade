@@ -12,7 +12,7 @@ from torchtrade.envs.utils.timeframe import normalize_timeframe_config
 
 def _sampler(bars, time_frames=("1Hour",), window_sizes=(8,), execute_on="4Hour", funding=None):
     ex, tfs, ws = normalize_timeframe_config(execute_on, list(time_frames), list(window_sizes))
-    return PortfolioSampler(bars, tfs, ws, ex, funding=funding, seed=0)
+    return PortfolioSampler(bars, tfs, ws, ex, funding=funding)
 
 
 def _bad_bars(kind):

@@ -25,7 +25,7 @@ def _price_jump_bars(jump_ratio):
     """
     bars = make_portfolio_bars()
     config = PortfolioTradingEnvConfig(**SMALL)
-    probe = PortfolioSampler(bars, config.time_frames, config.window_sizes, config.execute_on, seed=config.seed)
+    probe = PortfolioSampler(bars, config.time_frames, config.window_sizes, config.execute_on)
     asset_idx = probe.inst_ids.index("A1")
     jump_ts = probe.exec_times[1]
     mask = (bars["inst_id"] == "A1") & (bars["timestamp"] >= jump_ts)
