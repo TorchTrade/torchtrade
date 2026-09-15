@@ -58,23 +58,32 @@ def test_check_env_specs(allow_short, random_start):
     check_env_specs(env)
 
 
+@pytest.mark.parametrize("column", [0, 1], ids=["cash", "asset"])
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])
 @pytest.mark.parametrize("vectorized", [False, True])
-def test_step_rejects_non_finite_action(vectorized, value):
-    """A diverged policy emitting NaN/inf must fail loudly, not get silently absorbed."""
+def test_step_rejects_non_finite_action(vectorized, value, column):
+    """A diverged policy emitting NaN/inf must fail loudly and leave the env state as it was."""
     bars = make_portfolio_bars()
     if vectorized:
         env = VectorizedPortfolioTradingEnv(bars, VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2))
         env.reset()
         action = torch.zeros(2, 4)
-        action[1, 1] = value  # lane 1 only: a lane-0-only check would miss this
+        action[1, column] = value  # lane 1 only: a lane-0-only check would miss this
         td = TensorDict({"action": action}, batch_size=[2])
+        state = lambda: (env._pvs.clone(), env._drifted.clone(), env._idx.clone())
     else:
         env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL))
         td = env.reset()
-        td["action"] = torch.tensor([0.0, value, 0.0, 0.0])
+        action = torch.zeros(4)
+        action[column] = value
+        td["action"] = action
+        state = lambda: (torch.tensor(env.portfolio_value), env.drifted.clone(), torch.tensor(env._idx),
+                         torch.tensor(len(env.history.portfolio_values)))
+    before = state()
     with pytest.raises(ValueError, match="non-finite"):
         env.step(td)
+    for now, then in zip(state(), before):
+        assert torch.equal(now, then)
 
 
 @pytest.mark.parametrize("fee,rate", [(0.0, 0.0), (0.001, 0.0), (0.001, 0.0005)])
