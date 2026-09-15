@@ -147,30 +147,31 @@ def test_coarse_frame_flags_are_end_labelled():
     assert torch.all(day_window[-1] == 0)
 
 
-def _funding_at(s0, n, delta, rate=0.001):
+def _funding_at(s0, n, delta, rate=0.001, inst="A0"):
     """One funding row settling `delta` after window n's fill (exec_times[n] + 4h)."""
     ts = s0.exec_times[n] + pd.Timedelta("4h") + delta
-    return pd.DataFrame({"timestamp": [ts], "inst_id": ["A0"], "funding_rate": [rate]})
+    return pd.DataFrame({"timestamp": [ts], "inst_id": [inst], "funding_rate": [rate]})
 
 
 @pytest.mark.parametrize("build_funding,expected", [
     pytest.param(lambda s0: _funding_at(s0, 0, -pd.Timedelta("1h")), {}, id="before-first-window"),
-    pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta(0)), {4: 0.001}, id="fill"),
-    pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("1h")), {5: 0.001}, id="inside"),
-    pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("4h")), {5: 0.001}, id="next-fill"),
+    pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta(0)), {(4, 0): 0.001}, id="fill"),
+    pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("1h")), {(5, 0): 0.001}, id="inside"),
+    pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("4h")), {(5, 0): 0.001}, id="next-fill"),
     pytest.param(lambda s0: _funding_at(s0, -1, pd.Timedelta("4h") + pd.Timedelta("1h")), {}, id="after-last-window"),
-    pytest.param(lambda s0: _funding_at(s0, -1, pd.Timedelta("4h")), {"last": 0.001}, id="at-last-window-edge"),
+    pytest.param(lambda s0: _funding_at(s0, -1, pd.Timedelta("4h")), {("last", 0): 0.001}, id="at-last-window-edge"),
     pytest.param(
         lambda s0: pd.concat([_funding_at(s0, 5, pd.Timedelta("1h")), _funding_at(s0, 5, pd.Timedelta("2h"))]),
-        {5: 0.002}, id="same-step-sums",
+        {(5, 0): 0.002}, id="same-step-sums",
     ),
+    pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("1h"), inst="A2"), {(5, 2): 0.001}, id="other-asset"),
 ])
 def test_funding_window(build_funding, expected):
     s0 = _sampler(make_portfolio_bars())
     funding = build_funding(s0)
     s = _sampler(make_portfolio_bars(), funding=funding)
-    resolved = {(s.num_exec - 1 if k == "last" else k): v for k, v in expected.items()}
-    charged = {i: float(s.funding_exec[i, 0]) for i in torch.nonzero(s.funding_exec[:, 0]).flatten().tolist()}
+    resolved = {(s.num_exec - 1 if i == "last" else i, j): v for (i, j), v in expected.items()}
+    charged = {(i, j): float(s.funding_exec[i, j]) for i, j in torch.nonzero(s.funding_exec).tolist()}
     assert charged == resolved
 
 

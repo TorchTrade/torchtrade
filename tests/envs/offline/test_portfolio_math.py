@@ -99,10 +99,11 @@ def test_solution_satisfies_every_defining_condition(fee, allow_short, closed_sh
         ([[0.5, -0.5]], [[0.5, -0.5]], None, [[0.5]], 0.0, 1.25, [[0.8, -0.2]]),          # short halves
         ([[1.0, 0.0]], [[0.0, 1.0]], None, [[1.1]], 0.01, 1.1 / 1.01, [[0.0, 1.0]]),      # trade cost eats into pv_factor
         ([[0.0, -1.0]], [[0.0, -1.0]], None, [[2.5]], 0.0, 0.0, [[1.0, 0.0]]),            # wiped short -> flat cash, finite
+        ([[0.0, -1.0]], [[0.0, -1.0]], None, [[2.0]], 0.0, 0.0, [[1.0, 0.0]]),            # growth exactly 0 counts as wiped
         # A closed losing short already holds gross 3: no budget is left, so the long request buys nothing.
         ([[-2.0, -3.0, 0.0]], [[0.0, 0.0, 1.0]], [[False, True]], [[1.0, 1.0]], 0.0, 1.0, [[-2.0, -3.0, 0.0]]),
     ],
-    ids=["long-up", "short-up", "short-down", "trade-cost", "wiped-short", "closed-short-exhausts-budget"],
+    ids=["long-up", "short-up", "short-down", "trade-cost", "wiped-short", "wiped-short-exact", "closed-short-exhausts-budget"],
 )
 def test_drift(drifted, request_, tradable, y, fee, expected_pv_factor, expected_drifted):
     out = _step(drifted, request_, tradable=tradable, y=y, fee=fee, allow_short=True)

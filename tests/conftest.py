@@ -412,10 +412,10 @@ def validate_account_state(account_state, leverage):
         assert (state_leverage >= 1.0).all(), "Futures leverage should be >= 1.0"
 
 
-def make_portfolio_bars(n_assets=3, hours=24 * 14, seed=0, start="2026-01-05"):
+def make_portfolio_bars(n_assets=3, hours=24 * 14):
     """Long-format hourly bars for the portfolio envs: one random walk per asset."""
-    rng = np.random.default_rng(seed)
-    ts = pd.date_range(start, periods=hours, freq="h")
+    rng = np.random.default_rng(0)
+    ts = pd.date_range("2026-01-05", periods=hours, freq="h")
     frames = []
     for i in range(n_assets):
         close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, hours)))
@@ -426,5 +426,3 @@ def make_portfolio_bars(n_assets=3, hours=24 * 14, seed=0, start="2026-01-05"):
             "close": close, "volume": 1.0,
         }))
     return pd.concat(frames, ignore_index=True)
-
-
