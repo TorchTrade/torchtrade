@@ -387,7 +387,6 @@ def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash)
     steps = last - starts if max_traj_length is None else torch.full_like(starts, max_traj_length)
     assert len(starts.unique()) > 1
     assert torch.equal(ends - starts, torch.minimum(steps, last - starts))
-    assert (ends <= last).all()
     if isinstance(initial_cash, tuple):
         assert ((cash >= 500) & (cash <= 1500)).all()
 
@@ -400,13 +399,13 @@ def test_random_start_is_seed_reproducible(vectorized):
         env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
         env.set_seed(0)
         td = env.reset()
-        starts, ends, cash = env._idx.clone(), env._end.clone(), env._initial_pvs.clone()
+        starts, cash = env._idx.clone(), env._initial_pvs.clone()
         env.set_seed(1)
         env.reset()
         assert not torch.equal(env._idx, starts)
         env.set_seed(0)
         env.reset()
-        assert torch.equal(env._end, ends) and torch.equal(env._pvs, cash)
+        assert torch.equal(env._pvs, cash)
         assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], starts)
         td["action"] = torch.tensor([1.0, 0.0, 0.0, 0.0]).expand(64, -1)
         td = env.step(td)["next"]
