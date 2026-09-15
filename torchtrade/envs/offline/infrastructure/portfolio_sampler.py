@@ -120,9 +120,10 @@ class PortfolioSampler:
         unknown = sorted(set(funding["inst_id"]) - set(self.inst_ids))
         if unknown:
             raise ValueError(f"funding has unknown inst_id: {unknown}")
-        fills = (self.exec_times + tf_to_timedelta(execute_on)).as_unit("ns").asi8
+        period = tf_to_timedelta(execute_on)
+        fills = (self.exec_times + period).as_unit("ns").asi8
         # The appended edge bounds the last window.
-        edges = np.append(fills, fills[-1] + tf_to_timedelta(execute_on).value)
+        edges = np.append(fills, fills[-1] + period.value)
         stamps = pd.DatetimeIndex(funding["timestamp"]).as_unit("ns").asi8
         # Settlement s belongs to step n iff fill_n < s <= fill_{n+1}.
         step = np.searchsorted(edges, stamps, side="left") - 1
@@ -136,9 +137,10 @@ class PortfolioSampler:
         """`(B, N, W, 3)` windows of close, high, low over the window's latest close."""
         out = {}
         for tf, (key, ws) in zip(self.time_frames, self.market_data_keys):
-            end = self._obs_idx[tf.obs_key_freq()][exec_idx]
+            freq = tf.obs_key_freq()
+            end = self._obs_idx[freq][exec_idx]
             rows = (end[:, None] - ws + 1 + torch.arange(ws)).clamp(min=0)
-            window = self._stacks[tf.obs_key_freq()][rows]                      # (B, W, N, F)
+            window = self._stacks[freq][rows]                                   # (B, W, N, F)
             latest = window[:, -1:, :, _CLOSE]
             features = window[..., [_CLOSE, _HIGH, _LOW]] / latest[..., None]
             out[key] = (features * window[..., _LISTED, None]).transpose(1, 2).contiguous()

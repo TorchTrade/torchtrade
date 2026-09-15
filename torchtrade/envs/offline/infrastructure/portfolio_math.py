@@ -32,11 +32,9 @@ def normalise_request(request, force_close, max_gross, allow_short):
     """Any action -> valid target weights: cash ≥ 0, gross ≤ max_gross, all-zero -> cash."""
     cash = request[..., 0].clamp(min=0)
     assets = request[..., 1:] if allow_short else request[..., 1:].clamp(min=0)
-    assets = torch.where(force_close, torch.zeros_like(assets), assets)
+    assets = torch.where(force_close, 0.0, assets)
     total = cash + assets.abs().sum(-1)
-    assets = torch.where(
-        (total > 0)[..., None], assets / torch.where(total > 0, total, 1.0)[..., None], 0.0
-    )
+    assets = assets / torch.where(total > 0, total, 1.0)[..., None]
     gross = assets.abs().sum(-1)
     assets = assets * (max_gross / gross.clamp(min=1e-12)).clamp(max=1.0)[..., None]
     return _with_cash(assets)
@@ -44,13 +42,8 @@ def normalise_request(request, force_close, max_gross, allow_short):
 
 def _target_weights(held, tradable, open_assets, open_mass, mu):
     # A closed asset's post-trade holding μ·w_i must equal what it already holds.
-    pinned = torch.where(tradable, torch.zeros_like(held), held / mu[..., None])
-    has_open = open_mass > 0
-    budget = torch.where(
-        has_open,
-        (1 - pinned.abs().sum(-1)).clamp(min=0) / torch.where(has_open, open_mass, 1.0),
-        0.0,
-    )
+    pinned = torch.where(tradable, 0.0, held / mu[..., None])
+    budget = (1 - pinned.abs().sum(-1)).clamp(min=0) / torch.where(open_mass > 0, open_mass, 1.0)
     return _with_cash(pinned + open_assets * budget[..., None])
 
 
@@ -60,7 +53,7 @@ def portfolio_step(
 ) -> PortfolioStep:
     """Rebalance at bar n's close, then carry the portfolio to bar n+1."""
     target = normalise_request(request, force_close, max_gross, allow_short)
-    open_assets = torch.where(tradable, target[..., 1:], torch.zeros_like(target[..., 1:]))
+    open_assets = torch.where(tradable, target[..., 1:], 0.0)
     open_mass = target[..., 0] + open_assets.abs().sum(-1)
     held = drifted[..., 1:]
 
@@ -71,14 +64,12 @@ def portfolio_step(
         mu = 1 - fee * (held - mu[..., None] * weights[..., 1:]).abs().sum(-1)
     weights = _target_weights(held, tradable, open_assets, open_mass, mu)
 
-    growth = 1 + (weights[..., 1:] * (price_relative - 1)).sum(-1)
+    assets = weights[..., 1:]
+    growth = 1 + (assets * (price_relative - 1)).sum(-1)
     # A wiped-out lane (growth <= 0) divides by nothing: drift it to all cash instead.
     alive = growth > 0
-    safe_growth = torch.where(alive, growth, torch.ones_like(growth))
     next_assets = torch.where(
-        alive[..., None],
-        weights[..., 1:] * price_relative / safe_growth[..., None],
-        torch.zeros_like(weights[..., 1:]),
+        alive[..., None], assets * price_relative / torch.where(alive, growth, 1.0)[..., None], 0.0
     )
     funding_share = (next_assets * funding_rate).sum(-1)
     growth = growth.clamp(min=0)
