@@ -19,17 +19,13 @@ FUNDING_COLUMNS = ["timestamp", "inst_id", "funding_rate"]
 _HIGH, _LOW, _CLOSE, _LISTED = 1, 2, 3, 5
 
 
-def _utc_naive(ts: pd.Series) -> pd.Series:
-    ts = pd.to_datetime(ts)
-    return ts.dt.tz_convert("UTC").dt.tz_localize(None) if ts.dt.tz is not None else ts
-
-
 def _require(df: pd.DataFrame, columns: List[str], name: str) -> pd.DataFrame:
     missing = sorted(set(columns) - set(df.columns))
     if missing:
         raise ValueError(f"{name} missing required columns: {missing}")
     df = df.copy()
-    df["timestamp"] = _utc_naive(df["timestamp"])
+    ts = pd.to_datetime(df["timestamp"])
+    df["timestamp"] = ts.dt.tz_convert("UTC").dt.tz_localize(None) if ts.dt.tz is not None else ts
     if df.duplicated(["timestamp", "inst_id"]).any():
         raise ValueError(f"{name} has duplicate (timestamp, inst_id) rows")
     return df
@@ -53,14 +49,13 @@ class PortfolioSampler:
         if "tradable" in bars.columns and bars["tradable"].isna().any():
             raise ValueError("bars have NaN in the tradable column")
 
-        self.time_frames, self.window_sizes = time_frames, window_sizes
+        self.time_frames = time_frames
         self.np_rng = np.random.default_rng(seed)
         self.inst_ids = sorted(bars["inst_id"].unique())
         self.num_assets = n = len(self.inst_ids)
         grid = pd.DatetimeIndex(np.sort(bars["timestamp"].unique()), name="timestamp")
         exec_freq = execute_on.to_pandas_freq()
 
-        self._stacks: Dict[str, torch.Tensor] = {}
         for i, (inst, rows) in enumerate(bars.groupby("inst_id", sort=True)):
             rows = rows.set_index("timestamp")
             df = self._fill_onto_grid(rows, grid)
@@ -74,7 +69,7 @@ class PortfolioSampler:
                 if self.num_exec < 2:
                     raise ValueError("need at least two execute_on bars after warm-up")
                 self._obs_idx = {k: torch.from_numpy(v).long() for k, v in sampler._obs_indices.items()}
-                self._stacks = {
+                self._stacks: Dict[str, torch.Tensor] = {
                     k: torch.empty(t.shape[0], n, t.shape[1]) for k, t in sampler.torch_tensors.items()
                 }
                 self.close_exec = torch.empty(self.num_exec, n, dtype=torch.float64)
@@ -126,11 +121,7 @@ class PortfolioSampler:
         if unknown:
             raise ValueError(f"funding has unknown inst_id: {unknown}")
         fills = (self.exec_times + tf_to_timedelta(execute_on)).as_unit("ns").asi8
-        # searchsorted against `fills` alone caps at len(fills), so nothing past the last
-        # fill could ever fail `step < num_exec` -- every settlement after the data, no
-        # matter how far, piled into the final row. The appended edge is the right bound
-        # of that last window, so a settlement past it lands one step too high and is
-        # dropped by `keep`.
+        # The appended edge bounds the last window.
         edges = np.append(fills, fills[-1] + tf_to_timedelta(execute_on).value)
         stamps = pd.DatetimeIndex(funding["timestamp"]).as_unit("ns").asi8
         # Settlement s belongs to step n iff fill_n < s <= fill_{n+1}.

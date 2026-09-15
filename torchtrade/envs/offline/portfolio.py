@@ -100,7 +100,6 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         self._reset_history()
         self._reset_balance()
-        self.step_counter = 0
         u = (
             torch.tensor([self.sampler.np_rng.random()], dtype=torch.float64)
             if self.random_start else torch.zeros(1, dtype=torch.float64)
@@ -140,7 +139,7 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
             fee=self.config.transaction_fee, max_gross=self.config.max_gross,
             allow_short=self.config.allow_short,
         )
-        self._idx, self.step_counter = n + 1, self.step_counter + 1
+        self._idx = n + 1
         old_value = self.portfolio_value
         self.portfolio_value = old_value * out.pv_factor.item()
         self.drifted = out.drifted

@@ -24,13 +24,20 @@ def _price_jump_bars(jump_ratio):
     actual realized close_exec ratio for A1, not guessed against the bars' natural drift.
     """
     bars = make_portfolio_bars()
-    config = PortfolioTradingEnvConfig(**SMALL, allow_short=True)
+    config = PortfolioTradingEnvConfig(**SMALL)
     probe = PortfolioSampler(bars, config.time_frames, config.window_sizes, config.execute_on, seed=config.seed)
     asset_idx = probe.inst_ids.index("A1")
     jump_ts = probe.exec_times[1]
     mask = (bars["inst_id"] == "A1") & (bars["timestamp"] >= jump_ts)
     bars.loc[mask, ["open", "high", "low", "close"]] *= jump_ratio
-    return bars, config, asset_idx
+    return bars, asset_idx
+
+
+def _delisted_bars():
+    """make_portfolio_bars with A2's rows stopping 200 hours into the timeline."""
+    bars = make_portfolio_bars()
+    cutoff = bars["timestamp"].min() + pd.Timedelta(hours=200)
+    return bars[~((bars["inst_id"] == "A2") & (bars["timestamp"] >= cutoff))].reset_index(drop=True)
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -120,7 +127,8 @@ def test_termination_on_price_jump(jump_ratio, expect_wiped):
     (growth in (0, bankrupt_threshold)), or wiped to exactly 0 if the jump exceeds 2x
     (growth <= 0, per portfolio_math's wiped-lane clamp).
     """
-    bars, config, asset_idx = _price_jump_bars(jump_ratio)
+    bars, asset_idx = _price_jump_bars(jump_ratio)
+    config = PortfolioTradingEnvConfig(**SMALL, allow_short=True)
 
     env = PortfolioTradingEnv(bars, config)
     td = env.reset()
@@ -154,11 +162,7 @@ def test_termination_on_price_jump(jump_ratio, expect_wiped):
 def test_delist_force_close():
     """Asking for 100% of an asset every step must still be force-closed the step its
     data runs out, and stay closed (all cash, flat value) for every step after."""
-    bars = make_portfolio_bars()
-    cutoff = bars["timestamp"].min() + pd.Timedelta(hours=200)
-    bars = bars[~((bars["inst_id"] == "A2") & (bars["timestamp"] >= cutoff))].reset_index(drop=True)
-
-    env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL))
+    env = PortfolioTradingEnv(_delisted_bars(), PortfolioTradingEnvConfig(**SMALL))
     td = env.reset()
     asset_idx = env.inst_ids.index("A2")
     delist_n = int(env.sampler.delist_exec[asset_idx])
@@ -209,66 +213,45 @@ def _random_action_scenario(allow_short):
         for ts in pd.date_range("2026-01-05", "2026-01-19", freq="8h")
         for i, inst in enumerate(["A0", "A1", "A2", "A3"])
     ])
-    cfg = dict(**SMALL, transaction_fee=0.001, allow_short=allow_short)
-
-    def action_fn(gen):
-        return torch.randn(5, generator=gen)
-
-    return bars, funding, cfg, action_fn
+    return bars, funding, dict(**SMALL, transaction_fee=0.001, allow_short=allow_short), None
 
 
 def _jump_scenario(jump_ratio):
-    bars, _config, asset_idx = _price_jump_bars(jump_ratio)
-    cfg = dict(**SMALL, allow_short=True)
+    bars, asset_idx = _price_jump_bars(jump_ratio)
     action = torch.zeros(4)
     action[asset_idx + 1] = -1.0
-
-    def action_fn(gen):
-        return action
-
-    return bars, None, cfg, action_fn
+    return bars, None, dict(**SMALL, allow_short=True), action
 
 
 def _delist_scenario():
     """100% into an asset whose rows stop mid-timeline, as in test_delist_force_close."""
-    bars = make_portfolio_bars()
-    cutoff = bars["timestamp"].min() + pd.Timedelta(hours=200)
-    bars = bars[~((bars["inst_id"] == "A2") & (bars["timestamp"] >= cutoff))].reset_index(drop=True)
-    cfg = dict(**SMALL)
-    asset_idx = sorted(bars["inst_id"].unique()).index("A2")
+    bars = _delisted_bars()
+    asset_idx = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL)).inst_ids.index("A2")
     action = torch.zeros(4)
     action[asset_idx + 1] = 1.0
-
-    def action_fn(gen):
-        return action
-
-    return bars, None, cfg, action_fn
+    return bars, None, dict(**SMALL), action
 
 
-@pytest.mark.parametrize(
-    "scenario,allow_short",
-    [
-        ("random", False), ("random", True),
-        ("below-threshold", None), ("wiped", None), ("delisted", None),
-    ],
-)
-def test_scalar_and_vectorized_agree(scenario, allow_short):
+@pytest.mark.parametrize("scenario", [
+    pytest.param(lambda: _random_action_scenario(False), id="random-long-only"),
+    pytest.param(lambda: _random_action_scenario(True), id="random-short"),
+    pytest.param(lambda: _jump_scenario(1.9), id="below-threshold"),
+    pytest.param(lambda: _jump_scenario(2.05), id="wiped"),
+    pytest.param(_delist_scenario, id="delisted"),
+])
+def test_scalar_and_vectorized_agree(scenario):
     """Same actions, same data: same everything, including the failure paths (per-lane
     termination, wipe-out and delisting), not just random actions that never terminate."""
-    if scenario == "random":
-        bars, funding, cfg, action_fn = _random_action_scenario(allow_short)
-    elif scenario in ("below-threshold", "wiped"):
-        bars, funding, cfg, action_fn = _jump_scenario(1.9 if scenario == "below-threshold" else 2.05)
-    else:
-        bars, funding, cfg, action_fn = _delist_scenario()
+    bars, funding, cfg, fixed_action = scenario()
 
     scalar = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**cfg), funding=funding)
     vec = VectorizedPortfolioTradingEnv(bars, VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=1), funding=funding)
 
     gen = torch.Generator().manual_seed(1)
+    n = len(scalar.inst_ids)
     s_td, v_td = scalar.reset(), vec.reset()
     while True:
-        action = action_fn(gen)
+        action = torch.randn(n + 1, generator=gen) if fixed_action is None else fixed_action
         s_td["action"], v_td["action"] = action, action[None]
         s_td, v_td = scalar.step(s_td)["next"], vec.step(v_td)["next"]
         assert vec._pvs[0].item() == pytest.approx(scalar.portfolio_value, rel=1e-9, abs=0)
@@ -282,7 +265,7 @@ def test_scalar_and_vectorized_agree(scenario, allow_short):
 def test_vectorized_per_lane_termination():
     """Two lanes stepped together, one wiped by a price jump and the other flat: only the
     wiped lane terminates, and the flat lane's value is unaffected by the other's loss."""
-    bars, _config, asset_idx = _price_jump_bars(1.9)
+    bars, asset_idx = _price_jump_bars(1.9)
     vec = VectorizedPortfolioTradingEnv(
         bars, VectorizedPortfolioTradingEnvConfig(**{**SMALL, "allow_short": True}, num_envs=2)
     )
