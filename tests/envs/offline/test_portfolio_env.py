@@ -217,19 +217,13 @@ def _random_action_scenario(allow_short):
 
 
 def _jump_scenario(jump_ratio):
-    bars, asset_idx = _price_jump_bars(jump_ratio)
-    action = torch.zeros(4)
-    action[asset_idx + 1] = -1.0
-    return bars, None, dict(**SMALL, allow_short=True), action
+    bars, _ = _price_jump_bars(jump_ratio)
+    return bars, None, dict(**SMALL, allow_short=True), ("A1", -1.0)
 
 
 def _delist_scenario():
     """100% into an asset whose rows stop mid-timeline, as in test_delist_force_close."""
-    bars = _delisted_bars()
-    asset_idx = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL)).inst_ids.index("A2")
-    action = torch.zeros(4)
-    action[asset_idx + 1] = 1.0
-    return bars, None, dict(**SMALL), action
+    return _delisted_bars(), None, dict(**SMALL), ("A2", 1.0)
 
 
 @pytest.mark.parametrize("scenario", [
@@ -242,15 +236,20 @@ def _delist_scenario():
 def test_scalar_and_vectorized_agree(scenario):
     """Same actions, same data: same everything, including the failure paths (per-lane
     termination, wipe-out and delisting), not just random actions that never terminate."""
-    bars, funding, cfg, fixed_action = scenario()
+    bars, funding, cfg, fixed = scenario()
 
     scalar = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**cfg), funding=funding)
     vec = VectorizedPortfolioTradingEnv(bars, VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=1), funding=funding)
 
     gen = torch.Generator().manual_seed(1)
     n = len(scalar.inst_ids)
+    fixed_action = None
+    if fixed is not None:
+        name, weight = fixed
+        fixed_action = torch.zeros(n + 1)
+        fixed_action[scalar.inst_ids.index(name) + 1] = weight
     s_td, v_td = scalar.reset(), vec.reset()
-    while True:
+    for _ in range(scalar._end - scalar._idx):
         action = torch.randn(n + 1, generator=gen) if fixed_action is None else fixed_action
         s_td["action"], v_td["action"] = action, action[None]
         s_td, v_td = scalar.step(s_td)["next"], vec.step(v_td)["next"]

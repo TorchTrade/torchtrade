@@ -17,15 +17,14 @@ def _t(rows):
 def _step(drifted, request, tradable=None, force_close=None, y=None, rate=None,
           fee=0.0, max_gross=1.0, allow_short=False):
     drifted, request = _t(drifted), _t(request)
-    n = drifted.shape[-1] - 1
-    ones = torch.ones(drifted.shape[0], n, dtype=MONEY_DTYPE)
+    shape = (drifted.shape[0], drifted.shape[-1] - 1)
     return portfolio_step(
         drifted,
         request,
-        torch.ones_like(ones, dtype=torch.bool) if tradable is None else torch.tensor(tradable),
-        torch.zeros_like(ones, dtype=torch.bool) if force_close is None else torch.tensor(force_close),
-        ones if y is None else _t(y),
-        torch.zeros_like(ones) if rate is None else _t(rate),
+        torch.ones(shape, dtype=torch.bool) if tradable is None else torch.tensor(tradable),
+        torch.zeros(shape, dtype=torch.bool) if force_close is None else torch.tensor(force_close),
+        torch.ones(shape, dtype=MONEY_DTYPE) if y is None else _t(y),
+        torch.zeros(shape, dtype=MONEY_DTYPE) if rate is None else _t(rate),
         fee=fee, max_gross=max_gross, allow_short=allow_short,
     )
 

@@ -26,8 +26,9 @@ def _bad_bars(kind):
         bars["tradable"] = 1.0
         bars.loc[5, "tradable"] = np.nan
         return bars
-    bars.loc[5, "close"] = np.nan
-    return bars
+    if kind == "nan-price":
+        bars.loc[5, "close"] = np.nan
+        return bars
 
 
 @pytest.mark.parametrize("kind,match", [
@@ -86,7 +87,7 @@ def test_listing_zeroes_features_and_blocks_trading_before_the_first_row(
     s = _sampler(bars[~late], time_frames=time_frames, window_sizes=window_sizes)
     a2 = s.inst_ids.index("A2")
     # A2 lists mid-bin (06:00, inside the [04:00, 08:00) execute_on bin), so the bin
-    # itself is only PARTLY unlisted -- exclude it from the all-zero check below and
+    # itself is only PARTLY unlisted. Exclude it from the all-zero check below and
     # pin it on its own: tradable_exec must read the bin's LAST base bar (07:00, listed),
     # not resample's default first (04:00, still unlisted).
     partial_bin = pd.Timestamp(listed_from).floor("4h")
@@ -130,23 +131,16 @@ def _funding_at(s0, n, delta, rate=0.001):
     return pd.DataFrame({"timestamp": [ts], "inst_id": ["A0"], "funding_rate": [rate]})
 
 
-def _funding_two_in_same_step(s0, n):
-    """Two funding rows both settling inside window n's (fill_n, fill_{n+1}] span."""
-    fill_n = s0.exec_times[n] + pd.Timedelta("4h")
-    return pd.DataFrame({
-        "timestamp": [fill_n + pd.Timedelta("1h"), fill_n + pd.Timedelta("2h")],
-        "inst_id": ["A0", "A0"],
-        "funding_rate": [0.001, 0.001],
-    })
-
-
 @pytest.mark.parametrize("build_funding,expected", [
     pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta(0)), {4: 0.001}, id="fill"),
     pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("1h")), {5: 0.001}, id="inside"),
     pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("4h")), {5: 0.001}, id="next-fill"),
     pytest.param(lambda s0: _funding_at(s0, -1, pd.Timedelta("4h") + pd.Timedelta("1h")), {}, id="after-last-window"),
     pytest.param(lambda s0: _funding_at(s0, -1, pd.Timedelta("4h")), {"last": 0.001}, id="at-last-window-edge"),
-    pytest.param(lambda s0: _funding_two_in_same_step(s0, 5), {5: 0.002}, id="same-step-sums"),
+    pytest.param(
+        lambda s0: pd.concat([_funding_at(s0, 5, pd.Timedelta("1h")), _funding_at(s0, 5, pd.Timedelta("2h"))]),
+        {5: 0.002}, id="same-step-sums",
+    ),
 ])
 def test_funding_window(build_funding, expected):
     s0 = _sampler(make_portfolio_bars())
