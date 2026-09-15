@@ -146,7 +146,7 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
         self.drifted = out.drifted
 
         self.history.record_step(
-            s.exec_times[self._idx], self.portfolio_value, out.weights[0].tolist(),
+            s.exec_times[self._idx], self.portfolio_value, out.drifted[0].tolist(),
             commission=old_value * out.commission.item(), funding=old_value * out.funding.item(),
         )
         reward = float(self.reward_function(self.history))

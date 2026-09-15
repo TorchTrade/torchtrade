@@ -137,6 +137,9 @@ def test_termination_on_price_jump(jump_ratio, expect_wiped):
     assert td["terminated"].item()
     assert td["done"].item()
     assert torch.isfinite(td["reward"]).all()
+    torch.testing.assert_close(
+        torch.tensor(env.history.weights[-1], dtype=torch.float32), td["portfolio_weights"], rtol=0, atol=1e-6
+    )
     if expect_wiped:
         assert expected_growth <= 0  # sanity: the chosen jump really wipes the lane
         assert env.portfolio_value == 0.0
