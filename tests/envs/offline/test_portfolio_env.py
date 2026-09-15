@@ -3,13 +3,34 @@ import math
 import pandas as pd
 import pytest
 import torch
+from tensordict import TensorDict
 from torchrl.envs.utils import check_env_specs
 
 from tests.conftest import make_portfolio_bars
 from torchtrade.envs.offline.infrastructure.portfolio_sampler import PortfolioSampler
 from torchtrade.envs.offline.portfolio import PortfolioTradingEnv, PortfolioTradingEnvConfig
+from torchtrade.envs.offline.vectorized_portfolio import (
+    VectorizedPortfolioTradingEnv,
+    VectorizedPortfolioTradingEnvConfig,
+)
 
 SMALL = dict(time_frames="1Hour", window_sizes=8, execute_on="4Hour", initial_cash=1000, random_start=False)
+
+
+def _price_jump_bars(jump_ratio):
+    """Bars where A1's price jumps by `jump_ratio` starting at the second execution bar.
+
+    Deterministic (make_portfolio_bars is seeded): `jump_ratio` was picked by reading the
+    actual realized close_exec ratio for A1, not guessed against the bars' natural drift.
+    """
+    bars = make_portfolio_bars()
+    config = PortfolioTradingEnvConfig(**SMALL, allow_short=True)
+    probe = PortfolioSampler(bars, config.time_frames, config.window_sizes, config.execute_on, seed=config.seed)
+    asset_idx = probe.inst_ids.index("A1")
+    jump_ts = probe.exec_times[1]
+    mask = (bars["inst_id"] == "A1") & (bars["timestamp"] >= jump_ts)
+    bars.loc[mask, ["open", "high", "low", "close"]] *= jump_ratio
+    return bars, config, asset_idx
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -96,17 +117,9 @@ def test_termination_on_price_jump(jump_ratio, expect_wiped):
     """An all-in short on A1, met by a large price jump between the first two execution
     bars, must terminate: below bankrupt_threshold if the short survives with a residual
     (growth in (0, bankrupt_threshold)), or wiped to exactly 0 if the jump exceeds 2x
-    (growth <= 0, per portfolio_math's wiped-lane clamp). `jump_ratio` was picked by
-    reading the actual realized close_exec ratio for A1 (make_portfolio_bars is seeded,
-    so this is deterministic, not a guess against the natural drift already in the bars).
+    (growth <= 0, per portfolio_math's wiped-lane clamp).
     """
-    bars = make_portfolio_bars()
-    config = PortfolioTradingEnvConfig(**SMALL, allow_short=True)
-    probe = PortfolioSampler(bars, config.time_frames, config.window_sizes, config.execute_on, seed=config.seed)
-    asset_idx = probe.inst_ids.index("A1")
-    jump_ts = probe.exec_times[1]
-    mask = (bars["inst_id"] == "A1") & (bars["timestamp"] >= jump_ts)
-    bars.loc[mask, ["open", "high", "low", "close"]] *= jump_ratio
+    bars, config, asset_idx = _price_jump_bars(jump_ratio)
 
     env = PortfolioTradingEnv(bars, config)
     td = env.reset()
@@ -164,3 +177,146 @@ def test_delist_force_close():
 
     assert len(values_after_close) > 1
     assert all(v == pytest.approx(values_after_close[0]) for v in values_after_close)
+
+
+def test_vectorized_config_rejects_zero_envs():
+    with pytest.raises(ValueError):
+        VectorizedPortfolioTradingEnvConfig(num_envs=0)
+
+
+@pytest.mark.parametrize("allow_short", [False, True])
+@pytest.mark.parametrize("random_start", [False, True])
+def test_vectorized_check_env_specs(allow_short, random_start):
+    env = VectorizedPortfolioTradingEnv(
+        make_portfolio_bars(),
+        VectorizedPortfolioTradingEnvConfig(**{**SMALL, "random_start": random_start}, num_envs=3, allow_short=allow_short),
+    )
+    check_env_specs(env)
+
+
+def _random_action_scenario(allow_short):
+    """Random actions each step, with closures, delisting, funding and fees mixed in."""
+    bars = make_portfolio_bars(n_assets=4)
+    closed = (bars.inst_id == "A1") & (bars.timestamp.dt.dayofweek >= 5)
+    delisted = (bars.inst_id == "A3") & (bars.timestamp >= "2026-01-15")
+    bars = bars[~closed & ~delisted]
+    funding = pd.DataFrame([
+        {"timestamp": ts, "inst_id": inst, "funding_rate": 0.0003 * (1 if i % 2 else -1)}
+        for ts in pd.date_range("2026-01-05", "2026-01-19", freq="8h")
+        for i, inst in enumerate(["A0", "A1", "A2", "A3"])
+    ])
+    cfg = dict(**SMALL, transaction_fee=0.001, allow_short=allow_short)
+
+    def action_fn(gen):
+        return torch.randn(5, generator=gen)
+
+    return bars, funding, cfg, action_fn
+
+
+def _jump_scenario(jump_ratio):
+    bars, _config, asset_idx = _price_jump_bars(jump_ratio)
+    cfg = dict(**SMALL, allow_short=True)
+    action = torch.zeros(4)
+    action[asset_idx + 1] = -1.0
+
+    def action_fn(gen):
+        return action
+
+    return bars, None, cfg, action_fn
+
+
+def _delist_scenario():
+    """100% into an asset whose rows stop mid-timeline, as in test_delist_force_close."""
+    bars = make_portfolio_bars()
+    cutoff = bars["timestamp"].min() + pd.Timedelta(hours=200)
+    bars = bars[~((bars["inst_id"] == "A2") & (bars["timestamp"] >= cutoff))].reset_index(drop=True)
+    cfg = dict(**SMALL)
+    asset_idx = sorted(bars["inst_id"].unique()).index("A2")
+    action = torch.zeros(4)
+    action[asset_idx + 1] = 1.0
+
+    def action_fn(gen):
+        return action
+
+    return bars, None, cfg, action_fn
+
+
+@pytest.mark.parametrize(
+    "scenario,allow_short",
+    [
+        ("random", False), ("random", True),
+        ("below-threshold", None), ("wiped", None), ("delisted", None),
+    ],
+)
+def test_scalar_and_vectorized_agree(scenario, allow_short):
+    """Same actions, same data: same everything, including the failure paths (per-lane
+    termination, wipe-out and delisting), not just random actions that never terminate."""
+    if scenario == "random":
+        bars, funding, cfg, action_fn = _random_action_scenario(allow_short)
+    elif scenario in ("below-threshold", "wiped"):
+        bars, funding, cfg, action_fn = _jump_scenario(1.9 if scenario == "below-threshold" else 2.05)
+    else:
+        bars, funding, cfg, action_fn = _delist_scenario()
+
+    scalar = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**cfg), funding=funding)
+    vec = VectorizedPortfolioTradingEnv(bars, VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=1), funding=funding)
+
+    gen = torch.Generator().manual_seed(1)
+    s_td, v_td = scalar.reset(), vec.reset()
+    while True:
+        action = action_fn(gen)
+        s_td["action"], v_td["action"] = action, action[None]
+        s_td, v_td = scalar.step(s_td)["next"], vec.step(v_td)["next"]
+        assert vec._pvs[0].item() == pytest.approx(scalar.portfolio_value, rel=1e-9, abs=0)
+        for key in s_td.keys():
+            torch.testing.assert_close(v_td[key][0], s_td[key], rtol=0, atol=1e-6)
+        if s_td["done"].item():
+            break
+    assert s_td["done"].item()
+
+
+def test_vectorized_per_lane_termination():
+    """Two lanes stepped together, one wiped by a price jump and the other flat: only the
+    wiped lane terminates, and the flat lane's value is unaffected by the other's loss."""
+    bars, _config, asset_idx = _price_jump_bars(1.9)
+    vec = VectorizedPortfolioTradingEnv(
+        bars, VectorizedPortfolioTradingEnvConfig(**{**SMALL, "allow_short": True}, num_envs=2)
+    )
+    vec.reset()
+    action = torch.zeros(2, 4)
+    action[0, asset_idx + 1] = -1.0  # lane 0: all-in short on A1
+    action[1, 0] = 1.0  # lane 1: all cash
+    lane1_before = vec._pvs[1].item()
+
+    td = TensorDict({"action": action}, batch_size=[2])
+    td = vec.step(td)["next"]
+
+    assert td["terminated"].tolist() == [[True], [False]]
+    assert vec._pvs[1].item() == pytest.approx(lane1_before)
+
+
+def test_vectorized_step_past_end_no_raise():
+    """A lane already sitting on the last execution bar (done, but not yet reset by the
+    collector) must not raise when stepped again; this is what `_idx.clamp(max=num_exec
+    - 2)` exists for. `env.rollout(break_when_any_done=False)` alone does not exercise
+    this: `step_and_maybe_reset` resets every done lane before the next `_step` call, so
+    the state is forced directly instead."""
+    env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2))
+    env.reset()
+    env._idx = torch.full_like(env._idx, env.sampler.num_exec - 1)
+    td = TensorDict({"action": torch.tensor([[1.0, 0.0, 0.0, 0.0]] * 2)}, batch_size=[2])
+    env.step(td)
+
+
+def test_partial_reset_leaves_other_lanes_untouched():
+    env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=3))
+    td = env.reset()
+    for _ in range(3):
+        td["action"] = torch.tensor([[0.0, 1.0, 0.0, 0.0]] * 3)
+        td = env.step(td)["next"]
+    before = (env._pvs.clone(), env._drifted.clone(), env._idx.clone())
+    env.reset(TensorDict({"_reset": torch.tensor([[False], [True], [False]])}, batch_size=[3]))
+    keep = torch.tensor([0, 2])
+    for now, then in zip((env._pvs, env._drifted, env._idx), before):
+        torch.testing.assert_close(now[keep], then[keep])
+    assert env._pvs[1].item() == 1000 and env._drifted[1, 0].item() == 1.0 and env._idx[1].item() == 0
