@@ -74,11 +74,9 @@ def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     start, end = env._idx, env._end
     action = torch.tensor([0.0, 1.0, 0.0, 0.0])
     total_reward = 0.0
-    steps = 0
     while True:
         td["action"] = action
         td = env.step(td)["next"]
-        steps += 1
         total_reward += td["reward"].item()
         action = td["portfolio_weights"].clone()
         if td["done"].item():
@@ -90,7 +88,7 @@ def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     assert total_reward == pytest.approx(math.log(env.portfolio_value / 1000), abs=1e-5)
 
     h = env.history.to_dict()
-    assert {len(v) for v in h.values()} == {steps + 1}
+    assert {len(v) for v in h.values()} == {end - start + 1}
     assert h["timestamps"][-1] == s.exec_times[env._end]
     assert h["portfolio_values"][-1] == env.portfolio_value
     # Row 0 is the reset row; the entry trade pays V0·(1 − μ) with μ = 1/(1 + fee).
