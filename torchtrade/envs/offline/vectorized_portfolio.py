@@ -41,7 +41,7 @@ class VectorizedPortfolioTradingEnv(EnvBase):
         self.reward_function = reward_function or batched_log_return_reward
         self.sampler = PortfolioSampler(
             bars, config.time_frames, config.window_sizes, config.execute_on,
-            funding=funding, seed=config.seed,
+            funding=funding,
         )
         self.inst_ids = self.sampler.inst_ids
         batch = torch.Size([config.num_envs])
