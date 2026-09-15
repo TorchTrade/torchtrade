@@ -5,13 +5,14 @@ A trade pays `fee·|Δnotional|` (a perpetual swap's fee), so the post-trade val
 fixed point `μ = 1 − fee·Σ_i |w'_i − μ·w_i|`, a contraction with factor at most `fee`.
 """
 
+import math
 from typing import NamedTuple
 
 import torch
 
 MONEY_DTYPE = torch.float64
-# Converges to 1e-12 within 7 iterations at a 2% fee; a fixed count keeps the function
-# batched and differentiable.
+# Cap on the μ iterations. The count depends only on the Python-float fee, never on tensor
+# values, so the function stays batched and differentiable.
 MU_ITERS = 20
 
 
@@ -64,7 +65,8 @@ def portfolio_step(
     held = drifted[..., 1:]
 
     mu = torch.ones_like(open_mass)
-    for _ in range(MU_ITERS):
+    iters = 0 if fee == 0 else min(MU_ITERS, math.ceil(math.log(1e-15) / math.log(fee)))
+    for _ in range(iters):
         weights = _target_weights(held, tradable, open_assets, open_mass, mu)
         mu = 1 - fee * (held - mu[..., None] * weights[..., 1:]).abs().sum(-1)
     weights = _target_weights(held, tradable, open_assets, open_mass, mu)
