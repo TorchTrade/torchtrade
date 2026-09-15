@@ -36,6 +36,7 @@ def _price_jump_bars(jump_ratio):
 @pytest.mark.parametrize("kwargs", [
     {"transaction_fee": -0.1}, {"transaction_fee": 1.0},
     {"max_gross": 0.0}, {"max_gross": 1.5}, {"bankrupt_threshold": 1.0},
+    {"max_traj_length": 0},
 ], ids=lambda k: next(iter(k.items())).__repr__())
 def test_config_rejects_out_of_range(kwargs):
     with pytest.raises(ValueError):
@@ -320,3 +321,46 @@ def test_partial_reset_leaves_other_lanes_untouched():
     for now, then in zip((env._pvs, env._drifted, env._idx), before):
         torch.testing.assert_close(now[keep], then[keep])
     assert env._pvs[1].item() == 1000 and env._drifted[1, 0].item() == 1.0 and env._idx[1].item() == 0
+
+
+@pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
+@pytest.mark.parametrize("max_traj_length,initial_cash", [
+    pytest.param(None, 1000, id="to-end"),
+    pytest.param(10, 1000, id="max-10"),
+    pytest.param(None, (500, 1500), id="tuple-cash"),
+])
+def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash):
+    """Starts spread over the timeline, each episode ends at min(start + max_traj_length, last)."""
+    cfg = {**SMALL, "random_start": True, "max_traj_length": max_traj_length, "initial_cash": initial_cash}
+    action = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
+        td = env.reset()
+        starts, ends, cash = env._idx.clone(), env._end.clone(), env._initial_pvs.clone()
+        assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], starts)
+        td["action"] = action.expand(64, -1)
+        td = env.step(td)["next"]
+        assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], env._idx)
+    else:
+        env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**cfg))
+        env.set_seed(0)
+        starts, ends, cash = [], [], []
+        for _ in range(20):
+            td = env.reset()
+            start = env._idx
+            assert td["reset_index"].item() == start and td["state_index"].item() == start
+            starts.append(start)
+            ends.append(env._end)
+            cash.append(env.initial_portfolio_value)
+            td["action"] = action
+            td = env.step(td)["next"]
+            assert td["reset_index"].item() == start and td["state_index"].item() == env._idx
+        starts, ends, cash = torch.tensor(starts), torch.tensor(ends), torch.tensor(cash)
+
+    last = env.sampler.num_exec - 1
+    steps = last - starts if max_traj_length is None else torch.full_like(starts, max_traj_length)
+    assert len(starts.unique()) > 1
+    assert torch.equal(ends - starts, torch.minimum(steps, last - starts))
+    assert (ends <= last).all()
+    if isinstance(initial_cash, tuple):
+        assert ((cash >= 500) & (cash <= 1500)).all()

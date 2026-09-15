@@ -86,19 +86,18 @@ class VectorizedPortfolioTradingEnv(EnvBase):
                 new_cash = torch.empty(k).uniform_(float(cash[0]), float(cash[1]), generator=self._rng).to(MONEY_DTYPE)
             else:
                 new_cash = torch.full((k,), float(cash), dtype=MONEY_DTYPE)
-            last = self.sampler.num_exec - 1
-            steps = self.config.max_traj_length or last
-            starts = (
-                torch.randint(0, max(0, last - steps) + 1, (k,), generator=self._rng)
-                if self.config.random_start else torch.zeros(k, dtype=torch.long)
+            u = (
+                torch.rand(k, generator=self._rng, dtype=torch.float64)
+                if self.config.random_start else torch.zeros(k, dtype=torch.float64)
             )
+            starts, ends = self.sampler.episode_window(u, self.config.max_traj_length)
             self._pvs[mask] = new_cash
             self._initial_pvs[mask] = new_cash
             self._drifted[mask] = 0.0
             self._drifted[mask, 0] = 1.0
             self._starts[mask] = starts
             self._idx[mask] = starts
-            self._end[mask] = (starts + steps).clamp(max=last)
+            self._end[mask] = ends
         return self._observation()
 
     def _observation(self) -> TensorDict:

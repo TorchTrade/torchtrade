@@ -149,9 +149,14 @@ class PortfolioSampler:
             out[key] = (features * window[..., _LISTED, None]).transpose(1, 2).contiguous()
         return out
 
-    def episode_bounds(self, random_start: bool, max_traj_length: Optional[int]) -> Tuple[int, int]:
-        """First and last execution index of an episode; one step moves one index."""
+    def episode_window(
+        self, u: torch.Tensor, max_traj_length: Optional[int]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """First and last execution index per `u` in [0, 1); one step moves one index."""
         last = self.num_exec - 1
-        steps = max_traj_length or last
-        start = int(self.np_rng.integers(0, max(0, last - steps) + 1)) if random_start else 0
-        return start, min(start + steps, last)
+        if max_traj_length is None:
+            starts = (u * last).floor().long().clamp(max=last - 1)
+            return starts, torch.full_like(starts, last)
+        max_start = max(0, last - max_traj_length)
+        starts = (u * (max_start + 1)).floor().long().clamp(max=max_start)
+        return starts, (starts + max_traj_length).clamp(max=last)

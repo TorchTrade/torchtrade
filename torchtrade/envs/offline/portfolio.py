@@ -40,6 +40,8 @@ class PortfolioTradingEnvConfig:
             raise ValueError(f"max_gross must be in (0, 1], got {self.max_gross}")
         if not 0 <= self.bankrupt_threshold < 1:
             raise ValueError(f"bankrupt_threshold must be in [0, 1), got {self.bankrupt_threshold}")
+        if self.max_traj_length is not None and self.max_traj_length < 1:
+            raise ValueError(f"max_traj_length must be >= 1 or None, got {self.max_traj_length}")
 
 
 def portfolio_specs(sampler: PortfolioSampler, config, batch: torch.Size = torch.Size()):
@@ -99,7 +101,12 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
         self._reset_history()
         self._reset_balance()
         self.step_counter = 0
-        self._idx, self._end = self.sampler.episode_bounds(self.random_start, self.config.max_traj_length)
+        u = (
+            torch.tensor([self.sampler.np_rng.random()], dtype=torch.float64)
+            if self.random_start else torch.zeros(1, dtype=torch.float64)
+        )
+        starts, ends = self.sampler.episode_window(u, self.config.max_traj_length)
+        self._idx, self._end = int(starts), int(ends)
         self._reset_idx = self._idx
         self.portfolio_value = self.initial_portfolio_value
         self.drifted = torch.zeros(1, self.sampler.num_assets + 1, dtype=MONEY_DTYPE)
