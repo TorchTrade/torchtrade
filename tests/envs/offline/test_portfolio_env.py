@@ -41,15 +41,13 @@ def _delisted_bars():
 
 
 @pytest.mark.parametrize("kwargs", [
-    {"transaction_fee": -0.1}, {"transaction_fee": 1.0},
+    {"transaction_fee": -0.1}, {"transaction_fee": 0.25},
     {"max_gross": 0.0}, {"max_gross": 1.5}, {"bankrupt_threshold": 1.0},
     {"max_traj_length": 0},
 ], ids=lambda k: next(iter(k.items())).__repr__())
-@pytest.mark.parametrize("config_cls", [PortfolioTradingEnvConfig, VectorizedPortfolioTradingEnvConfig],
-                         ids=["scalar", "vectorized"])
-def test_config_rejects_out_of_range(config_cls, kwargs):
+def test_config_rejects_out_of_range(kwargs):
     with pytest.raises(ValueError):
-        config_cls(**kwargs)
+        PortfolioTradingEnvConfig(**kwargs)
 
 
 @pytest.mark.parametrize("allow_short", [False, True])
@@ -221,9 +219,10 @@ def test_delist_force_close(allow_short, weight):
     assert all(v == pytest.approx(values_after_close[0]) for v in values_after_close)
 
 
-def test_vectorized_config_rejects_zero_envs():
+@pytest.mark.parametrize("kwargs", [{"transaction_fee": 0.25}, {"num_envs": 0}], ids=["inherited-base", "num-envs"])
+def test_vectorized_config_rejects_out_of_range(kwargs):
     with pytest.raises(ValueError):
-        VectorizedPortfolioTradingEnvConfig(num_envs=0)
+        VectorizedPortfolioTradingEnvConfig(**kwargs)
 
 
 @pytest.mark.parametrize("allow_short", [False, True])

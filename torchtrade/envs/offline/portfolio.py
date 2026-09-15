@@ -34,8 +34,11 @@ class PortfolioTradingEnvConfig:
         self.execute_on, self.time_frames, self.window_sizes = normalize_timeframe_config(
             self.execute_on, self.time_frames, self.window_sizes
         )
-        if not 0 <= self.transaction_fee < 1:
-            raise ValueError(f"transaction_fee must be in [0, 1), got {self.transaction_fee}")
+        if not 0 <= self.transaction_fee < 0.25:
+            raise ValueError(
+                f"transaction_fee must be in [0, 0.25), got {self.transaction_fee}; "
+                "the capped fee fixed point does not converge for higher fees"
+            )
         if not 0 < self.max_gross <= 1:
             raise ValueError(f"max_gross must be in (0, 1], got {self.max_gross}")
         if not 0 <= self.bankrupt_threshold < 1:
