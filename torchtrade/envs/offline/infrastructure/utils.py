@@ -34,6 +34,26 @@ def load_torch_trade_dataset(
     return dataset[split].to_pandas()
 
 
+def load_portfolio_dataset(
+    repo_id: str = "Torch-Trade/okx-multi-asset-1h",
+    revision: str = "v2026.09",
+):
+    """Load a multi-asset dataset into `(bars, instruments, funding)` DataFrames.
+
+    Pin `revision` to a published version tag so results stay reproducible.
+
+    Example:
+        >>> bars, instruments, funding = load_portfolio_dataset()
+        >>> env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(), funding=funding)
+    """
+    from huggingface_hub import hf_hub_download
+
+    def read(filename):
+        return pd.read_parquet(hf_hub_download(repo_id, filename, repo_type="dataset", revision=revision))
+
+    return read("ohlcv_1h.parquet"), read("instruments.parquet"), read("funding.parquet")
+
+
 def compute_periods_per_year_crypto(execute_on_unit: str, execute_on_value: float):
     """
     Compute periods per year for crypto trading (24/7).

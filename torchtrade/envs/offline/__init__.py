@@ -22,6 +22,14 @@ from torchtrade.envs.offline.vectorized_sequential_sltp import (
     VectorizedSequentialTradingEnvSLTP,
     VectorizedSequentialTradingEnvSLTPConfig,
 )
+from torchtrade.envs.offline.portfolio import (
+    PortfolioTradingEnv,
+    PortfolioTradingEnvConfig,
+)
+from torchtrade.envs.offline.vectorized_portfolio import (
+    VectorizedPortfolioTradingEnv,
+    VectorizedPortfolioTradingEnvConfig,
+)
 
 # Infrastructure
 from torchtrade.envs.offline.infrastructure import MarketDataObservationSampler
@@ -39,6 +47,11 @@ __all__ = [
     "VectorizedSequentialTradingEnvConfig",
     "VectorizedSequentialTradingEnvSLTP",
     "VectorizedSequentialTradingEnvSLTPConfig",
+    # Portfolio environments
+    "PortfolioTradingEnv",
+    "PortfolioTradingEnvConfig",
+    "VectorizedPortfolioTradingEnv",
+    "VectorizedPortfolioTradingEnvConfig",
     # Types
     "MarginMode",
     # Infrastructure
