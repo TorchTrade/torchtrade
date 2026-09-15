@@ -263,8 +263,8 @@ def test_scalar_and_vectorized_agree(scenario):
 
 
 def test_vectorized_per_lane_termination():
-    """Two lanes stepped together, one wiped by a price jump and the other flat: only the
-    wiped lane terminates, and the flat lane's value is unaffected by the other's loss."""
+    """Two lanes stepped together, one pushed below the bankrupt threshold by a price jump and
+    the other flat: only that lane terminates, and the flat lane's value is unaffected."""
     bars, asset_idx = _price_jump_bars(1.9)
     vec = VectorizedPortfolioTradingEnv(
         bars, VectorizedPortfolioTradingEnvConfig(**{**SMALL, "allow_short": True}, num_envs=2)
@@ -283,11 +283,7 @@ def test_vectorized_per_lane_termination():
 
 
 def test_vectorized_step_past_end_no_raise():
-    """A lane already sitting on the last execution bar (done, but not yet reset by the
-    collector) must not raise when stepped again; this is what `_idx.clamp(max=num_exec
-    - 2)` exists for. `env.rollout(break_when_any_done=False)` alone does not exercise
-    this: `step_and_maybe_reset` resets every done lane before the next `_step` call, so
-    the state is forced directly instead."""
+    """`_idx` is set directly because a rollout resets done lanes before stepping them again."""
     env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2))
     env.reset()
     env._idx = torch.full_like(env._idx, env.sampler.num_exec - 1)
@@ -350,3 +346,21 @@ def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash)
     assert (ends <= last).all()
     if isinstance(initial_cash, tuple):
         assert ((cash >= 500) & (cash <= 1500)).all()
+
+
+@pytest.mark.parametrize("make_env", [
+    pytest.param(
+        lambda bars: PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL), reward_function=lambda history: 1.0),
+        id="scalar",
+    ),
+    pytest.param(
+        lambda bars: VectorizedPortfolioTradingEnv(
+            bars, VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2),
+            reward_function=lambda old, new: torch.ones_like(new),
+        ),
+        id="vectorized",
+    ),
+])
+def test_reward_function_injection(make_env):
+    rollout = make_env(make_portfolio_bars()).rollout(5)
+    assert (rollout["next", "reward"] == 1.0).all()

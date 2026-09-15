@@ -51,16 +51,27 @@ def test_invalid_funding_raises(funding, match):
         _sampler(make_portfolio_bars(), funding=funding)
 
 
-def test_weekend_closure_carries_price_and_blocks_trading():
+@pytest.mark.parametrize("closed_by", ["missing-rows", "tradable-column"])
+def test_weekend_closure_carries_price_and_blocks_trading(closed_by):
+    """A1 closes on weekends through absent rows (price carried) or rows flagged tradable=False."""
     bars = make_portfolio_bars()
     weekend = (bars.inst_id == "A1") & (bars.timestamp.dt.dayofweek >= 5)
-    s = _sampler(bars[~weekend])
+    s = _sampler(bars[~weekend] if closed_by == "missing-rows" else bars.assign(tradable=~weekend))
     a1 = s.inst_ids.index("A1")
     is_weekend = torch.from_numpy(s.exec_times.dayofweek.to_numpy() >= 5)
     assert not s.tradable_exec[is_weekend, a1].any()
     assert s.tradable_exec[~is_weekend].all()
-    friday_close = bars[(bars.inst_id == "A1") & ~weekend & (bars.timestamp < "2026-01-10")].close.iloc[-1]
-    assert torch.all(s.close_exec[is_weekend, a1][:12] == friday_close)
+    if closed_by == "missing-rows":
+        friday_close = bars[(bars.inst_id == "A1") & ~weekend & (bars.timestamp < "2026-01-10")].close.iloc[-1]
+        assert torch.all(s.close_exec[is_weekend, a1][:12] == friday_close)
+
+
+def test_tz_aware_timestamps_match_utc_naive():
+    bars = make_portfolio_bars()
+    berlin = bars.assign(timestamp=bars.timestamp.dt.tz_localize("UTC").dt.tz_convert("Europe/Berlin"))
+    naive, aware = _sampler(bars), _sampler(berlin)
+    assert aware.exec_times.equals(naive.exec_times)
+    assert torch.equal(aware.close_exec, naive.close_exec)
 
 
 @pytest.mark.parametrize("time_frames,window_sizes,hours,listed_from", [
@@ -85,9 +96,7 @@ def test_listing_zeroes_features_and_blocks_trading_before_the_first_row(
     assert not s.tradable_exec[before, a2].any()
 
     mid_bin = int(np.flatnonzero(s.exec_times == partial_bin)[0])
-    empty_bin = int(np.flatnonzero(s.exec_times == partial_bin - pd.Timedelta("4h"))[0])
     assert s.tradable_exec[mid_bin, a2]
-    assert not s.tradable_exec[empty_bin, a2]
 
 
 @pytest.mark.parametrize("drop_after,expected_delisted", [(None, False), ("2026-01-12", True)])

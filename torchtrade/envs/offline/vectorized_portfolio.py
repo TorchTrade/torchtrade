@@ -114,7 +114,7 @@ class VectorizedPortfolioTradingEnv(EnvBase):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         s = self.sampler
-        # Lanes already done may sit on the last bar until the collector resets them.
+        # Keeps n + 1 in range when a done lane is stepped before its reset.
         n = self._idx.clamp(max=s.num_exec - 2)
         out = portfolio_step(
             self._drifted,
