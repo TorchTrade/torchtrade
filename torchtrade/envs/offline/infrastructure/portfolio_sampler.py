@@ -122,11 +122,18 @@ class PortfolioSampler:
         if unknown:
             raise ValueError(f"funding has unknown inst_id: {unknown}")
         fills = (self.exec_times + tf_to_timedelta(execute_on)).as_unit("ns").asi8
+        # searchsorted against `fills` alone caps at len(fills), so nothing past the last
+        # fill could ever fail `step < num_exec` -- every settlement after the data, no
+        # matter how far, piled into the final row. The appended edge is the right bound
+        # of that last window, so a settlement past it lands one step too high and is
+        # dropped by `keep`.
+        edges = np.append(fills, fills[-1] + tf_to_timedelta(execute_on).value)
         stamps = pd.DatetimeIndex(funding["timestamp"]).as_unit("ns").asi8
         # Settlement s belongs to step n iff fill_n < s <= fill_{n+1}.
-        step = np.searchsorted(fills, stamps, side="left") - 1
+        step = np.searchsorted(edges, stamps, side="left") - 1
         asset = funding["inst_id"].map({inst: i for i, inst in enumerate(self.inst_ids)}).to_numpy()
         keep = (step >= 0) & (step < self.num_exec)
+        # Two settlements landing in the same step must SUM, not overwrite.
         np.add.at(out, (step[keep], asset[keep]), funding["funding_rate"].to_numpy()[keep])
         return torch.from_numpy(out)
 
