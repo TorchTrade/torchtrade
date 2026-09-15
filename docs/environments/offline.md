@@ -382,14 +382,14 @@ bias. Choose the universe from data before the test window.
 
 ## Visualization
 
-The single-asset offline environments support `render_history()` to visualize episode performance:
+`SequentialTradingEnv`, `SequentialTradingEnvSLTP` and `OneStepTradingEnv` support `render_history()` to visualize episode performance:
 
 ```python
 env.render_history()  # Display after running an episode
 fig = env.render_history(return_fig=True)  # Or get the figure
 ```
 
-All environments render 3 subplots: price + actions, portfolio vs buy-and-hold, and exposure history.
+They render 3 subplots: price + actions, portfolio vs buy-and-hold, and exposure history.
 
 See [Visualization Guide](visualization.md) for details.
 
