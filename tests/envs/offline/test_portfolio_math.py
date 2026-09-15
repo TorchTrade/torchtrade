@@ -56,7 +56,7 @@ def test_commission_matches_hand_computed(drifted, request_, allow_short, fee, m
     torch.testing.assert_close(1 - out.commission, _t([mu]), atol=1e-12, rtol=0)
 
 
-@pytest.mark.parametrize("fee", [0.0, 0.001, 0.02])
+@pytest.mark.parametrize("fee", [0.0, 0.001, 0.02, 0.2])
 @pytest.mark.parametrize("allow_short", [False, True])
 @pytest.mark.parametrize("closed_share", [0.0, 0.3, 1.0])
 def test_solution_satisfies_every_defining_condition(fee, allow_short, closed_share):
