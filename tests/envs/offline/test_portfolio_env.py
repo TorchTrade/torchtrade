@@ -325,21 +325,24 @@ def test_vectorized_step_past_end_no_raise():
 
 
 def test_partial_reset_leaves_other_lanes_untouched():
-    env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=3))
+    env = VectorizedPortfolioTradingEnv(
+        make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**{**SMALL, "random_start": True}, num_envs=3)
+    )
     td = env.reset()
     for _ in range(3):
         td["action"] = torch.tensor([[0.0, 1.0, 0.0, 0.0]] * 3)
         td = env.step(td)["next"]
     before = (env._pvs.clone(), env._drifted.clone(), env._idx.clone())
-    held = td["portfolio_weights"]
-    held_values = held.clone()
+    held = [td[key] for key in ("portfolio_weights", "reset_index", "state_index")]
+    held_values = [t.clone() for t in held]
     env.reset(TensorDict({"_reset": torch.tensor([[False], [True], [False]])}, batch_size=[3]))
     # _reset writes the lane in place; an observation already handed out must not change.
-    torch.testing.assert_close(held, held_values, rtol=0, atol=0)
+    for now, then in zip(held, held_values):
+        torch.testing.assert_close(now, then, rtol=0, atol=0)
     keep = torch.tensor([0, 2])
     for now, then in zip((env._pvs, env._drifted, env._idx), before):
         torch.testing.assert_close(now[keep], then[keep])
-    assert env._pvs[1].item() == 1000 and env._idx[1].item() == 0
+    assert env._pvs[1].item() == 1000 and env._idx[1].item() == env._starts[1].item()
     assert env._drifted[1].tolist() == [1.0, 0.0, 0.0, 0.0]
 
 
@@ -352,28 +355,12 @@ def test_partial_reset_leaves_other_lanes_untouched():
 def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash):
     """Starts spread over the timeline, each episode ends at min(start + max_traj_length, last)."""
     cfg = {**SMALL, "random_start": True, "max_traj_length": max_traj_length, "initial_cash": initial_cash}
-    action = torch.tensor([1.0, 0.0, 0.0, 0.0])
     if vectorized:
         env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
-        env.set_seed(0)
-        td = env.reset()
+        env.reset()
         starts, ends, cash = env._idx.clone(), env._end.clone(), env._initial_pvs.clone()
-        pvs = env._pvs.clone()
-        env.set_seed(0)
-        env.reset()
-        assert torch.equal(env._idx, starts) and torch.equal(env._end, ends) and torch.equal(env._pvs, pvs)
-        env.set_seed(1)
-        env.reset()
-        assert not torch.equal(env._idx, starts)
-        env.set_seed(0)
-        td = env.reset()
-        assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], starts)
-        td["action"] = action.expand(64, -1)
-        td = env.step(td)["next"]
-        assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], env._idx)
     else:
         env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**cfg))
-        env.set_seed(0)
         starts, ends, cash = [], [], []
         for _ in range(20):
             td = env.reset()
@@ -382,19 +369,9 @@ def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash)
             starts.append(start)
             ends.append(env._end)
             cash.append(env.initial_portfolio_value)
-            td["action"] = action
+            td["action"] = torch.tensor([1.0, 0.0, 0.0, 0.0])
             td = env.step(td)["next"]
             assert td["reset_index"].item() == start and td["state_index"].item() == env._idx
-
-        def windows(seed):
-            env.set_seed(seed)
-            pairs = []
-            for _ in range(20):
-                env.reset()
-                pairs.append((env._idx, env._end))
-            return pairs
-
-        assert windows(0) == list(zip(starts, ends)) and windows(1) != list(zip(starts, ends))
         starts, ends, cash = torch.tensor(starts), torch.tensor(ends), torch.tensor(cash)
 
     last = env.sampler.num_exec - 1
@@ -404,6 +381,39 @@ def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash)
     assert (ends <= last).all()
     if isinstance(initial_cash, tuple):
         assert ((cash >= 500) & (cash <= 1500)).all()
+
+
+@pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
+def test_random_start_is_seed_reproducible(vectorized):
+    """Tuple cash on the vectorized row: a fixed cash makes its `_pvs` comparison vacuous."""
+    cfg = {**SMALL, "random_start": True, "max_traj_length": None, "initial_cash": (500, 1500) if vectorized else 1000}
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
+        env.set_seed(0)
+        td = env.reset()
+        starts, ends, cash = env._idx.clone(), env._end.clone(), env._initial_pvs.clone()
+        env.set_seed(1)
+        env.reset()
+        assert not torch.equal(env._idx, starts)
+        env.set_seed(0)
+        env.reset()
+        assert torch.equal(env._end, ends) and torch.equal(env._pvs, cash)
+        assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], starts)
+        td["action"] = torch.tensor([1.0, 0.0, 0.0, 0.0]).expand(64, -1)
+        td = env.step(td)["next"]
+        assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], env._idx)
+    else:
+        env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**cfg))
+
+        def windows(seed):
+            env.set_seed(seed)
+            pairs = []
+            for _ in range(20):
+                env.reset()
+                pairs.append((env._idx, env._end))
+            return pairs
+
+        assert windows(0) == windows(0) and windows(0) != windows(1)
 
 
 @pytest.mark.parametrize("make_env", [
