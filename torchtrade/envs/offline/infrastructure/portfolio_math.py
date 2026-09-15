@@ -40,13 +40,6 @@ def normalise_request(request, force_close, max_gross, allow_short):
     return _with_cash(assets)
 
 
-def _target_weights(held, tradable, open_assets, open_mass, mu):
-    # A closed asset's post-trade holding μ·w_i must equal what it already holds.
-    pinned = torch.where(tradable, 0.0, held / mu[..., None])
-    budget = (1 - pinned.abs().sum(-1)).clamp(min=0) / torch.where(open_mass > 0, open_mass, 1.0)
-    return _with_cash(pinned + open_assets * budget[..., None])
-
-
 def portfolio_step(
     drifted, request, tradable, force_close, price_relative, funding_rate,
     fee, max_gross, allow_short,
@@ -55,16 +48,22 @@ def portfolio_step(
     target = normalise_request(request, force_close, max_gross, allow_short)
     open_assets = torch.where(tradable, target[..., 1:], 0.0)
     open_mass = target[..., 0] + open_assets.abs().sum(-1)
+    open_mass = torch.where(open_mass > 0, open_mass, 1.0)
     held = drifted[..., 1:]
+    closed_held = torch.where(tradable, 0.0, held)
+
+    def assets_at(mu):
+        # A closed asset's post-trade holding μ·w_i must equal what it already holds.
+        pinned = closed_held / mu[..., None]
+        budget = (1 - pinned.abs().sum(-1)).clamp(min=0) / open_mass
+        return pinned + open_assets * budget[..., None]
 
     mu = torch.ones_like(open_mass)
     iters = 0 if fee == 0 else min(MU_ITERS, math.ceil(math.log(1e-15) / math.log(fee)))
     for _ in range(iters):
-        weights = _target_weights(held, tradable, open_assets, open_mass, mu)
-        mu = 1 - fee * (held - mu[..., None] * weights[..., 1:]).abs().sum(-1)
-    weights = _target_weights(held, tradable, open_assets, open_mass, mu)
+        mu = 1 - fee * (held - mu[..., None] * assets_at(mu)).abs().sum(-1)
+    assets = assets_at(mu)
 
-    assets = weights[..., 1:]
     growth = 1 + (assets * (price_relative - 1)).sum(-1)
     # A wiped-out lane (growth <= 0) divides by nothing: drift it to all cash instead.
     alive = growth > 0
@@ -75,7 +74,7 @@ def portfolio_step(
     growth = growth.clamp(min=0)
     return PortfolioStep(
         pv_factor=mu * growth * (1 - funding_share),
-        weights=weights,
+        weights=_with_cash(assets),
         drifted=_with_cash(next_assets),
         commission=1 - mu,
         funding=mu * growth * funding_share,
