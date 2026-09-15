@@ -116,9 +116,12 @@ class VectorizedPortfolioTradingEnv(EnvBase):
         s = self.sampler
         # Keeps n + 1 in range when a done lane is stepped before its reset.
         n = self._idx.clamp(max=s.num_exec - 2)
+        action = tensordict["action"].to(MONEY_DTYPE)
+        if not torch.isfinite(action).all():
+            raise ValueError("action contains non-finite values")
         out = portfolio_step(
             self._drifted,
-            tensordict["action"].to(MONEY_DTYPE),
+            action,
             s.tradable_exec[n],
             s.delist_exec[None, :] == n[:, None],
             s.close_exec[n + 1] / s.close_exec[n],

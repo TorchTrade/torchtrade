@@ -129,9 +129,12 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         s, n = self.sampler, self._idx
+        action = tensordict["action"].to(MONEY_DTYPE).reshape(1, -1)
+        if not torch.isfinite(action).all():
+            raise ValueError("action contains non-finite values")
         out = portfolio_step(
             self.drifted,
-            tensordict["action"].to(MONEY_DTYPE).reshape(1, -1),
+            action,
             s.tradable_exec[n : n + 1],
             (s.delist_exec == n)[None],
             (s.close_exec[n + 1] / s.close_exec[n])[None],

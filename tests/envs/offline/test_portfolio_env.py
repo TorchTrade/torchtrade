@@ -60,6 +60,25 @@ def test_check_env_specs(allow_short, random_start):
     check_env_specs(env)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+@pytest.mark.parametrize("vectorized", [False, True])
+def test_step_rejects_non_finite_action(vectorized, value):
+    """A diverged policy emitting NaN/inf must fail loudly, not get silently absorbed."""
+    bars = make_portfolio_bars()
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(bars, VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2))
+        env.reset()
+        action = torch.zeros(2, 4)
+        action[1, 1] = value  # lane 1 only: a lane-0-only check would miss this
+        td = TensorDict({"action": action}, batch_size=[2])
+    else:
+        env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL))
+        td = env.reset()
+        td["action"] = torch.tensor([0.0, value, 0.0, 0.0])
+    with pytest.raises(ValueError, match="non-finite"):
+        env.step(td)
+
+
 @pytest.mark.parametrize("fee,rate", [(0.0, 0.0), (0.001, 0.0), (0.001, 0.0005)])
 def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     """All in A0 once, then ask for exactly the drifted weights: only the entry fee and
