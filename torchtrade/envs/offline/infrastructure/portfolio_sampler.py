@@ -48,6 +48,10 @@ class PortfolioSampler:
         bars = _require(bars, BAR_COLUMNS, "bars")
         if bars[["open", "high", "low", "close"]].isna().any().any():
             raise ValueError("bars contain NaN prices")
+        if (bars["close"] <= 0).any():
+            raise ValueError("bars contain non-positive close prices")
+        if "tradable" in bars.columns and bars["tradable"].isna().any():
+            raise ValueError("bars have NaN in the tradable column")
 
         self.time_frames, self.window_sizes = time_frames, window_sizes
         self.np_rng = np.random.default_rng(seed)

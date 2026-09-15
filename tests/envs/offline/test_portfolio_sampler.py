@@ -19,6 +19,13 @@ def _bad_bars(kind):
         return bars.drop(columns="volume")
     if kind == "duplicate-row":
         return pd.concat([bars, bars.iloc[:1]])
+    if kind == "non-positive-close":
+        bars.loc[5, "close"] = 0.0
+        return bars
+    if kind == "nan-tradable":
+        bars["tradable"] = 1.0
+        bars.loc[5, "tradable"] = np.nan
+        return bars
     bars.loc[5, "close"] = np.nan
     return bars
 
@@ -27,6 +34,8 @@ def _bad_bars(kind):
     ("missing-column", "missing required columns"),
     ("duplicate-row", "duplicate"),
     ("nan-price", "NaN"),
+    ("non-positive-close", "non-positive"),
+    ("nan-tradable", "tradable"),
 ])
 def test_invalid_bars_raise(kind, match):
     with pytest.raises(ValueError, match=match):
