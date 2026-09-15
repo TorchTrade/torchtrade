@@ -90,6 +90,7 @@ The single-asset environments support both spot and futures trading via config (
 | **SequentialTradingEnv** | ❌ | ❌ | Standard sequential trading |
 | **SequentialTradingEnvSLTP** | ✅ | ❌ | Risk management with SL/TP |
 | **OneStepTradingEnv** | ✅ | ✅ | GRPO, contextual bandits |
+| **PortfolioTradingEnv** | ❌ | ❌ | Multi-asset allocation (target weights incl. cash) |
 
 ### Live Environments (Exchange APIs)
 
