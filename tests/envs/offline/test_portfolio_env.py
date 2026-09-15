@@ -45,9 +45,11 @@ def _delisted_bars():
     {"max_gross": 0.0}, {"max_gross": 1.5}, {"bankrupt_threshold": 1.0},
     {"max_traj_length": 0},
 ], ids=lambda k: next(iter(k.items())).__repr__())
-def test_config_rejects_out_of_range(kwargs):
+@pytest.mark.parametrize("config_cls", [PortfolioTradingEnvConfig, VectorizedPortfolioTradingEnvConfig],
+                         ids=["scalar", "vectorized"])
+def test_config_rejects_out_of_range(config_cls, kwargs):
     with pytest.raises(ValueError):
-        PortfolioTradingEnvConfig(**kwargs)
+        config_cls(**kwargs)
 
 
 @pytest.mark.parametrize("allow_short", [False, True])
@@ -72,9 +74,11 @@ def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     start, end = env._idx, env._end
     action = torch.tensor([0.0, 1.0, 0.0, 0.0])
     total_reward = 0.0
+    steps = 0
     while True:
         td["action"] = action
         td = env.step(td)["next"]
+        steps += 1
         total_reward += td["reward"].item()
         action = td["portfolio_weights"].clone()
         if td["done"].item():
@@ -84,6 +88,18 @@ def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     expected = 1000 / (1 + fee) * (s.close_exec[end, 0] / s.close_exec[start, 0]).item() * (1 - rate) ** settlements
     assert env.portfolio_value == pytest.approx(expected, rel=1e-6)
     assert total_reward == pytest.approx(math.log(env.portfolio_value / 1000), abs=1e-5)
+
+    h = env.history.to_dict()
+    assert {len(v) for v in h.values()} == {steps + 1}
+    assert h["timestamps"][-1] == s.exec_times[env._end]
+    assert h["portfolio_values"][-1] == env.portfolio_value
+    # Row 0 is the reset row; the entry trade pays V0·(1 − μ) with μ = 1/(1 + fee).
+    assert h["commissions"][1] == pytest.approx(1000 * fee / (1 + fee), abs=1e-9)
+    assert sum(h["commissions"][2:]) == pytest.approx(0.0, abs=1e-6)
+    if rate == 0:
+        assert all(f == 0.0 for f in h["fundings"])
+    else:
+        assert sum(f > 0 for f in h["fundings"]) == settlements
 
 
 def test_observation_timing_matches_next_index():
@@ -159,17 +175,18 @@ def test_termination_on_price_jump(jump_ratio, expect_wiped):
         assert 0 < env.portfolio_value < config.bankrupt_threshold * env.initial_portfolio_value
 
 
-def test_delist_force_close():
+@pytest.mark.parametrize("allow_short,weight", [(False, 1.0), (True, -1.0)], ids=["long", "short"])
+def test_delist_force_close(allow_short, weight):
     """Asking for 100% of an asset every step must still be force-closed the step its
     data runs out, and stay closed (all cash, flat value) for every step after."""
-    env = PortfolioTradingEnv(_delisted_bars(), PortfolioTradingEnvConfig(**SMALL))
+    env = PortfolioTradingEnv(_delisted_bars(), PortfolioTradingEnvConfig(**SMALL, allow_short=allow_short))
     td = env.reset()
     asset_idx = env.inst_ids.index("A2")
     delist_n = int(env.sampler.delist_exec[asset_idx])
     assert delist_n >= 0  # sanity: the asset was actually delisted within the episode
 
     action = torch.zeros(len(env.inst_ids) + 1)
-    action[asset_idx + 1] = 1.0
+    action[asset_idx + 1] = weight
     values_after_close = []
     while True:
         n_before = env._idx
@@ -316,8 +333,18 @@ def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash)
     action = torch.tensor([1.0, 0.0, 0.0, 0.0])
     if vectorized:
         env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
+        env.set_seed(0)
         td = env.reset()
         starts, ends, cash = env._idx.clone(), env._end.clone(), env._initial_pvs.clone()
+        pvs = env._pvs.clone()
+        env.set_seed(0)
+        env.reset()
+        assert torch.equal(env._idx, starts) and torch.equal(env._end, ends) and torch.equal(env._pvs, pvs)
+        env.set_seed(1)
+        env.reset()
+        assert not torch.equal(env._idx, starts)
+        env.set_seed(0)
+        td = env.reset()
         assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], starts)
         td["action"] = action.expand(64, -1)
         td = env.step(td)["next"]
@@ -336,6 +363,16 @@ def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash)
             td["action"] = action
             td = env.step(td)["next"]
             assert td["reset_index"].item() == start and td["state_index"].item() == env._idx
+
+        def windows(seed):
+            env.set_seed(seed)
+            pairs = []
+            for _ in range(20):
+                env.reset()
+                pairs.append((env._idx, env._end))
+            return pairs
+
+        assert windows(0) == list(zip(starts, ends)) and windows(1) != list(zip(starts, ends))
         starts, ends, cash = torch.tensor(starts), torch.tensor(ends), torch.tensor(cash)
 
     last = env.sampler.num_exec - 1
