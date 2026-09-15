@@ -16,6 +16,8 @@ from torchtrade.envs.utils.timeframe import TimeFrame, tf_to_timedelta
 
 BAR_COLUMNS = ["timestamp", "inst_id", "open", "high", "low", "close", "volume"]
 FUNDING_COLUMNS = ["timestamp", "inst_id", "funding_rate"]
+# Columns of the per-asset feature tensors: open, high, low, close, volume, listed, tradable
+# (OHLCV, then the two aux columns _fill_onto_grid appends).
 _HIGH, _LOW, _CLOSE, _LISTED = 1, 2, 3, 5
 
 
@@ -49,7 +51,7 @@ class PortfolioSampler:
         if "tradable" in bars.columns and bars["tradable"].isna().any():
             raise ValueError("bars have NaN in the tradable column")
 
-        self.time_frames = time_frames
+        # TorchTradeOfflineEnv._set_seed reseeds this; the scalar env draws episode starts from it.
         self.np_rng = np.random.default_rng(seed)
         self.inst_ids = sorted(bars["inst_id"].unique())
         self.num_assets = n = len(self.inst_ids)
@@ -75,12 +77,6 @@ class PortfolioSampler:
                 self.close_exec = torch.empty(self.num_exec, n, dtype=torch.float64)
                 self.tradable_exec = torch.empty(self.num_exec, n, dtype=torch.bool)
                 self.delist_exec = torch.full((n,), -1, dtype=torch.long)
-            elif not (
-                sampler.exec_times.equals(self.exec_times)
-                and all(np.array_equal(v, self._obs_idx[k].numpy()) for k, v in sampler._obs_indices.items())
-            ):
-                raise ValueError(f"{inst} does not share the common execution grid")
-
             for key, tensor in sampler.torch_tensors.items():
                 self._stacks[key][:, i] = tensor
             self.close_exec[:, i] = torch.from_numpy(
@@ -91,8 +87,9 @@ class PortfolioSampler:
             if rows.index.max() < grid[-1] and tradable.any():
                 self.delist_exec[i] = int(np.flatnonzero(tradable.to_numpy())[-1])
 
-        self.market_data_keys: List[Tuple[str, int]] = [
-            (f"market_data_{tf.obs_key_freq()}_{ws}", ws) for tf, ws in zip(time_frames, window_sizes)
+        self.market_data_keys: List[Tuple[str, str, int]] = [
+            (f"market_data_{tf.obs_key_freq()}_{ws}", tf.obs_key_freq(), ws)
+            for tf, ws in zip(time_frames, window_sizes)
         ]
         self.funding_exec = self._funding_per_step(funding, execute_on)
 
@@ -138,8 +135,7 @@ class PortfolioSampler:
     def market_data(self, exec_idx: torch.Tensor) -> Dict[str, torch.Tensor]:
         """`(B, N, W, 3)` windows of close, high, low over the window's latest close."""
         out = {}
-        for tf, (key, ws) in zip(self.time_frames, self.market_data_keys):
-            freq = tf.obs_key_freq()
+        for key, freq, ws in self.market_data_keys:
             end = self._obs_idx[freq][exec_idx]
             rows = (end[:, None] - ws + 1 + torch.arange(ws)).clamp(min=0)
             window = self._stacks[freq][rows]                                   # (B, W, N, F)

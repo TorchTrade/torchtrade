@@ -55,7 +55,7 @@ def portfolio_specs(sampler: PortfolioSampler, config, batch: torch.Size = torch
         tradable=Binary(shape=batch + (n,), dtype=torch.float32),
         shape=batch,
     )
-    for key, window in sampler.market_data_keys:
+    for key, _, window in sampler.market_data_keys:
         obs.set(key, Unbounded(shape=batch + (n, window, 3), dtype=torch.float32))
     if config.random_start:
         obs.set("reset_index", Unbounded(shape=batch, dtype=torch.long))
@@ -131,7 +131,8 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
         return td
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        s, n = self.sampler, self._idx
+        s = self.sampler
+        n = min(self._idx, s.num_exec - 2)  # a done env stepped again re-emits its last bar
         action = tensordict["action"].to(MONEY_DTYPE).reshape(1, -1)
         if not torch.isfinite(action).all():
             raise ValueError("action contains non-finite values")

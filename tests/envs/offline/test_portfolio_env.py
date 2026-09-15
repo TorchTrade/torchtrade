@@ -17,19 +17,19 @@ from torchtrade.envs.offline.vectorized_portfolio import (
 SMALL = dict(time_frames="1Hour", window_sizes=8, execute_on="4Hour", initial_cash=1000, random_start=False)
 
 
-def _price_jump_bars(jump_ratio):
-    """Bars where A1's price jumps by `jump_ratio` starting at the second execution bar.
+def _price_jump_bars(*jump_ratios):
+    """Bars where A1's price jumps by `jump_ratios[k]` from execution bar k+1 onward.
 
-    Deterministic (make_portfolio_bars is seeded): `jump_ratio` was picked by reading the
+    Deterministic (make_portfolio_bars is seeded): each ratio was picked by reading the
     actual realized close_exec ratio for A1, not guessed against the bars' natural drift.
     """
     bars = make_portfolio_bars()
     config = PortfolioTradingEnvConfig(**SMALL)
     probe = PortfolioSampler(bars, config.time_frames, config.window_sizes, config.execute_on)
     asset_idx = probe.inst_ids.index("A1")
-    jump_ts = probe.exec_times[1]
-    mask = (bars["inst_id"] == "A1") & (bars["timestamp"] >= jump_ts)
-    bars.loc[mask, ["open", "high", "low", "close"]] *= jump_ratio
+    for k, ratio in enumerate(jump_ratios):
+        mask = (bars["inst_id"] == "A1") & (bars["timestamp"] >= probe.exec_times[k + 1])
+        bars.loc[mask, ["open", "high", "low", "close"]] *= ratio
     return bars, asset_idx
 
 
@@ -42,7 +42,7 @@ def _delisted_bars():
 
 @pytest.mark.parametrize("kwargs", [
     {"transaction_fee": -0.1}, {"transaction_fee": 0.25},
-    {"max_gross": 0.0}, {"max_gross": 1.5}, {"bankrupt_threshold": 1.0},
+    {"max_gross": 0.0}, {"max_gross": 1.5}, {"bankrupt_threshold": -0.1}, {"bankrupt_threshold": 1.0},
     {"max_traj_length": 0},
 ], ids=lambda k: next(iter(k.items())).__repr__())
 def test_config_rejects_out_of_range(kwargs):
@@ -84,6 +84,29 @@ def test_step_rejects_non_finite_action(vectorized, value, column):
         env.step(td)
     for now, then in zip(state(), before):
         assert torch.equal(now, then)
+
+
+@pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
+def test_bankruptcy_is_measured_against_the_initial_value(vectorized):
+    """Two 40% drops in a row, each clearing a 0.5 threshold on its own: the second step
+    must terminate because the value is 0.36 of the initial, not 0.6 of the previous."""
+    bars, asset_idx = _price_jump_bars(0.6, 0.6)
+    cfg = {**SMALL, "bankrupt_threshold": 0.5}
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(bars, VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=1))
+        action = torch.zeros(1, 4)
+        action[0, asset_idx + 1] = 1.0
+    else:
+        env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**cfg))
+        action = torch.zeros(4)
+        action[asset_idx + 1] = 1.0
+    td = env.reset()
+    td["action"] = action
+    td = env.step(td)["next"]
+    assert not td["terminated"].any()
+    td["action"] = action
+    td = env.step(td)["next"]
+    assert td["terminated"].all()
 
 
 @pytest.mark.parametrize("fee,rate", [(0.0, 0.0), (0.001, 0.0), (0.001, 0.0005)])
@@ -150,7 +173,7 @@ def test_observation_timing_matches_next_index():
         expected_idx = start + k
         assert torch.equal(td["tradable"], s.tradable_exec[expected_idx].float())
         expected_market = s.market_data(torch.tensor([expected_idx]))
-        for key, _ in s.market_data_keys:
+        for key, _, _ in s.market_data_keys:
             assert torch.equal(td[key], expected_market[key][0])
         if not torch.equal(td["tradable"], prev_tradable):
             seen_diff = True
@@ -292,6 +315,8 @@ def test_scalar_and_vectorized_agree(scenario):
         fixed_action = torch.zeros(n + 1)
         fixed_action[scalar.inst_ids.index(name) + 1] = weight
     s_td, v_td = scalar.reset(), vec.reset()
+    for key in s_td.keys():
+        torch.testing.assert_close(v_td[key][0], s_td[key], rtol=0, atol=0)
     for _ in range(scalar._end - scalar._idx):
         action = torch.randn(n + 1, generator=gen) if fixed_action is None else fixed_action
         s_td["action"], v_td["action"] = action, action[None]
@@ -324,12 +349,19 @@ def test_vectorized_per_lane_termination():
     assert vec._pvs[1].item() == pytest.approx(lane1_before)
 
 
-def test_vectorized_step_past_end_no_raise():
-    """`_idx` is set directly because a rollout resets done lanes before stepping them again."""
-    env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2))
-    env.reset()
-    env._idx = torch.full_like(env._idx, env.sampler.num_exec - 1)
-    td = TensorDict({"action": torch.tensor([[1.0, 0.0, 0.0, 0.0]] * 2)}, batch_size=[2])
+@pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
+def test_step_past_end_no_raise(vectorized):
+    """`_idx` is set directly because a rollout resets a done env before stepping it again."""
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2))
+        env.reset()
+        env._idx = torch.full_like(env._idx, env.sampler.num_exec - 1)
+        td = TensorDict({"action": torch.tensor([[1.0, 0.0, 0.0, 0.0]] * 2)}, batch_size=[2])
+    else:
+        env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**SMALL))
+        td = env.reset()
+        env._idx = env.sampler.num_exec - 1
+        td["action"] = torch.tensor([1.0, 0.0, 0.0, 0.0])
     env.step(td)
 
 
