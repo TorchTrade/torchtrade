@@ -70,8 +70,16 @@ def portfolio_step(
     weights = _target_weights(held, tradable, open_assets, open_mass, mu)
 
     growth = 1 + (weights[..., 1:] * (price_relative - 1)).sum(-1)
-    next_assets = weights[..., 1:] * price_relative / growth[..., None]
+    # A wiped-out lane (growth <= 0) divides by nothing: drift it to all cash instead.
+    alive = growth > 0
+    safe_growth = torch.where(alive, growth, torch.ones_like(growth))
+    next_assets = torch.where(
+        alive[..., None],
+        weights[..., 1:] * price_relative / safe_growth[..., None],
+        torch.zeros_like(weights[..., 1:]),
+    )
     funding_share = (next_assets * funding_rate).sum(-1)
+    growth = growth.clamp(min=0)
     return PortfolioStep(
         pv_factor=mu * growth * (1 - funding_share),
         weights=weights,

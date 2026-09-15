@@ -91,27 +91,40 @@ def test_solution_satisfies_every_defining_condition(fee, allow_short, closed_sh
     assert cross[has_open].abs().max() < 1e-12
 
 
-@pytest.mark.parametrize("weights,y,expected_growth,expected_drifted", [
-    ([[0.5, 0.5]], [[2.0]], 1.5, [[1 / 3, 2 / 3]]),     # long doubles
-    ([[0.5, -0.5]], [[2.0]], 0.5, [[-1.0, -2.0]]),      # short doubles: gross 2, cash -1
-    ([[0.5, -0.5]], [[0.5]], 1.25, [[0.8, -0.2]]),      # short halves
-], ids=["long-up", "short-up", "short-down"])
-def test_drift(weights, y, expected_growth, expected_drifted):
-    out = _step(weights, weights, y=y, allow_short=True)
-    torch.testing.assert_close(out.pv_factor, _t([expected_growth]))
+@pytest.mark.parametrize(
+    "drifted,request_,y,fee,expected_pv_factor,expected_drifted",
+    [
+        ([[0.5, 0.5]], [[0.5, 0.5]], [[2.0]], 0.0, 1.5, [[1 / 3, 2 / 3]]),          # long doubles
+        ([[0.5, -0.5]], [[0.5, -0.5]], [[2.0]], 0.0, 0.5, [[-1.0, -2.0]]),          # short doubles: gross 2, cash -1
+        ([[0.5, -0.5]], [[0.5, -0.5]], [[0.5]], 0.0, 1.25, [[0.8, -0.2]]),          # short halves
+        ([[1.0, 0.0]], [[0.0, 1.0]], [[1.1]], 0.01, 1.1 / 1.01, [[0.0, 1.0]]),      # trade cost eats into pv_factor
+        ([[0.0, -1.0]], [[0.0, -1.0]], [[2.5]], 0.0, 0.0, [[1.0, 0.0]]),            # wiped short -> flat cash, finite
+    ],
+    ids=["long-up", "short-up", "short-down", "trade-cost", "wiped-short"],
+)
+def test_drift(drifted, request_, y, fee, expected_pv_factor, expected_drifted):
+    out = _step(drifted, request_, y=y, fee=fee, allow_short=True)
+    torch.testing.assert_close(out.pv_factor, _t([expected_pv_factor]))
     torch.testing.assert_close(out.drifted, _t(expected_drifted))
+    assert torch.isfinite(out.drifted).all()
 
 
-@pytest.mark.parametrize("weights,rate,expected_factor", [
-    ([[0.0, 1.0]], [[0.01]], 0.99),    # long pays a positive rate
-    ([[0.0, -1.0]], [[0.01]], 1.01),   # short receives it
-    ([[0.0, 1.0]], [[-0.01]], 1.01),   # long receives a negative rate
-    ([[1.0, 0.0]], [[0.01]], 1.0),     # flat pays nothing
-], ids=["long-pays", "short-receives", "negative-rate", "flat"])
-def test_funding_sign(weights, rate, expected_factor):
-    out = _step(weights, weights, rate=rate, allow_short=True)
-    torch.testing.assert_close(out.pv_factor, _t([expected_factor]))
-    torch.testing.assert_close(out.funding, _t([1 - expected_factor]))
+@pytest.mark.parametrize(
+    "drifted,request_,y,rate,fee,expected_pv_factor,expected_funding",
+    [
+        ([[0.0, 1.0]], [[0.0, 1.0]], [[1.0]], [[0.01]], 0.0, 0.99, 0.01),            # long pays a positive rate
+        ([[0.0, -1.0]], [[0.0, -1.0]], [[1.0]], [[0.01]], 0.0, 1.01, -0.01),         # short receives it
+        ([[0.0, 1.0]], [[0.0, 1.0]], [[1.0]], [[-0.01]], 0.0, 1.01, -0.01),          # long receives a negative rate
+        ([[1.0, 0.0]], [[1.0, 0.0]], [[1.0]], [[0.01]], 0.0, 1.0, 0.0),              # flat pays nothing
+        ([[1.0, 0.0]], [[0.5, 0.5]], [[2.0]], [[0.03]], 0.01,                        # drift-then-funding, fee-adjusted
+         (1 / 1.005) * 1.5 * 0.98, (1 / 1.005) * 1.5 * 0.02),
+    ],
+    ids=["long-pays", "short-receives", "negative-rate", "flat", "drift-and-fee"],
+)
+def test_funding_sign(drifted, request_, y, rate, fee, expected_pv_factor, expected_funding):
+    out = _step(drifted, request_, y=y, rate=rate, fee=fee, allow_short=True)
+    torch.testing.assert_close(out.pv_factor, _t([expected_pv_factor]))
+    torch.testing.assert_close(out.funding, _t([expected_funding]))
 
 
 def test_pv_factor_is_differentiable_in_the_request():
