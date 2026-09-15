@@ -315,7 +315,11 @@ def test_partial_reset_leaves_other_lanes_untouched():
         td["action"] = torch.tensor([[0.0, 1.0, 0.0, 0.0]] * 3)
         td = env.step(td)["next"]
     before = (env._pvs.clone(), env._drifted.clone(), env._idx.clone())
+    held = td["portfolio_weights"]
+    held_values = held.clone()
     env.reset(TensorDict({"_reset": torch.tensor([[False], [True], [False]])}, batch_size=[3]))
+    # _reset writes the lane in place; an observation already handed out must not change.
+    torch.testing.assert_close(held, held_values, rtol=0, atol=0)
     keep = torch.tensor([0, 2])
     for now, then in zip((env._pvs, env._drifted, env._idx), before):
         torch.testing.assert_close(now[keep], then[keep])

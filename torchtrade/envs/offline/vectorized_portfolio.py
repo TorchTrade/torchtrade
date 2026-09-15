@@ -103,7 +103,7 @@ class VectorizedPortfolioTradingEnv(EnvBase):
     def _observation(self) -> TensorDict:
         s = self.sampler
         td = TensorDict({
-            "portfolio_weights": self._drifted.float(),
+            "portfolio_weights": self._drifted.to(torch.float32, copy=True),
             "tradable": s.tradable_exec[self._idx].float(),
             **s.market_data(self._idx),
         }, batch_size=self.batch_size)
