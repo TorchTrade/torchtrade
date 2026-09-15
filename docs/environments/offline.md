@@ -331,6 +331,57 @@ env = OneStepTradingEnv(df, config)
 
 ---
 
+## PortfolioTradingEnv
+
+Allocates a portfolio across N assets and cash. `N` comes from the data, so the same code
+runs 3 or 500 assets. `VectorizedPortfolioTradingEnv` steps `num_envs` lanes at once and
+matches the scalar env to 1e-9.
+
+```python
+from torchtrade.envs.offline import PortfolioTradingEnv, PortfolioTradingEnvConfig
+from torchtrade.envs.offline.infrastructure.utils import load_portfolio_dataset
+
+bars, instruments, funding = load_portfolio_dataset(revision="v2026.09")
+config = PortfolioTradingEnvConfig(
+    time_frames=["1Hour"], window_sizes=[50], execute_on="4Hour",
+    transaction_fee=0.0005, allow_short=False,
+)
+env = PortfolioTradingEnv(bars, config, funding=funding)
+```
+
+**Data.** `bars` is long format, one row per asset and bar: `timestamp` (UTC, bar open),
+`inst_id`, `open`, `high`, `low`, `close`, `volume`, optional `tradable`. A missing row means
+the asset was not tradable at that bar; its last close is carried forward. Rows that stop
+before the end of the data mean the asset was delisted: the position is closed at its last
+tradable close. `funding` (optional) has `timestamp`, `inst_id`, `funding_rate`.
+
+**Action.** Target weights `[w_cash, w_1, ..., w_N]`. The env normalises any vector to
+`w_cash + Σ|w_i| = 1` with `w_cash ≥ 0`, clips shorts unless `allow_short=True`, and caps
+gross exposure at `max_gross` (≤ 1). Assets that are not tradable at the decision bar keep
+their holding; the rest of the budget follows the requested proportions.
+
+**Observation.** `portfolio_weights` (N+1, drifted weights, cash first), `tradable` (N),
+and `market_data_{tf}_{window}` (N × window × 3: close, high, low divided by the window's
+latest close; zero before an asset lists).
+
+**Timing.** The agent observes bars up to and including n, the rebalance fills at close n,
+and the step is valued at close n+1 with funding for settlements in (fill n, fill n+1].
+
+**Costs and assumptions.**
+
+- A trade pays `transaction_fee × |notional traded|` (a perpetual swap's fee). The
+  post-trade value solves `μ = 1 − fee·Σ|w'_i − μ·w_i|` exactly.
+- Zero slippage and zero market impact: every trade fills at the close and does not move it.
+- Funding is charged on the weights at the end of the step, which is exact when
+  settlements fall on `execute_on` boundaries.
+- `transaction_fee` defaults to 0; set your venue's taker rate.
+
+**Dataset caveat.** The 40 instruments in `Torch-Trade/okx-multi-asset-1h` were selected by
+liquidity measured at the end of the window, so backtests over that window carry selection
+bias. Choose the universe from data before the test window.
+
+---
+
 ## Visualization
 
 All offline environments support `render_history()` to visualize episode performance:
