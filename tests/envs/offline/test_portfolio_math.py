@@ -36,8 +36,9 @@ def _step(drifted, request, tradable=None, force_close=None, y=None, rate=None,
     ([[0.0, -1.0, 1.0]], [[False, False]], 1.0, False, [[0.0, 0.0, 1.0]]),        # long-only clip
     ([[0.0, -1.0, 1.0]], [[False, False]], 1.0, True, [[0.0, -0.5, 0.5]]),        # short kept
     ([[-1.0, 0.0, 0.0]], [[False, False]], 1.0, True, [[1.0, 0.0, 0.0]]),         # all-zero -> cash
+    ([[-0.5, 0.25, 0.25]], [[False, False]], 1.0, True, [[0.0, 0.5, 0.5]]),       # negative cash clipped
     ([[0.0, 1.0, 1.0]], [[True, False]], 1.0, False, [[0.0, 0.0, 1.0]]),          # force close
-], ids=["valid", "rescale", "gross-cap", "long-only-clip", "short", "empty-to-cash", "force-close"])
+], ids=["valid", "rescale", "gross-cap", "long-only-clip", "short", "empty-to-cash", "negative-cash", "force-close"])
 def test_normalise_request(request_, force_close, max_gross, allow_short, expected):
     out = normalise_request(_t(request_), torch.tensor(force_close), max_gross, allow_short)
     torch.testing.assert_close(out, _t(expected))
@@ -91,18 +92,20 @@ def test_solution_satisfies_every_defining_condition(fee, allow_short, closed_sh
 
 
 @pytest.mark.parametrize(
-    "drifted,request_,y,fee,expected_pv_factor,expected_drifted",
+    "drifted,request_,tradable,y,fee,expected_pv_factor,expected_drifted",
     [
-        ([[0.5, 0.5]], [[0.5, 0.5]], [[2.0]], 0.0, 1.5, [[1 / 3, 2 / 3]]),          # long doubles
-        ([[0.5, -0.5]], [[0.5, -0.5]], [[2.0]], 0.0, 0.5, [[-1.0, -2.0]]),          # short doubles: gross 2, cash -1
-        ([[0.5, -0.5]], [[0.5, -0.5]], [[0.5]], 0.0, 1.25, [[0.8, -0.2]]),          # short halves
-        ([[1.0, 0.0]], [[0.0, 1.0]], [[1.1]], 0.01, 1.1 / 1.01, [[0.0, 1.0]]),      # trade cost eats into pv_factor
-        ([[0.0, -1.0]], [[0.0, -1.0]], [[2.5]], 0.0, 0.0, [[1.0, 0.0]]),            # wiped short -> flat cash, finite
+        ([[0.5, 0.5]], [[0.5, 0.5]], None, [[2.0]], 0.0, 1.5, [[1 / 3, 2 / 3]]),          # long doubles
+        ([[0.5, -0.5]], [[0.5, -0.5]], None, [[2.0]], 0.0, 0.5, [[-1.0, -2.0]]),          # short doubles: gross 2, cash -1
+        ([[0.5, -0.5]], [[0.5, -0.5]], None, [[0.5]], 0.0, 1.25, [[0.8, -0.2]]),          # short halves
+        ([[1.0, 0.0]], [[0.0, 1.0]], None, [[1.1]], 0.01, 1.1 / 1.01, [[0.0, 1.0]]),      # trade cost eats into pv_factor
+        ([[0.0, -1.0]], [[0.0, -1.0]], None, [[2.5]], 0.0, 0.0, [[1.0, 0.0]]),            # wiped short -> flat cash, finite
+        # A closed losing short already holds gross 3: no budget is left, so the long request buys nothing.
+        ([[-2.0, -3.0, 0.0]], [[0.0, 0.0, 1.0]], [[False, True]], [[1.0, 1.0]], 0.0, 1.0, [[-2.0, -3.0, 0.0]]),
     ],
-    ids=["long-up", "short-up", "short-down", "trade-cost", "wiped-short"],
+    ids=["long-up", "short-up", "short-down", "trade-cost", "wiped-short", "closed-short-exhausts-budget"],
 )
-def test_drift(drifted, request_, y, fee, expected_pv_factor, expected_drifted):
-    out = _step(drifted, request_, y=y, fee=fee, allow_short=True)
+def test_drift(drifted, request_, tradable, y, fee, expected_pv_factor, expected_drifted):
+    out = _step(drifted, request_, tradable=tradable, y=y, fee=fee, allow_short=True)
     torch.testing.assert_close(out.pv_factor, _t([expected_pv_factor]))
     torch.testing.assert_close(out.drifted, _t(expected_drifted))
     assert torch.isfinite(out.drifted).all()

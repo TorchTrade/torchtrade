@@ -46,6 +46,7 @@ def test_invalid_bars_raise(kind, match):
 @pytest.mark.parametrize("funding,match", [
     (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")], "inst_id": ["ZZZ"], "funding_rate": [0.001]}), "unknown inst_id"),
     (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")] * 2, "inst_id": ["A0"] * 2, "funding_rate": [0.001] * 2}), "duplicate"),
+    (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")], "inst_id": ["A0"], "funding_rate": [np.nan]}), "NaN"),
 ])
 def test_invalid_funding_raises(funding, match):
     with pytest.raises(ValueError, match=match):
@@ -75,12 +76,13 @@ def test_tz_aware_timestamps_match_utc_naive():
     assert torch.equal(aware.close_exec, naive.close_exec)
 
 
-@pytest.mark.parametrize("time_frames,window_sizes,hours,listed_from", [
-    pytest.param(("1Hour",), (8,), 24 * 14, "2026-01-08 06:00", id="fine"),
-    pytest.param(("1Day", "1Hour"), (3, 8), 24 * 20, "2026-01-12 06:00", id="coarse-first-key"),
+# listed_rows: the fine mid-bin window ends at base bar 07:00, so only 06:00 and 07:00 are listed.
+@pytest.mark.parametrize("time_frames,window_sizes,hours,listed_from,listed_rows", [
+    pytest.param(("1Hour",), (8,), 24 * 14, "2026-01-08 06:00", 2, id="fine"),
+    pytest.param(("1Day", "1Hour"), (3, 8), 24 * 20, "2026-01-12 06:00", None, id="coarse-first-key"),
 ])
 def test_listing_zeroes_features_and_blocks_trading_before_the_first_row(
-    time_frames, window_sizes, hours, listed_from
+    time_frames, window_sizes, hours, listed_from, listed_rows
 ):
     bars = make_portfolio_bars(hours=hours)
     late = (bars.inst_id == "A2") & (bars.timestamp < listed_from)
@@ -98,6 +100,13 @@ def test_listing_zeroes_features_and_blocks_trading_before_the_first_row(
 
     mid_bin = int(np.flatnonzero(s.exec_times == partial_bin)[0])
     assert s.tradable_exec[mid_bin, a2]
+
+    if listed_rows is not None:
+        window = s.market_data(torch.tensor([mid_bin]))[key][0]
+        close, high, low = window.unbind(-1)
+        assert torch.all(window[a2, :-listed_rows] == 0)
+        assert torch.all(close[:, -1] == 1.0)
+        assert torch.all((high >= close) & (close >= low))
 
 
 @pytest.mark.parametrize("drop_after,expected_delisted", [(None, False), ("2026-01-12", True)])
@@ -132,6 +141,7 @@ def _funding_at(s0, n, delta, rate=0.001):
 
 
 @pytest.mark.parametrize("build_funding,expected", [
+    pytest.param(lambda s0: _funding_at(s0, 0, -pd.Timedelta("1h")), {}, id="before-first-window"),
     pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta(0)), {4: 0.001}, id="fill"),
     pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("1h")), {5: 0.001}, id="inside"),
     pytest.param(lambda s0: _funding_at(s0, 5, pd.Timedelta("4h")), {5: 0.001}, id="next-fill"),

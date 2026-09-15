@@ -233,9 +233,9 @@ def _random_action_scenario(allow_short):
     return bars, funding, dict(**SMALL, transaction_fee=0.001, allow_short=allow_short), None
 
 
-def _jump_scenario(jump_ratio):
+def _jump_scenario(jump_ratio, **overrides):
     bars, _ = _price_jump_bars(jump_ratio)
-    return bars, None, dict(**SMALL, allow_short=True), ("A1", -1.0)
+    return bars, None, dict(**SMALL, allow_short=True, **overrides), ("A1", -1.0)
 
 
 def _delist_scenario():
@@ -248,6 +248,7 @@ def _delist_scenario():
     pytest.param(lambda: _random_action_scenario(True), id="random-short"),
     pytest.param(lambda: _jump_scenario(1.9), id="below-threshold"),
     pytest.param(lambda: _jump_scenario(2.05), id="wiped"),
+    pytest.param(lambda: _jump_scenario(2.05, bankrupt_threshold=0.0), id="wiped-zero-threshold"),
     pytest.param(_delist_scenario, id="delisted"),
 ])
 def test_scalar_and_vectorized_agree(scenario):
@@ -318,7 +319,8 @@ def test_partial_reset_leaves_other_lanes_untouched():
     keep = torch.tensor([0, 2])
     for now, then in zip((env._pvs, env._drifted, env._idx), before):
         torch.testing.assert_close(now[keep], then[keep])
-    assert env._pvs[1].item() == 1000 and env._drifted[1, 0].item() == 1.0 and env._idx[1].item() == 0
+    assert env._pvs[1].item() == 1000 and env._idx[1].item() == 0
+    assert env._drifted[1].tolist() == [1.0, 0.0, 0.0, 0.0]
 
 
 @pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])

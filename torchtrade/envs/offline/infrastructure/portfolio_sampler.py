@@ -117,6 +117,8 @@ class PortfolioSampler:
         if funding is None:
             return torch.from_numpy(out)
         funding = _require(funding, FUNDING_COLUMNS, "funding")
+        if funding["funding_rate"].isna().any():
+            raise ValueError("funding has NaN funding_rate values")
         unknown = sorted(set(funding["inst_id"]) - set(self.inst_ids))
         if unknown:
             raise ValueError(f"funding has unknown inst_id: {unknown}")
