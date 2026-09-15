@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -46,7 +48,8 @@ def test_invalid_bars_raise(kind, match):
 @pytest.mark.parametrize("funding,match", [
     (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")], "inst_id": ["ZZZ"], "funding_rate": [0.001]}), "unknown inst_id"),
     (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")] * 2, "inst_id": ["A0"] * 2, "funding_rate": [0.001] * 2}), "duplicate"),
-    (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")], "inst_id": ["A0"], "funding_rate": [np.nan]}), "NaN"),
+    (pd.DataFrame({"timestamp": pd.date_range("2026-01-06", periods=3, freq="8h"), "inst_id": "A0",
+                   "funding_rate": [0.001, np.nan, 0.001]}), "NaN"),
 ])
 def test_invalid_funding_raises(funding, match):
     with pytest.raises(ValueError, match=match):
@@ -76,7 +79,16 @@ def test_tz_aware_timestamps_match_utc_naive():
     assert torch.equal(aware.close_exec, naive.close_exec)
 
 
-# The fine mid-bin window ends at base bar 07:00, so only 06:00 and 07:00 (last 2 rows) are listed.
+def test_asset_columns_follow_sorted_inst_ids_whatever_the_row_order():
+    bars = make_portfolio_bars()
+    bars["inst_id"] = bars["inst_id"].map({"A0": "ZEC", "A1": "BTC", "A2": "ETH"})
+    bars = bars.sort_values("timestamp", kind="stable")
+    s = _sampler(bars)
+    assert s.inst_ids == ["BTC", "ETH", "ZEC"]
+    last_close = bars.groupby("inst_id").close.last()
+    assert s.close_exec[-1].tolist() == [last_close[i] for i in s.inst_ids]
+
+
 @pytest.mark.parametrize("time_frames,window_sizes,hours,listed_from", [
     pytest.param(("1Hour",), (8,), 24 * 14, "2026-01-08 06:00", id="fine"),
     pytest.param(("1Day", "1Hour"), (3, 8), 24 * 20, "2026-01-12 06:00", id="coarse-first-key"),
@@ -101,6 +113,7 @@ def test_listing_zeroes_features_and_blocks_trading_before_the_first_row(
     mid_bin = int(np.flatnonzero(s.exec_times == partial_bin)[0])
     assert s.tradable_exec[mid_bin, a2]
 
+    # The fine mid-bin window ends at base bar 07:00, so only 06:00 and 07:00 (last 2 rows) are listed.
     window = s.market_data(torch.tensor([mid_bin]))["market_data_1Hour_8"][0]
     close, high, low = window.unbind(-1)
     assert torch.all(window[a2, :-2] == 0)
@@ -159,3 +172,21 @@ def test_funding_window(build_funding, expected):
     resolved = {(s.num_exec - 1 if k == "last" else k): v for k, v in expected.items()}
     charged = {i: float(s.funding_exec[i, 0]) for i in torch.nonzero(s.funding_exec[:, 0]).flatten().tolist()}
     assert charged == resolved
+
+
+@pytest.mark.parametrize("max_traj_length", [None, 10, "beyond-last"], ids=["to-end", "max-10", "beyond-last"])
+def test_episode_window_edges(max_traj_length):
+    """u = 1.0 must clamp to a valid start, and a length past the timeline must pin every start to 0."""
+    s = _sampler(make_portfolio_bars())
+    last = s.num_exec - 1
+    if max_traj_length == "beyond-last":
+        max_traj_length = s.num_exec + 50
+    u = torch.tensor([0.0, math.nextafter(1.0, 0.0), 1.0], dtype=torch.float64)
+    starts, ends = s.episode_window(u, max_traj_length)
+    assert (starts >= 0).all() and (ends <= last).all()
+    if max_traj_length is None:
+        assert (ends == last).all() and (starts <= last - 1).all()
+    elif max_traj_length == 10:
+        assert torch.equal(ends - starts, torch.clamp(last - starts, max=10))
+    else:
+        assert (starts == 0).all() and (ends == last).all()
