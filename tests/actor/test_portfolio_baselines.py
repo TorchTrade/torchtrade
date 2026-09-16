@@ -58,8 +58,6 @@ def test_ucrp_rebalances_to_the_same_target_every_step():
     td = env.rollout(4, policy=UCRP())
     torch.testing.assert_close(td["action"], torch.tensor([0.0, 1 / 3, 1 / 3, 1 / 3]).expand(4, -1))
     assert all(t > 0 for t in env.history.turnovers[2:])  # drift is undone every step
-    td = _env(False).rollout(2, policy=UCRP(weights=[0.5, 0.5, 0.0, 0.0]))
-    torch.testing.assert_close(td["action"][0], torch.tensor([0.5, 0.5, 0.0, 0.0]))
 
 
 def _olmar_td(window_closes, tradable, weights):
@@ -87,10 +85,14 @@ def test_olmar_moves_toward_the_mean_reversion_prediction():
 
 
 def test_olmar_gives_no_weight_to_untradable_assets_and_no_move_without_signal():
-    """An unlisted asset (zero window) and a closed one get weight 0; a flat window keeps the book."""
+    """An unlisted asset (zero window) and a closed one get weight 0; a tradable asset with
+    no bars yet is not read as a crash; a flat window keeps the book."""
     td = _olmar_td([[0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 1.0], [1.3, 1.3, 1.3, 1.0]], [0.0, 1.0, 0.0], [0.5, 0.0, 0.5, 0.0])
     OLMAR(window=4, epsilon=1.1)(td)
     assert td["action"][1] == 0 and td["action"][3] == 0 and td["action"].sum() == pytest.approx(1.0)
+    fresh = _olmar_td([[0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 1.0]], [1.0, 1.0], [0.2, 0.3, 0.5])
+    OLMAR(window=4, epsilon=1.1)(fresh)
+    torch.testing.assert_close(fresh["action"], torch.tensor([0.2, 0.3, 0.5]))
     flat = _olmar_td([[1.0] * 4, [1.0] * 4], [1.0, 1.0], [0.2, 0.3, 0.5])
     OLMAR(window=4, epsilon=1.1)(flat)
     torch.testing.assert_close(flat["action"], torch.tensor([0.2, 0.3, 0.5]))

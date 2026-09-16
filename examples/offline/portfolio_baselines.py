@@ -12,7 +12,6 @@ import argparse
 
 import matplotlib
 import matplotlib.pyplot as plt
-import torch
 
 from torchtrade.actor import OLMAR, UBAH, UCRP
 from torchtrade.envs.offline import PortfolioTradingEnv, PortfolioTradingEnvConfig
@@ -41,8 +40,7 @@ def main():
     print(f"|---|{'---|' * len(COLUMNS)}")
     curves = {}
     for name, policy in [("UBAH", UBAH()), ("UCRP", UCRP()), ("OLMAR", OLMAR(window=5, epsilon=10.0))]:
-        with torch.no_grad():
-            env.rollout(env.sampler.num_exec, policy=policy, break_when_any_done=True)
+        env.rollout(env.sampler.num_exec, policy=policy)
         m = portfolio_metrics(env.history, periods_per_year)
         curves[name] = (env.history.timestamps, env.history.portfolio_values)
         print(f"| {name} | " + " | ".join(f"{m[c]:.3f}" for c in COLUMNS) + " |")

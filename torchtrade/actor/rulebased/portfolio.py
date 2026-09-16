@@ -10,8 +10,6 @@ The parameter is named `td` on purpose: torchrl passes a callable whose sole par
 TensorDictModule that hands over individual tensors.
 """
 
-from typing import Optional
-
 import torch
 from tensordict import TensorDictBase
 
@@ -43,34 +41,32 @@ class UBAH:
 
 
 class UCRP:
-    """Uniform constant rebalanced portfolio: the same target every step, equal weights by default."""
-
-    def __init__(self, weights=None):
-        self.weights = None if weights is None else torch.as_tensor(weights, dtype=torch.float32)
+    """Uniform constant rebalanced portfolio: back to equal weights every step."""
 
     def __call__(self, td: TensorDictBase) -> TensorDictBase:
-        w = td["portfolio_weights"]
-        td["action"] = _equal_weights(w) if self.weights is None else self.weights.expand_as(w).clone()
+        td["action"] = _equal_weights(td["portfolio_weights"])
         return td
 
 
 class OLMAR:
     """On-line moving average reversion (Li & Hoi, 2012), the OLMAR-1 variant.
 
-    Predicts next price relatives as the window's mean close over the latest close, moves the
-    drifted weights toward that prediction until the expected relative reaches `epsilon`, and
-    projects back onto the simplex. Cash is the asset with a relative of 1; assets that are
-    not tradable get no signal and no weight.
+    Predicts next price relatives as the mean close over the latest close in the first
+    `market_data_*` window, moves the drifted weights toward that prediction until the
+    expected relative reaches `epsilon`, and projects back onto the simplex. Cash is the
+    asset with a relative of 1; assets that are not tradable or have no bars yet get no
+    signal and no weight.
     """
 
-    def __init__(self, window: int = 5, epsilon: float = 10.0, key: Optional[str] = None):
-        self.window, self.epsilon, self.key = window, epsilon, key
+    def __init__(self, window: int = 5, epsilon: float = 10.0):
+        self.window, self.epsilon = window, epsilon
 
     def __call__(self, td: TensorDictBase) -> TensorDictBase:
-        key = self.key or next(k for k in td.keys() if k.startswith("market_data_"))
+        key = next(k for k in td.keys() if k.startswith("market_data_"))
         closes = td[key][..., -self.window :, 0]  # (..., N, window) close over the latest close
         # Bars before an asset listed are zero and must not read as a crash.
-        x_hat = closes.sum(-1) / (closes > 0).sum(-1).clamp(min=1)
+        n_bars = (closes > 0).sum(-1)
+        x_hat = torch.where(n_bars > 0, closes.sum(-1) / n_bars.clamp(min=1), 1.0)
         tradable = td["tradable"] > 0
         x_hat = torch.where(tradable, x_hat, 1.0)
         x_hat = torch.cat([torch.ones_like(x_hat[..., :1]), x_hat], -1)
