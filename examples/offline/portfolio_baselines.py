@@ -10,15 +10,12 @@ Usage:
 
 import argparse
 
-import matplotlib
+import matplotlib.pyplot as plt
 
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-
-from torchtrade.actor import OLMAR, UBAH, UCRP  # noqa: E402
-from torchtrade.envs.offline import PortfolioTradingEnv, PortfolioTradingEnvConfig  # noqa: E402
-from torchtrade.envs.offline.infrastructure.utils import load_portfolio_dataset  # noqa: E402
-from torchtrade.metrics import portfolio_metrics  # noqa: E402
+from torchtrade.actor import OLMAR, UBAH, UCRP
+from torchtrade.envs.offline import PortfolioTradingEnv, PortfolioTradingEnvConfig
+from torchtrade.envs.offline.infrastructure.utils import load_portfolio_dataset
+from torchtrade.metrics import portfolio_metrics
 
 COLUMNS = ["final_value", "sharpe_ratio", "max_drawdown", "turnover", "commission", "funding"]
 
@@ -45,7 +42,8 @@ def main():
         m = portfolio_metrics(env.history, periods_per_year)
         pv = env.history.portfolio_values
         ax.plot(env.history.timestamps, [v / pv[0] for v in pv], label=name)
-        print("| " + " | ".join([name] + [f"{m[c]:.3f}" for c in COLUMNS]) + " |")
+        row = " | ".join(f"{m[c]:.3f}" for c in COLUMNS)
+        print(f"| {name} | {row} |")
 
     ax.set_ylabel("portfolio value / initial")
     ax.set_title(f"OKX multi-asset 1h, 4h decisions, fee {args.fee:.2%}")

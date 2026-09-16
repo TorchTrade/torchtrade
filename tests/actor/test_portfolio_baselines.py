@@ -93,14 +93,18 @@ FLAT = [1.0] * 6
 
 
 @pytest.mark.parametrize("windows,tradable,weights,epsilon,expected", [
-    pytest.param([[0.0] * 6, FLAT, [1.3] * 5 + [1.0]], [0.0, 1.0, 0.0], [0.5, 0.0, 0.0, 0.5], 1.1, [1.0, 0.0, 0.0, 0.0],
-                 id="unlisted-and-closed-get-zero-held-closed-goes-to-cash"),
+    pytest.param([[0.0] * 6, FLAT, [1.3] * 5 + [1.0]], [0.0, 1.0, 0.0], [0.5, 0.0, 0.0, 0.5], 1.1, [0.5, 0.0, 0.0, 0.5],
+                 id="untradable-assets-give-no-signal"),
+    pytest.param([FLAT, FLAT], [1.0, 1.0], [0.0, -0.5, -0.5], 1.1, [1 / 3, 1 / 3, 1 / 3], id="all-short-book-starts-from-nothing"),
     pytest.param([[0.0] * 6, FLAT], [1.0, 1.0], [0.2, 0.3, 0.5], 1.1, [0.2, 0.3, 0.5], id="tradable-without-bars-is-no-signal"),
     pytest.param([FLAT, FLAT], [1.0, 1.0], [0.2, 0.3, 0.5], 1.1, [0.2, 0.3, 0.5], id="flat-window-keeps-the-book"),
     pytest.param([A_FELL, B_ROSE], [1.0, 1.0], [0.0, 1.0, 0.0], 1.1, [0.0, 1.0, 0.0], id="prediction-above-epsilon-no-move"),
     pytest.param([[0.0, 0.0, 0.0, 0.0, 1.2, 1.0]], [1.0], [1.0, 0.0], 1.05, [0.5, 0.5], id="mid-window-listing-counts-its-own-bars"),
     pytest.param([FLAT, FLAT], [1.0, 1.0], [0.5, 0.7, -0.2], 1.1, [5 / 12, 7 / 12, 0.0], id="short-book-clipped-and-renormalised"),
-    pytest.param([A_FELL, B_ROSE], [1.0, 1.0], [1 / 3, 1 / 3, 1 / 3], 3.0, [0.0, 1.0, 0.0], id="projection-clips-the-update"),
+    # B is closed: its bars are no signal, so b.x_hat = 1.125 sits above epsilon and nothing moves.
+    pytest.param([A_FELL, B_ROSE], [1.0, 0.0], [0.0, 0.5, 0.5], 1.1, [0.0, 0.5, 0.5], id="closed-asset-bars-are-no-signal"),
+    # A 0.03% signal still moves all in: the denominator floor is a division guard, not damping.
+    pytest.param([[1.0004] * 5 + [1.0]], [1.0], [1.0, 0.0], 1.1, [0.0, 1.0], id="tiny-signal-still-moves-all-in"),
 ])
 def test_olmar_edge_cases(windows, tradable, weights, epsilon, expected):
     td = _olmar_td(windows, tradable, weights)

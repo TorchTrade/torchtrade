@@ -2,8 +2,10 @@
 
 Each writes `td["action"]` (target weights, cash first) from the portfolio env's observation,
 so `env.rollout(policy=UCRP())` evaluates them exactly like a trained policy, on the scalar
-or the vectorized env. All three are long-only; the env redistributes weight requested on an
-asset that is not tradable at the decision bar.
+or the vectorized env. All three are long-only and fully invested: the env pins the holding
+of an asset that is not tradable at the decision bar and spreads the rest of the request
+over the others, and under `max_gross < 1` it caps the fill (the request itself then sits
+outside `action_spec`).
 
 The parameter is named `td` on purpose: torchrl passes a callable whose sole parameter is
 `td` or `tensordict` the whole TensorDict, and wraps any other signature in a
@@ -59,8 +61,8 @@ class OLMAR:
     Predicts next price relatives as the mean close over the latest close in the first
     `market_data_*` window, moves the drifted weights toward that prediction until the
     expected relative reaches `epsilon`, and projects back onto the simplex. Cash is the
-    asset with a relative of 1. Assets that are not tradable get no signal, and any weight
-    the update gives them goes to cash; bars before an asset listed are left out of its mean.
+    asset with a relative of 1. Assets that are not tradable get no signal; bars before an
+    asset listed are left out of its mean.
     """
 
     def __init__(self, window: int = 5, epsilon: float = 10.0):
@@ -75,12 +77,9 @@ class OLMAR:
         x_hat = torch.cat([torch.ones_like(x_hat[..., :1]), x_hat], -1)
 
         b = td["portfolio_weights"].clamp(min=0)
-        b = b / b.sum(-1, keepdim=True)
+        b = b / b.sum(-1, keepdim=True).clamp(min=1e-12)  # an all-short book has no long mass
         centered = x_hat - x_hat.mean(-1, keepdim=True)
         denom = (centered * centered).sum(-1, keepdim=True)  # zero exactly when centered is
         lam = ((self.epsilon - (b * x_hat).sum(-1, keepdim=True)) / denom.clamp(min=1e-12)).clamp(min=0)
-        target = project_simplex(b + lam * centered)
-        target[..., 1:] = torch.where(tradable, target[..., 1:], 0.0)
-        target[..., 0] = 1 - target[..., 1:].sum(-1)
-        td["action"] = target
+        td["action"] = project_simplex(b + lam * centered)
         return td

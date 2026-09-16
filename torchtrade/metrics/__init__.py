@@ -12,8 +12,8 @@ from torchtrade.metrics.trading_metrics import (
     compute_win_rate,
     compute_portfolio_returns,
     compute_all_metrics,
+    portfolio_metrics,
 )
-from torchtrade.metrics.portfolio_metrics import portfolio_metrics
 
 __all__ = [
     "portfolio_metrics",
