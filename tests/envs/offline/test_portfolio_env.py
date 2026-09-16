@@ -175,7 +175,7 @@ def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL, transaction_fee=fee), funding=funding)
     td = env.reset()
     start, end = env._idx, env._end
-    action = torch.tensor([0.0, 1.0, 0.0, 0.0])
+    action = torch.tensor([0.0, 2.0, 0.0, 0.0])  # normalised to all-in A0; turnover reads the fill, not the request
     total_reward = 0.0
     while True:
         td["action"] = action

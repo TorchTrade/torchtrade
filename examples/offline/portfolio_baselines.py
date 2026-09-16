@@ -11,14 +11,15 @@ Usage:
 import argparse
 
 import matplotlib
-import matplotlib.pyplot as plt
-
-from torchtrade.actor import OLMAR, UBAH, UCRP
-from torchtrade.envs.offline import PortfolioTradingEnv, PortfolioTradingEnvConfig
-from torchtrade.envs.offline.infrastructure.utils import load_portfolio_dataset
-from torchtrade.metrics import portfolio_metrics
 
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
+from torchtrade.actor import OLMAR, UBAH, UCRP  # noqa: E402
+from torchtrade.envs.offline import PortfolioTradingEnv, PortfolioTradingEnvConfig  # noqa: E402
+from torchtrade.envs.offline.infrastructure.utils import load_portfolio_dataset  # noqa: E402
+from torchtrade.metrics import portfolio_metrics  # noqa: E402
+
 COLUMNS = ["final_value", "sharpe_ratio", "max_drawdown", "turnover", "commission", "funding"]
 
 
@@ -38,16 +39,14 @@ def main():
 
     print(f"| baseline | {' | '.join(COLUMNS)} |")
     print(f"|---|{'---|' * len(COLUMNS)}")
-    curves = {}
+    fig, ax = plt.subplots(figsize=(9, 4))
     for name, policy in [("UBAH", UBAH()), ("UCRP", UCRP()), ("OLMAR", OLMAR(window=5, epsilon=10.0))]:
         env.rollout(env.sampler.num_exec, policy=policy)
         m = portfolio_metrics(env.history, periods_per_year)
-        curves[name] = (env.history.timestamps, env.history.portfolio_values)
-        print(f"| {name} | " + " | ".join(f"{m[c]:.3f}" for c in COLUMNS) + " |")
+        pv = env.history.portfolio_values
+        ax.plot(env.history.timestamps, [v / pv[0] for v in pv], label=name)
+        print("| " + " | ".join([name] + [f"{m[c]:.3f}" for c in COLUMNS]) + " |")
 
-    fig, ax = plt.subplots(figsize=(9, 4))
-    for name, (ts, pv) in curves.items():
-        ax.plot(ts, [v / pv[0] for v in pv], label=name)
     ax.set_ylabel("portfolio value / initial")
     ax.set_title(f"OKX multi-asset 1h, 4h decisions, fee {args.fee:.2%}")
     ax.legend()

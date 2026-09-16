@@ -22,4 +22,6 @@ def test_portfolio_metrics_totals_and_final_value():
     assert m["total_return"] == pytest.approx(0.089)
     assert m["turnover"] == 1.5 and m["commission"] == 3.0 and m["funding"] == 0.75
     assert m["max_drawdown"] == pytest.approx(-0.1)
-    assert "num_trades" not in m and "sharpe_ratio" in m
+    assert m["win_rate (reward>0)"] == pytest.approx(0.5)  # two of four rewards are positive
+    assert "num_trades" not in m
+    assert portfolio_metrics(h, periods_per_year=4 * 6 * 365)["sharpe_ratio"] == pytest.approx(2 * m["sharpe_ratio"])

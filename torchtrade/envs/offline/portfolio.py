@@ -150,10 +150,10 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
             fee=self.config.transaction_fee, max_gross=self.config.max_gross,
             allow_short=self.config.allow_short,
         )
+        turnover = (out.weights[0, 1:] - self.drifted[0, 1:]).abs().sum().item()  # post-trade vs pre-trade
         self._idx = n + 1
         old_value = self.portfolio_value
         self.portfolio_value = old_value * out.pv_factor.item()
-        turnover = (out.weights[0, 1:] - self.drifted[0, 1:]).abs().sum().item()
         self.drifted = out.drifted
 
         self.history.record_step(

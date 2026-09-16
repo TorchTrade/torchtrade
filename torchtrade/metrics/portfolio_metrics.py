@@ -17,8 +17,8 @@ def portfolio_metrics(history, periods_per_year: float) -> Dict[str, float]:
     del out["num_trades"]
     out.update(
         final_value=(pv[-1] / pv[0]).item(),
-        turnover=float(sum(history.turnovers)),
-        commission=float(sum(history.commissions)),
-        funding=float(sum(history.fundings)),
+        turnover=sum(history.turnovers),
+        commission=sum(history.commissions),
+        funding=sum(history.fundings),
     )
     return out
