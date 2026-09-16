@@ -281,13 +281,15 @@ class PortfolioHistoryTracker:
     weights: List[List[float]] = field(default_factory=list)
     commissions: List[float] = field(default_factory=list)
     fundings: List[float] = field(default_factory=list)
+    turnovers: List[float] = field(default_factory=list)  # Σ|w_target − w_drifted| per step
 
-    def record_step(self, timestamp, portfolio_value, weights, commission=0.0, funding=0.0):
+    def record_step(self, timestamp, portfolio_value, weights, commission=0.0, funding=0.0, turnover=0.0):
         self.timestamps.append(timestamp)
         self.portfolio_values.append(portfolio_value)
         self.weights.append(weights)
         self.commissions.append(commission)
         self.fundings.append(funding)
+        self.turnovers.append(turnover)
         # The env overwrites rewards[-1] once the reward function has read this step.
         self.rewards.append(0.0)
 
