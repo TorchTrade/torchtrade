@@ -175,7 +175,7 @@ def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL, transaction_fee=fee), funding=funding)
     td = env.reset()
     start, end = env._idx, env._end
-    action = torch.tensor([0.0, 1.0, 0.0, 0.0])
+    action = torch.tensor([0.0, 2.0, 0.0, 0.0])  # normalised to all-in A0; turnover reads the fill, not the request
     total_reward = 0.0
     while True:
         td["action"] = action
@@ -197,6 +197,7 @@ def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     assert h["rewards"][0] == 0.0 and sum(h["rewards"]) == pytest.approx(total_reward, abs=1e-5)
     # Row 0 is the reset row; the entry trade pays V0·(1 − μ) with μ = 1/(1 + fee).
     assert h["commissions"][1] == pytest.approx(1000 * fee / (1 + fee), abs=1e-9)
+    assert h["turnovers"][1] == pytest.approx(1.0) and sum(h["turnovers"][2:]) == pytest.approx(0.0, abs=1e-6)
     assert sum(h["commissions"][2:]) == pytest.approx(0.0, abs=1e-6)
     if rate == 0:
         assert all(f == 0.0 for f in h["fundings"])

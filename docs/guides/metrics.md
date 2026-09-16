@@ -88,6 +88,9 @@ metrics = compute_all_metrics(
 # max_drawdown, max_dd_duration, num_trades, win_rate, avg_win, avg_loss, profit_factor
 ```
 
+For `PortfolioTradingEnv`, use `portfolio_metrics(env.history, periods_per_year)` instead; see
+[Portfolio Environment](../environments/portfolio.md#metrics).
+
 ### Logging to Weights & Biases
 
 ```python

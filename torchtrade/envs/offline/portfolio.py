@@ -150,6 +150,7 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
             fee=self.config.transaction_fee, max_gross=self.config.max_gross,
             allow_short=self.config.allow_short,
         )
+        turnover = (out.weights[0, 1:] - self.drifted[0, 1:]).abs().sum().item()  # post-trade vs pre-trade
         self._idx = n + 1
         old_value = self.portfolio_value
         self.portfolio_value = old_value * out.pv_factor.item()
@@ -158,6 +159,7 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
         self.history.record_step(
             s.exec_times[self._idx], self.portfolio_value, out.drifted[0].tolist(),
             commission=old_value * out.commission.item(), funding=old_value * out.funding.item(),
+            turnover=turnover,
         )
         reward = float(self.reward_function(self.history))
         self.history.rewards[-1] = reward

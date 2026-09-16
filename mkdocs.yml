@@ -87,6 +87,7 @@ nav:
 
   - Environments:
       - Offline Environments: environments/offline.md
+      - Portfolio Environment: environments/portfolio.md
       - Visualization: environments/visualization.md
       - Online Environments: environments/online.md
       - Offline RL: environments/offline-rl.md
