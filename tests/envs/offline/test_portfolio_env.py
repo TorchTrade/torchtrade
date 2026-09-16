@@ -391,10 +391,11 @@ def test_partial_reset_leaves_other_lanes_untouched():
 @pytest.mark.parametrize("max_traj_length,initial_cash", [
     pytest.param(None, 1000, id="to-end"),
     pytest.param(10, 1000, id="max-10"),
-    pytest.param(None, (500, 1500), id="tuple-cash"),
+    pytest.param(None, (500, 501), id="tuple-cash"),
 ])
 def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash):
-    """Starts spread over the timeline, each episode ends at min(start + max_traj_length, last)."""
+    """Starts spread over the timeline, each episode ends at min(start + max_traj_length, last).
+    Tuple cash draws inclusive integers in both envs, so (500, 501) yields exactly {500, 501}."""
     cfg = {**SMALL, "random_start": True, "max_traj_length": max_traj_length, "initial_cash": initial_cash}
     if vectorized:
         env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
@@ -420,12 +421,13 @@ def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash)
     assert len(starts.unique()) > 1
     assert torch.equal(ends - starts, torch.minimum(steps, last - starts))
     if isinstance(initial_cash, tuple):
-        assert ((cash >= 500) & (cash <= 1500)).all()
+        assert set(cash.tolist()) == {500.0, 501.0}
 
 
 @pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
 def test_random_start_is_seed_reproducible(vectorized):
-    """Tuple cash on the vectorized row: a fixed cash makes its `_pvs` comparison vacuous."""
+    """Tuple cash on the vectorized row: a fixed cash makes its `_pvs` comparison vacuous.
+    `set_seed()` with no seed falls back to `config.seed`, as in the scalar env."""
     cfg = {**SMALL, "random_start": True, "max_traj_length": None, "initial_cash": (500, 1500) if vectorized else 1000}
     if vectorized:
         env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
@@ -435,6 +437,12 @@ def test_random_start_is_seed_reproducible(vectorized):
         env.set_seed(1)
         env.reset()
         assert not torch.equal(env._idx, starts)
+        env.set_seed(env.config.seed)
+        configured = env.reset()["reset_index"]
+        env.set_seed(1)
+        env.reset()
+        env.set_seed()
+        assert torch.equal(env.reset()["reset_index"], configured)
         env.set_seed(0)
         td = env.reset()
         assert torch.equal(env._pvs, cash)
@@ -454,6 +462,7 @@ def test_random_start_is_seed_reproducible(vectorized):
             return pairs
 
         assert windows(0) == windows(0) and windows(0) != windows(1)
+        assert windows(None) == windows(env.config.seed)
 
 
 @pytest.mark.parametrize("make_env", [

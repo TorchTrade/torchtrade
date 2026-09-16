@@ -70,6 +70,8 @@ class VectorizedPortfolioTradingEnv(EnvBase):
         self._starts = torch.zeros(b, dtype=torch.long)
 
     def _set_seed(self, seed: Optional[int] = None):
+        if seed is None:
+            seed = self.config.seed
         if seed is not None:
             self._rng.manual_seed(seed)
             torch.manual_seed(seed)
@@ -83,7 +85,8 @@ class VectorizedPortfolioTradingEnv(EnvBase):
         if k:
             cash = self.config.initial_cash
             if isinstance(cash, (tuple, list)):
-                new_cash = torch.empty(k).uniform_(float(cash[0]), float(cash[1]), generator=self._rng).to(MONEY_DTYPE)
+                # Inclusive integers, the scalar env's InitialBalanceSampler contract.
+                new_cash = torch.randint(int(cash[0]), int(cash[1]) + 1, (k,), generator=self._rng).to(MONEY_DTYPE)
             else:
                 new_cash = torch.full((k,), float(cash), dtype=MONEY_DTYPE)
             u = (
