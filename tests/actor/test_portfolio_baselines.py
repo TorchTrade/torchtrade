@@ -54,6 +54,9 @@ def test_ubah_buys_equal_weights_once_then_holds():
     # The float32 cash weight can round below zero after a listing; the echoed action must stay in spec.
     td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([-2.2e-16, 0.5, 0.5, 0.0])}))
     assert env.action_spec.is_in(td["action"]) and torch.equal(td["action"], torch.tensor([0.0, 0.5, 0.5, 0.0]))
+    # A partially invested book (the fill under max_gross < 1) is held, not re-bought.
+    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.5, 0.25, 0.25, 0.0])}))
+    torch.testing.assert_close(td["action"], torch.tensor([0.5, 0.25, 0.25, 0.0]))
 
 
 def test_ucrp_rebalances_to_the_same_target_every_step():
@@ -66,11 +69,11 @@ def test_ucrp_rebalances_to_the_same_target_every_step():
 
 def _olmar_td(window_closes, tradable, weights):
     """One observation with a 6-bar window: `window_closes` is (N, 6) close over the latest close.
-    High and low differ from close, and a decoy second market-data key holds the reversed window."""
+    High and low differ from close, and a decoy second market-data key holds a rolled window."""
     closes = torch.tensor(window_closes)
     market = torch.stack([closes, closes * 1.02, closes * 0.98], -1)
     return TensorDict({
-        "market_data_1Hour_6": market, "market_data_1Day_6": market.flip(-2),
+        "market_data_1Hour_6": market, "market_data_1Day_6": market.roll(1, -2),
         "tradable": torch.tensor(tradable), "portfolio_weights": torch.tensor(weights),
     })
 
@@ -114,3 +117,16 @@ def test_olmar_edge_cases(windows, tradable, weights, epsilon, expected):
     td = _olmar_td(windows, tradable, weights)
     OLMAR(window=4, epsilon=epsilon)(td)
     torch.testing.assert_close(td["action"], torch.tensor(expected))
+
+
+def test_olmar_lanes_are_independent():
+    """On the vectorized env every reduction is per lane: a batch of two different windows
+    gives each lane the action it gets alone."""
+    lanes = [
+        _olmar_td([A_FELL, B_ROSE], [1.0, 1.0], [1 / 3, 1 / 3, 1 / 3]),
+        _olmar_td([A_FELL, FLAT], [1.0, 1.0], [1 / 3, 1 / 3, 1 / 3]),
+    ]
+    policy = OLMAR(window=4, epsilon=1.1)
+    batched = policy(torch.stack(lanes, 0))
+    for i, lane in enumerate(lanes):
+        torch.testing.assert_close(batched["action"][i], policy(lane)["action"])

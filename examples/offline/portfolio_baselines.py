@@ -5,7 +5,7 @@ prints a metrics table and saves the portfolio value curves. Compare an RL polic
 these numbers by passing it as `policy=` to the same rollout.
 
 Usage:
-    python examples/offline/portfolio_baselines.py [--fee 0.0005] [--plot portfolio_baselines.png]
+    python examples/offline/portfolio_baselines.py [--fee 0.0005]
 """
 
 import argparse
@@ -23,7 +23,6 @@ COLUMNS = ["final_value", "sharpe_ratio", "max_drawdown", "turnover", "commissio
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--fee", type=float, default=0.0005, help="taker fee per unit notional")
-    parser.add_argument("--plot", default="portfolio_baselines.png")
     args = parser.parse_args()
 
     bars, _, funding = load_portfolio_dataset()
@@ -37,7 +36,8 @@ def main():
     print(f"| baseline | {' | '.join(COLUMNS)} |")
     print(f"|---|{'---|' * len(COLUMNS)}")
     fig, ax = plt.subplots(figsize=(9, 4))
-    for name, policy in [("UBAH", UBAH()), ("UCRP", UCRP()), ("OLMAR", OLMAR(window=5, epsilon=10.0))]:
+    for policy in (UBAH(), UCRP(), OLMAR()):
+        name = type(policy).__name__
         env.rollout(env.sampler.num_exec, policy=policy)
         m = portfolio_metrics(env.history, periods_per_year)
         pv = env.history.portfolio_values
@@ -50,8 +50,8 @@ def main():
     ax.legend()
     fig.autofmt_xdate()
     fig.tight_layout()
-    fig.savefig(args.plot, dpi=120)
-    print(f"saved {args.plot}")
+    fig.savefig("portfolio_baselines.png", dpi=120)
+    print("saved portfolio_baselines.png")
 
 
 if __name__ == "__main__":

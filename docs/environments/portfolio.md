@@ -104,10 +104,11 @@ the account at a 0.05% taker fee. A policy has to beat UCRP after costs to be in
 `portfolio_metrics(history, periods_per_year)` returns the standard metrics of
 [`compute_all_metrics`](../guides/metrics.md) (return, Sharpe, Sortino, Calmar, drawdown,
 win rate) plus `final_value` (p_f / p_0) and the episode totals of `turnover`
-(Σ|w_filled − w_drifted| over the assets, per step), `commission` and `funding`. The scalar env's `history`
-also exposes each of these per step through `history.to_dict()`. Like every offline env's
-history, it covers the current episode and starts over on `reset()`, so evaluate over the
-whole timeline as one episode (`random_start=False`, no `max_traj_length`), as the example does.
+(Σ|w_filled − w_drifted| over the assets, per step), `commission` and `funding`. The scalar
+env's `history` also exposes each of these per step through `history.to_dict()`. Like every
+offline env's history, it covers the current episode and starts over on `reset()`, so
+evaluate over the whole timeline as one episode (`random_start=False`, no `max_traj_length`),
+as the example does.
 
 To compare your own policy, pass it to the same rollout:
 
