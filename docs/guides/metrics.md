@@ -88,6 +88,21 @@ metrics = compute_all_metrics(
 # max_drawdown, max_dd_duration, num_trades, win_rate, avg_win, avg_loss, profit_factor
 ```
 
+### Portfolio environment
+
+`PortfolioTradingEnv` keeps a `PortfolioHistoryTracker` instead. `portfolio_metrics` wraps
+`compute_all_metrics` for it and adds `final_value` and the episode totals of `turnover`,
+`commission` and `funding`; `num_trades` is dropped because the env has no discrete actions.
+
+```python
+from torchtrade.metrics import portfolio_metrics
+
+env.rollout(env.sampler.num_exec, policy=my_policy)
+metrics = portfolio_metrics(env.history, periods_per_year=6 * 365)  # 4-hour bars
+```
+
+See [Portfolio Environment](../environments/portfolio.md) for the baselines to compare against.
+
 ### Logging to Weights & Biases
 
 ```python

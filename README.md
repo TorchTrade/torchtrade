@@ -43,7 +43,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 
 > **⚠️ Work in Progress:** TorchTrade is under active development. We continuously add new features, improvements, and optimizations. Expect API changes, new environments, and enhanced functionality in future releases.
 >
-> **Current Scope:** The framework currently focuses on single-asset trading environments (one symbol per environment). Multi-asset portfolio optimization and cross-asset trading environments are planned for future releases.
+> **Current Scope:** Single-asset environments for every exchange, plus an offline multi-asset `PortfolioTradingEnv` (target weights across N assets and cash, long and unlevered short) with baselines and metrics to compare policies against.
 
 ---
 
@@ -421,6 +421,28 @@ actor = MeanReversionActor(
     market_data_keys=["market_data_5Minute_24"],
 )
 ```
+
+### Multi-Asset Portfolio Allocation
+
+```python
+from torchtrade.actor import OLMAR, UBAH, UCRP
+from torchtrade.envs.offline import PortfolioTradingEnv, PortfolioTradingEnvConfig
+from torchtrade.envs.offline.infrastructure.utils import load_portfolio_dataset
+from torchtrade.metrics import portfolio_metrics
+
+bars, instruments, funding = load_portfolio_dataset()  # 40 OKX perpetual swaps, 1h bars
+config = PortfolioTradingEnvConfig(time_frames=["1Hour"], window_sizes=[50], execute_on="4Hour", transaction_fee=0.0005)
+env = PortfolioTradingEnv(bars, config, funding=funding)
+
+# Actions are target weights [cash, asset_1, ..., asset_N]; any callable policy(td) -> td works
+for policy in (UBAH(), UCRP(), OLMAR()):
+    env.rollout(env.sampler.num_exec, policy=policy)
+    print(type(policy).__name__, portfolio_metrics(env.history, periods_per_year=6 * 365)["final_value"])
+```
+
+`VectorizedPortfolioTradingEnv` steps many lanes at once for training; see the
+[Portfolio Environment](https://torchtrade.github.io/torchtrade/environments/portfolio/) docs
+for the data contract, cost model and baseline results.
 
 ### Feature Engineering
 
