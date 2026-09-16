@@ -38,15 +38,20 @@ from tensordict import TensorDictBase
 import torchtrade
 import torchtrade.envs  # noqa: F401 -- registers every live env as a subclass
 # The same 10 concrete envs; test_live_env_base length-asserts them at import.
+from tests.conftest import make_portfolio_bars
 from tests.envs.test_live_env_base import STEPPING_ENVS as LIVE_ENVS
 from torchtrade.envs.core.base import TorchTradeBaseEnv
 from torchtrade.envs.offline import (
     OneStepTradingEnv,
     OneStepTradingEnvConfig,
+    PortfolioTradingEnv,
+    PortfolioTradingEnvConfig,
     SequentialTradingEnv,
     SequentialTradingEnvConfig,
     SequentialTradingEnvSLTP,
     SequentialTradingEnvSLTPConfig,
+    VectorizedPortfolioTradingEnv,
+    VectorizedPortfolioTradingEnvConfig,
     VectorizedSequentialTradingEnv,
     VectorizedSequentialTradingEnvConfig,
     VectorizedSequentialTradingEnvSLTP,
@@ -171,6 +176,16 @@ def test_offline_env_specs_sample_finite(sample_ohlcv_df, env_cls, config_cls, e
         ),
     )
     _assert_specs_sample_finite(env, env_cls.__name__)
+
+
+@pytest.mark.parametrize("env_cls,config_cls,extra", [
+    (PortfolioTradingEnv, PortfolioTradingEnvConfig, {}),
+    (VectorizedPortfolioTradingEnv, VectorizedPortfolioTradingEnvConfig, {"num_envs": 2}),
+], ids=["PortfolioTradingEnv", "VectorizedPortfolioTradingEnv"])
+def test_portfolio_env_specs_sample_finite(env_cls, config_cls, extra):
+    """Separate from OFFLINE_ENVS: these take long-format multi-asset bars."""
+    config = config_cls(window_sizes=8, allow_short=True, **extra)
+    _assert_specs_sample_finite(env_cls(make_portfolio_bars(), config), env_cls.__name__)
 
 
 class _StubObserver:

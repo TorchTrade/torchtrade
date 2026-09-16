@@ -271,6 +271,30 @@ class HistoryTracker:
         return len(self.base_prices)
 
 
+@dataclass
+class PortfolioHistoryTracker:
+    """Episode history of the portfolio envs. The default rewards read `portfolio_values`."""
+
+    timestamps: List = field(default_factory=list)
+    portfolio_values: List[float] = field(default_factory=list)
+    rewards: List[float] = field(default_factory=list)
+    weights: List[List[float]] = field(default_factory=list)
+    commissions: List[float] = field(default_factory=list)
+    fundings: List[float] = field(default_factory=list)
+
+    def record_step(self, timestamp, portfolio_value, weights, commission=0.0, funding=0.0):
+        self.timestamps.append(timestamp)
+        self.portfolio_values.append(portfolio_value)
+        self.weights.append(weights)
+        self.commissions.append(commission)
+        self.fundings.append(funding)
+        # The env overwrites rewards[-1] once the reward function has read this step.
+        self.rewards.append(0.0)
+
+    def to_dict(self) -> Dict[str, list]:
+        return asdict(self)
+
+
 def advance_hold_counter_from_size(position: PositionState) -> None:
     """advance_hold_counter for the offline envs, which own the signed size directly.
 

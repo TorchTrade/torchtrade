@@ -83,13 +83,14 @@ config = SequentialTradingEnvSLTPConfig(
 
 ### Offline Environments (Backtesting)
 
-All environments support both spot and futures trading via config (`leverage=1` for spot, `leverage>1` for futures with margin/liquidation mechanics).
+The single-asset environments support both spot and futures trading via config (`leverage=1` for spot, `leverage>1` for futures with margin/liquidation mechanics).
 
 | Environment | Bracket Orders | One-Step | Best For |
 |-------------|----------------|----------|----------|
 | **SequentialTradingEnv** | ❌ | ❌ | Standard sequential trading |
 | **SequentialTradingEnvSLTP** | ✅ | ❌ | Risk management with SL/TP |
 | **OneStepTradingEnv** | ✅ | ✅ | GRPO, contextual bandits |
+| **PortfolioTradingEnv** | ❌ | ❌ | Multi-asset allocation (target weights incl. cash) |
 
 ### Live Environments (Exchange APIs)
 

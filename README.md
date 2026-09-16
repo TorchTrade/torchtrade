@@ -213,13 +213,14 @@ Your support helps maintain the project, add new features, and keep documentatio
 <details>
 <summary><h2>📦 Offline Environments</h2></summary>
 
-All environments support both spot (`leverage=1`) and futures (`leverage>1`) trading via config.
+The single-asset environments support both spot (`leverage=1`) and futures (`leverage>1`) trading via config.
 
 | Environment | Bracket Orders | One-Step | Best For |
 |-------------|----------------|----------|----------|
 | **SequentialTradingEnv** | ❌ | ❌ | Standard sequential trading |
 | **SequentialTradingEnvSLTP** | ✅ | ❌ | Risk management with SL/TP |
 | **OneStepTradingEnv** | ✅ | ✅ | GRPO, contextual bandits |
+| **PortfolioTradingEnv** | ❌ | ❌ | Multi-asset allocation (target weights incl. cash) |
 
 See **[Offline Environments Documentation](https://torchtrade.github.io/torchtrade/environments/offline/)** for detailed guides.
 

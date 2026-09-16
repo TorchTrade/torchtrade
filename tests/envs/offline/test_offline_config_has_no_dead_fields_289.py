@@ -10,8 +10,10 @@ from torchtrade.envs.core.common_types import MarginMode
 
 from torchtrade.envs.offline import (
     OneStepTradingEnvConfig,
+    PortfolioTradingEnvConfig,
     SequentialTradingEnvConfig,
     SequentialTradingEnvSLTPConfig,
+    VectorizedPortfolioTradingEnvConfig,
     VectorizedSequentialTradingEnvConfig,
     VectorizedSequentialTradingEnvSLTPConfig,
 )
@@ -33,6 +35,8 @@ CONFIGS = [
     OneStepTradingEnvConfig,
     VectorizedSequentialTradingEnvConfig,
     VectorizedSequentialTradingEnvSLTPConfig,
+    PortfolioTradingEnvConfig,
+    VectorizedPortfolioTradingEnvConfig,
 ]
 
 # Descriptive, not behavioural: `symbol` labels the data the user supplied, and the
