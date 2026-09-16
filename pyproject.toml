@@ -49,6 +49,7 @@ examples = [
     "tqdm",
     "hydra-core",
     "scikit-learn>=1.6.1",
+    "seaborn",
 ]
 dev = [
     "pytest>=7.0",

@@ -81,23 +81,33 @@ print(portfolio_metrics(env.history, periods_per_year=6 * 365))  # 4-hour bars
 ```
 
 `examples/offline/portfolio_baselines.py` runs all three on `Torch-Trade/okx-multi-asset-1h`
-(40 perpetual swaps, 2026-03-12 to 2026-09-13, 1h bars, 4h decisions, initial cash 10,000):
+(40 perpetual swaps, 2026-03-12 to 2026-09-13, 1h bars, initial cash 10,000) at 1h, 4h and
+1d decisions, at OKX's regular-tier taker fee of 0.05% with funding charged. These are the
+numbers an RL policy trained on this dataset has to beat, on the same window and frequency:
 
-| fee | baseline | final value | Sharpe | max drawdown | turnover | commission | funding |
+| decisions | baseline | final value | Sharpe | max drawdown | turnover | commission | funding |
 |---|---|---|---|---|---|---|---|
-| 0 | UBAH | 1.212 | 1.22 | −0.213 | 1.0 | 0 | 328 |
-| 0 | UCRP | 1.241 | 1.40 | −0.179 | 8.7 | 0 | 287 |
-| 0 | OLMAR | 1.300 | 1.02 | −0.510 | 2003.8 | 0 | 309 |
-| 0.05% | UBAH | 1.211 | 1.22 | −0.213 | 1.0 | 5 | 328 |
-| 0.05% | UCRP | 1.236 | 1.37 | −0.180 | 8.7 | 48 | 287 |
-| 0.05% | OLMAR | 0.478 | −0.95 | −0.726 | 2003.8 | 6187 | 211 |
+| 1h | UBAH | 1.206 | 1.16 | −0.219 | 1.0 | 5 | 327 |
+| 1h | UCRP | 1.229 | 1.31 | −0.186 | 16.3 | 89 | 285 |
+| 1h | OLMAR | 0.417 | −1.14 | −0.709 | 5506 | 18,456 | 234 |
+| 4h | UBAH | 1.211 | 1.22 | −0.213 | 1.0 | 5 | 328 |
+| 4h | UCRP | 1.236 | 1.37 | −0.180 | 8.7 | 48 | 287 |
+| 4h | OLMAR | 0.478 | −0.95 | −0.726 | 2004 | 6,187 | 211 |
+| 1d | UBAH | 1.192 | 1.09 | −0.207 | 1.0 | 5 | 327 |
+| 1d | UCRP | 1.225 | 1.29 | −0.172 | 4.5 | 24 | 285 |
+| 1d | OLMAR | 1.073 | 0.62 | −0.540 | 337 | 2,339 | 386 |
 
-![Portfolio baselines](../images/portfolio_baselines.png)
+![Portfolio baselines at 1h, 4h and 1d decisions](../images/portfolio_baselines.png)
 
-Two things to read off this table. Funding, not commission, is the dominant cost of holding
-this universe (about 3% of initial value over six months for UBAH). And OLMAR turns the book
-over almost twice per decision bar, which is the best strategy at zero fee and loses half
-the account at a 0.05% taker fee. A policy has to beat UCRP after costs to be interesting.
+What to read off this. UCRP beats UBAH on every frequency with a shallower drawdown: selling
+what rose and buying what fell harvests the universe's volatility at a cost of a few dozen
+USD in commission. Funding, not commission, is the dominant cost of holding this universe
+(about 3% of initial value over six months). OLMAR turns the book over from 337x (1d) to
+5,506x (1h); at zero fee it is the best strategy at 4h (1.30x), at the taker fee it loses
+half the account at 1h and 4h and keeps +7% at 1d with a 54% drawdown. Equal weight is the
+bar: a learned policy that does not beat UCRP after costs, on both final value and
+drawdown, has not learned anything the market did not hand it. The dataset's selection bias
+(below) lifts every one of these curves, and lifts a learned policy the same way.
 
 ## Metrics
 
