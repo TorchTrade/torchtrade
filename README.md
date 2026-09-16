@@ -31,6 +31,7 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 🤖 **Multiple RL Algorithms** - PPO, DQN, IQL, GRPO, DSAC, CTRL implementations
 - 📊 **Feature Engineering** - Add technical indicators and custom features
 - 🔴 **Live Trading** - Direct Alpaca, Binance, Bitget, Bybit, and OKX integrations (Polymarket is paper-only)
+- 💼 **Portfolio Management** - Multi-asset allocation across N assets and cash with the offline `PortfolioTradingEnv`, a vectorized twin for training, UBAH/UCRP/OLMAR baselines and metrics to beat ([docs](https://torchtrade.github.io/torchtrade/environments/portfolio/))
 - 🧠 **LLM Integration** - Use GPT-4o-mini or local LLMs as trading agents
 - 🔧 **LLM Tool Use** - Let LLM agents call tools mid-reasoning (e.g. live Google News for sentiment) before choosing an action
 - 🎓 **LLM Fine-Tuning** - Train/fine-tune a local LLM actor on your own data with GRPO or [SAO](https://arxiv.org/abs/2607.07508) ([guide](https://github.com/TorchTrade/torchtrade/blob/main/docs/guides/llm-grpo-training.md))
@@ -42,8 +43,6 @@ TorchTrade provides modular environments for both live trading with major exchan
 - 📝 **Research Articles** - In-depth articles on RL trading strategies and framework design ([get here](https://torchtrade.github.io/torchtrade.io/index.html))
 
 > **⚠️ Work in Progress:** TorchTrade is under active development. We continuously add new features, improvements, and optimizations. Expect API changes, new environments, and enhanced functionality in future releases.
->
-> **Current Scope:** Single-asset environments for every exchange, plus an offline multi-asset `PortfolioTradingEnv` (target weights across N assets and cash, long and unlevered short) with baselines and metrics to compare policies against.
 
 ---
 
@@ -178,7 +177,7 @@ paper-only** — see its entry.
 - **Get Started:** [Sign up for Bybit](https://www.bybit.eu/invite?ref=MX42GRV)
 
 **[OKX](https://my.okx.com/en-eu/join/52629853)** - Leading global cryptocurrency exchange
-- **Supported by:** `OKXFuturesTorchTradingEnv`, `OKXFuturesSLTPTorchTradingEnv`
+- **Supported by:** `OKXFuturesTorchTradingEnv`, `OKXFuturesSLTPTorchTradingEnv`, and offline `PortfolioTradingEnv` on the [OKX multi-asset dataset](https://huggingface.co/datasets/Torch-Trade/okx-multi-asset-1h) (40 USDT perpetual swaps)
 - **Features:** Futures trading with up to 125x leverage, bracket orders via attachAlgoOrds, demo trading
 - **Commission:** Maker 0.02% / Taker 0.05%
 - **Get Started:** [Sign up for OKX](https://my.okx.com/en-eu/join/52629853)
