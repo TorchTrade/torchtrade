@@ -4,8 +4,7 @@ Each writes `td["action"]` (target weights, cash first) from the portfolio env's
 so `env.rollout(policy=UCRP())` evaluates them exactly like a trained policy, on the scalar
 or the vectorized env. All three are long-only and fully invested: the env pins the holding
 of an asset that is not tradable at the decision bar and spreads the rest of the request
-over the others, and under `max_gross < 1` it caps the fill (the request itself then sits
-outside `action_spec`).
+over the others, and caps gross exposure at `max_gross`.
 
 The parameter is named `td` on purpose: torchrl passes a callable whose sole parameter is
 `td` or `tensordict` the whole TensorDict, and wraps any other signature in a
@@ -41,8 +40,8 @@ class UBAH:
     """Uniform buy and hold: equal weights once, then never rebalance."""
 
     def __call__(self, td: TensorDictBase) -> TensorDictBase:
-        w = td["portfolio_weights"]
-        invested = w[..., 1:].abs().sum(-1, keepdim=True) > 0
+        w = td["portfolio_weights"].clamp(min=0)  # the float32 cash weight can be -1e-16
+        invested = w[..., 1:].sum(-1, keepdim=True) > 0
         td["action"] = torch.where(invested, w, _equal_weights(w))
         return td
 

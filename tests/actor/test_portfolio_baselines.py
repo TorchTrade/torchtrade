@@ -51,6 +51,9 @@ def test_ubah_buys_equal_weights_once_then_holds():
     assert h["turnovers"][1] == pytest.approx(1.0) and h["commissions"][1] > 0
     assert sum(h["turnovers"][2:]) == pytest.approx(0.0, abs=1e-6)  # float32 observation round trip
     torch.testing.assert_close(torch.tensor(h["weights"][1][1:]), torch.full((3,), 1 / 3), atol=0.05, rtol=0)
+    # The float32 cash weight can round below zero after a listing; the echoed action must stay in spec.
+    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([-2.2e-16, 0.5, 0.5, 0.0])}))
+    assert env.action_spec.is_in(td["action"]) and torch.equal(td["action"], torch.tensor([0.0, 0.5, 0.5, 0.0]))
 
 
 def test_ucrp_rebalances_to_the_same_target_every_step():
@@ -93,14 +96,15 @@ FLAT = [1.0] * 6
 
 
 @pytest.mark.parametrize("windows,tradable,weights,epsilon,expected", [
-    pytest.param([[0.0] * 6, FLAT, [1.3] * 5 + [1.0]], [0.0, 1.0, 0.0], [0.5, 0.0, 0.0, 0.5], 1.1, [0.5, 0.0, 0.0, 0.5],
-                 id="untradable-assets-give-no-signal"),
+    # B is closed: its 0.8 history must not shift the mean (leaked: [0.877, 0.123, 0]); a mask
+    # collapsed to one value per book would gate A too ([1, 0, 0]).
+    pytest.param([A_FELL, B_ROSE], [1.0, 0.0], [1.0, 0.0, 0.0], 1.1, [0.7, 0.3, 0.0], id="closed-asset-does-not-shift-the-mean"),
     pytest.param([FLAT, FLAT], [1.0, 1.0], [0.0, -0.5, -0.5], 1.1, [1 / 3, 1 / 3, 1 / 3], id="all-short-book-starts-from-nothing"),
     pytest.param([[0.0] * 6, FLAT], [1.0, 1.0], [0.2, 0.3, 0.5], 1.1, [0.2, 0.3, 0.5], id="tradable-without-bars-is-no-signal"),
     pytest.param([FLAT, FLAT], [1.0, 1.0], [0.2, 0.3, 0.5], 1.1, [0.2, 0.3, 0.5], id="flat-window-keeps-the-book"),
     pytest.param([A_FELL, B_ROSE], [1.0, 1.0], [0.0, 1.0, 0.0], 1.1, [0.0, 1.0, 0.0], id="prediction-above-epsilon-no-move"),
     pytest.param([[0.0, 0.0, 0.0, 0.0, 1.2, 1.0]], [1.0], [1.0, 0.0], 1.05, [0.5, 0.5], id="mid-window-listing-counts-its-own-bars"),
-    pytest.param([FLAT, FLAT], [1.0, 1.0], [0.5, 0.7, -0.2], 1.1, [5 / 12, 7 / 12, 0.0], id="short-book-clipped-and-renormalised"),
+    pytest.param([FLAT, FLAT], [1.0, 1.0], [0.2, 0.3, -0.5], 1.1, [0.4, 0.6, 0.0], id="short-book-clipped-and-renormalised"),
     # B is closed: its bars are no signal, so b.x_hat = 1.125 sits above epsilon and nothing moves.
     pytest.param([A_FELL, B_ROSE], [1.0, 0.0], [0.0, 0.5, 0.5], 1.1, [0.0, 0.5, 0.5], id="closed-asset-bars-are-no-signal"),
     # A 0.03% signal still moves all in: the denominator floor is a division guard, not damping.

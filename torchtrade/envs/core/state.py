@@ -281,7 +281,7 @@ class PortfolioHistoryTracker:
     weights: List[List[float]] = field(default_factory=list)
     commissions: List[float] = field(default_factory=list)
     fundings: List[float] = field(default_factory=list)
-    turnovers: List[float] = field(default_factory=list)  # Σ|w_target − w_drifted| per step
+    turnovers: List[float] = field(default_factory=list)  # Σ|w_filled − w_drifted| over the assets, per step
 
     def record_step(self, timestamp, portfolio_value, weights, commission=0.0, funding=0.0, turnover=0.0):
         self.timestamps.append(timestamp)
