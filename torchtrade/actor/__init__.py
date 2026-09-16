@@ -3,10 +3,13 @@ __all__ = []
 # Rule-based actors
 try:
     from torchtrade.actor.rulebased import (
+        OLMAR,
+        UBAH,
+        UCRP,
         RuleBasedActor,
         MeanReversionActor,
     )
-    __all__.extend(["RuleBasedActor", "MeanReversionActor"])
+    __all__.extend(["RuleBasedActor", "MeanReversionActor", "UBAH", "UCRP", "OLMAR"])
 except ImportError:
     pass
 
