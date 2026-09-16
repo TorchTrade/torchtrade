@@ -15,13 +15,18 @@ from tensordict import TensorDictBase
 
 
 def project_simplex(v: torch.Tensor) -> torch.Tensor:
-    """Euclidean projection of the last dim onto the probability simplex (Duchi et al., 2008)."""
-    u, _ = v.sort(dim=-1, descending=True)
+    """Euclidean projection of the last dim onto the probability simplex (Duchi et al., 2008).
+
+    Done in float64: at float32 magnitudes above ~1.6e7 the cumulative sums lose the unit
+    offset and the projection returns nothing usable.
+    """
+    v64 = v.double()
+    u, _ = v64.sort(dim=-1, descending=True)
     css = u.cumsum(-1) - 1
     k = torch.arange(1, v.shape[-1] + 1, device=v.device)
     rho = ((u - css / k) > 0).sum(-1, keepdim=True)
     theta = css.gather(-1, rho - 1) / rho
-    return (v - theta).clamp(min=0)
+    return (v64 - theta).clamp(min=0).to(v.dtype)
 
 
 def _equal_weights(weights: torch.Tensor) -> torch.Tensor:
@@ -54,8 +59,8 @@ class OLMAR:
     Predicts next price relatives as the mean close over the latest close in the first
     `market_data_*` window, moves the drifted weights toward that prediction until the
     expected relative reaches `epsilon`, and projects back onto the simplex. Cash is the
-    asset with a relative of 1; assets that are not tradable or have no bars yet get no
-    signal and no weight.
+    asset with a relative of 1. Assets that are not tradable get no signal, and any weight
+    the update gives them goes to cash; bars before an asset listed are left out of its mean.
     """
 
     def __init__(self, window: int = 5, epsilon: float = 10.0):
@@ -64,20 +69,18 @@ class OLMAR:
     def __call__(self, td: TensorDictBase) -> TensorDictBase:
         key = next(k for k in td.keys() if k.startswith("market_data_"))
         closes = td[key][..., -self.window :, 0]  # (..., N, window) close over the latest close
-        # Bars before an asset listed are zero and must not read as a crash.
-        n_bars = (closes > 0).sum(-1)
-        x_hat = torch.where(n_bars > 0, closes.sum(-1) / n_bars.clamp(min=1), 1.0)
         tradable = td["tradable"] > 0
-        x_hat = torch.where(tradable, x_hat, 1.0)
+        n_bars = (closes > 0).sum(-1)  # bars before an asset listed are zero, not a crash
+        x_hat = torch.where(tradable & (n_bars > 0), closes.sum(-1) / n_bars.clamp(min=1), 1.0)
         x_hat = torch.cat([torch.ones_like(x_hat[..., :1]), x_hat], -1)
 
         b = td["portfolio_weights"].clamp(min=0)
         b = b / b.sum(-1, keepdim=True)
         centered = x_hat - x_hat.mean(-1, keepdim=True)
-        denom = (centered * centered).sum(-1, keepdim=True)
-        lam = (self.epsilon - (b * x_hat).sum(-1, keepdim=True)) / denom.clamp(min=1e-12)
-        lam = torch.where(denom > 0, lam.clamp(min=0), 0.0)
+        denom = (centered * centered).sum(-1, keepdim=True)  # zero exactly when centered is
+        lam = ((self.epsilon - (b * x_hat).sum(-1, keepdim=True)) / denom.clamp(min=1e-12)).clamp(min=0)
         target = project_simplex(b + lam * centered)
         target[..., 1:] = torch.where(tradable, target[..., 1:], 0.0)
+        target[..., 0] = 1 - target[..., 1:].sum(-1)
         td["action"] = target
         return td
