@@ -1,8 +1,9 @@
 """Multi-asset observation sampler for the portfolio envs.
 
 One unchanged MarketDataObservationSampler per asset, so the lookahead rules for coarse
-and fine frames (#282, #320) exist in one place. `listed` and `tradable` ride along as aux
-columns, which puts them through the same END-label relabel as the prices.
+and fine frames (#282, #320) exist in one place. `listed` rides along as an aux column so
+the feature windows are zeroed before an asset's first bar under the same END-label relabel
+as the prices; `tradable_exec` is read from the last bar of each execution bin.
 """
 
 from typing import Dict, List, Optional, Tuple

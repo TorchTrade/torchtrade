@@ -86,6 +86,7 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
         super().__init__(bars, config)
         self.reward_function = reward_function or log_return_reward
         self.inst_ids = self.sampler.inst_ids
+        self.market_data_keys = [key for key, _, _ in self.sampler.market_data_keys]
         self.observation_spec, self.action_spec = portfolio_specs(self.sampler, config)
 
     def _init_sampler(self, bars, feature_preprocessing_fn):
@@ -110,6 +111,7 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
         starts, ends = self.sampler.episode_window(u, self.config.max_traj_length)
         self._idx, self._end = int(starts), int(ends)
         self._reset_idx = self._idx
+        self._done = False
         self.portfolio_value = self.initial_portfolio_value
         self.drifted = torch.zeros(1, self.sampler.num_assets + 1, dtype=MONEY_DTYPE)
         self.drifted[0, 0] = 1.0
@@ -131,8 +133,9 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
         return td
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
-        s = self.sampler
-        n = min(self._idx, s.num_exec - 2)  # a done env stepped again re-emits its last bar
+        if self._done:  # stepped before its reset: nothing moves, as in SequentialTradingEnv
+            return self._transition(0.0)
+        s, n = self.sampler, self._idx
         action = tensordict["action"].to(MONEY_DTYPE).reshape(1, -1)
         if not torch.isfinite(action).all():
             raise ValueError("action contains non-finite values")
@@ -157,17 +160,20 @@ class PortfolioTradingEnv(TorchTradeOfflineEnv):
         )
         reward = float(self.reward_function(self.history))
         self.history.rewards[-1] = reward
+        return self._transition(reward)
 
+    def _transition(self, reward: float) -> TensorDictBase:
         terminated = (
             self.portfolio_value < self.config.bankrupt_threshold * self.initial_portfolio_value
             or self.portfolio_value <= 0
         )
         truncated = self._idx >= self._end
+        self._done = terminated or truncated
         td = self._observation()
         td.set("reward", torch.tensor([reward], dtype=torch.float32))
         td.set("terminated", torch.tensor([terminated]))
         td.set("truncated", torch.tensor([truncated]))
-        td.set("done", torch.tensor([terminated or truncated]))
+        td.set("done", torch.tensor([self._done]))
         return td
 
     def render_history(self, return_fig=False, plot_bh_baseline=True):

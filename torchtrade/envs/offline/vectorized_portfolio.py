@@ -68,13 +68,15 @@ class VectorizedPortfolioTradingEnv(EnvBase):
         self._idx = torch.zeros(b, dtype=torch.long)
         self._end = torch.zeros(b, dtype=torch.long)
         self._starts = torch.zeros(b, dtype=torch.long)
+        self._done = torch.zeros(b, dtype=torch.bool)
 
     def _set_seed(self, seed: Optional[int] = None):
         if seed is None:
             seed = self.config.seed
-        if seed is not None:
-            self._rng.manual_seed(seed)
-            torch.manual_seed(seed)
+        if seed is None:
+            return
+        self._rng.manual_seed(seed)
+        torch.manual_seed(seed)
 
     def _reset(self, tensordict: TensorDictBase, **kwargs) -> TensorDictBase:
         if tensordict is not None and "_reset" in tensordict.keys():
@@ -101,6 +103,7 @@ class VectorizedPortfolioTradingEnv(EnvBase):
             self._starts[mask] = starts
             self._idx[mask] = starts
             self._end[mask] = ends
+            self._done[mask] = False
         return self._observation()
 
     def _observation(self) -> TensorDict:
@@ -117,7 +120,7 @@ class VectorizedPortfolioTradingEnv(EnvBase):
 
     def _step(self, tensordict: TensorDictBase) -> TensorDictBase:
         s = self.sampler
-        # Keeps n + 1 in range when a done lane is stepped before its reset.
+        # A done lane stepped before its reset stays indexable here and frozen below.
         n = self._idx.clamp(max=s.num_exec - 2)
         action = tensordict["action"].to(MONEY_DTYPE)
         if not torch.isfinite(action).all():
@@ -132,15 +135,19 @@ class VectorizedPortfolioTradingEnv(EnvBase):
             fee=self.config.transaction_fee, max_gross=self.config.max_gross,
             allow_short=self.config.allow_short,
         )
-        new_pvs = self._pvs * out.pv_factor
-        rewards = self.reward_function(self._pvs, new_pvs)
-        self._pvs, self._drifted, self._idx = new_pvs, out.drifted, n + 1
+        live = ~self._done
+        new_pvs = torch.where(live, self._pvs * out.pv_factor, self._pvs)
+        rewards = torch.where(live, self.reward_function(self._pvs, new_pvs), 0.0)
+        self._pvs = new_pvs
+        self._drifted = torch.where(live[:, None], out.drifted, self._drifted)
+        self._idx = torch.where(live, n + 1, self._idx)
 
-        terminated = (new_pvs < self._initial_pvs * self.config.bankrupt_threshold) | (new_pvs <= 0)
+        terminated = (self._pvs < self._initial_pvs * self.config.bankrupt_threshold) | (self._pvs <= 0)
         truncated = self._idx >= self._end
+        self._done = terminated | truncated
         td = self._observation()
         td.set("reward", rewards.unsqueeze(-1).float())
         td.set("terminated", terminated.unsqueeze(-1))
         td.set("truncated", truncated.unsqueeze(-1))
-        td.set("done", (terminated | truncated).unsqueeze(-1))
+        td.set("done", self._done.unsqueeze(-1))
         return td

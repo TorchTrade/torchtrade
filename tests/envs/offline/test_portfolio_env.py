@@ -33,6 +33,14 @@ def _price_jump_bars(*jump_ratios):
     return bars, asset_idx
 
 
+def _money_state(env):
+    """Everything a step may move, for before/after comparisons."""
+    if isinstance(env, VectorizedPortfolioTradingEnv):
+        return env._pvs.clone(), env._drifted.clone(), env._idx.clone()
+    return (torch.tensor(env.portfolio_value), env.drifted.clone(), torch.tensor(env._idx),
+            torch.tensor(len(env.history.portfolio_values)))
+
+
 def _delisted_bars():
     """make_portfolio_bars with A2's rows stopping 200 hours into the timeline."""
     bars = make_portfolio_bars()
@@ -70,20 +78,45 @@ def test_step_rejects_non_finite_action(vectorized, value, column):
         action = torch.zeros(2, 4)
         action[1, column] = value  # lane 1 only: a lane-0-only check would miss this
         td = TensorDict({"action": action}, batch_size=[2])
-        state = lambda: (env._pvs.clone(), env._drifted.clone(), env._idx.clone())
     else:
         env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL))
         td = env.reset()
         action = torch.zeros(4)
         action[column] = value
         td["action"] = action
-        state = lambda: (torch.tensor(env.portfolio_value), env.drifted.clone(), torch.tensor(env._idx),
-                         torch.tensor(len(env.history.portfolio_values)))
-    before = state()
+    before = _money_state(env)
     with pytest.raises(ValueError, match="non-finite"):
         env.step(td)
-    for now, then in zip(state(), before):
+    for now, then in zip(_money_state(env), before):
         assert torch.equal(now, then)
+
+
+@pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
+def test_step_after_done_moves_nothing(vectorized):
+    """A done env stepped before its reset re-emits its terminal transition: reward 0,
+    value, weights and index unchanged, done still set."""
+    cfg = {**SMALL, "max_traj_length": 3}
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=2))
+        action = torch.tensor([[0.0, 1.0, 0.0, 0.0]] * 2)
+    else:
+        env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**cfg))
+        action = torch.tensor([0.0, 1.0, 0.0, 0.0])
+    td = env.reset()
+    for _ in range(3):
+        td["action"] = action
+        td = env.step(td)["next"]
+    assert td["done"].all()
+    before = _money_state(env)
+    td["action"] = action
+    td = env.step(td)["next"]
+    assert td["done"].all() and not td["reward"].any()
+    for now, then in zip(_money_state(env), before):
+        assert torch.equal(now, then)
+    td = env.reset()
+    td["action"] = action
+    td = env.step(td)["next"]
+    assert not td["done"].any() and (td["reward"] != 0).all()  # a reset lifts the freeze
 
 
 @pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
@@ -140,6 +173,7 @@ def test_buy_and_hold_single_asset_end_to_end(fee, rate):
     assert {len(v) for v in h.values()} == {end - start + 1}
     assert h["timestamps"][-1] == s.exec_times[env._end]
     assert h["portfolio_values"][-1] == env.portfolio_value
+    assert h["rewards"][0] == 0.0 and sum(h["rewards"]) == pytest.approx(total_reward, abs=1e-5)
     # Row 0 is the reset row; the entry trade pays V0·(1 − μ) with μ = 1/(1 + fee).
     assert h["commissions"][1] == pytest.approx(1000 * fee / (1 + fee), abs=1e-9)
     assert sum(h["commissions"][2:]) == pytest.approx(0.0, abs=1e-6)
@@ -349,22 +383,6 @@ def test_vectorized_per_lane_termination():
     assert vec._pvs[1].item() == pytest.approx(lane1_before)
 
 
-@pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
-def test_step_past_end_no_raise(vectorized):
-    """`_idx` is set directly because a rollout resets a done env before stepping it again."""
-    if vectorized:
-        env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2))
-        env.reset()
-        env._idx = torch.full_like(env._idx, env.sampler.num_exec - 1)
-        td = TensorDict({"action": torch.tensor([[1.0, 0.0, 0.0, 0.0]] * 2)}, batch_size=[2])
-    else:
-        env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**SMALL))
-        td = env.reset()
-        env._idx = env.sampler.num_exec - 1
-        td["action"] = torch.tensor([1.0, 0.0, 0.0, 0.0])
-    env.step(td)
-
-
 def test_partial_reset_leaves_other_lanes_untouched():
     env = VectorizedPortfolioTradingEnv(
         make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**{**SMALL, "random_start": True}, num_envs=3)
@@ -427,12 +445,17 @@ def test_random_start_episode_windows(vectorized, max_traj_length, initial_cash)
 @pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
 def test_random_start_is_seed_reproducible(vectorized):
     """Tuple cash on the vectorized row: a fixed cash makes its `_pvs` comparison vacuous.
-    `set_seed()` with no seed falls back to `config.seed`, as in the scalar env."""
+    `config.seed` alone makes the first resets deterministic, and `set_seed()` with no seed
+    falls back to it, as in the scalar env."""
     cfg = {**SMALL, "random_start": True, "max_traj_length": None, "initial_cash": (500, 1500) if vectorized else 1000}
     if vectorized:
-        env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
+        env, twin = (
+            VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=64))
+            for _ in range(2)
+        )
+        assert torch.equal(twin.reset()["reset_index"], env.reset()["reset_index"])
         env.set_seed(0)
-        td = env.reset()
+        env.reset()
         starts, cash = env._idx.clone(), env._initial_pvs.clone()
         env.set_seed(1)
         env.reset()
@@ -451,7 +474,8 @@ def test_random_start_is_seed_reproducible(vectorized):
         td = env.step(td)["next"]
         assert torch.equal(td["reset_index"], starts) and torch.equal(td["state_index"], env._idx)
     else:
-        env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**cfg))
+        env, twin = (PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**cfg)) for _ in range(2))
+        assert [twin.reset()["reset_index"].item() for _ in range(5)] == [env.reset()["reset_index"].item() for _ in range(5)]
 
         def windows(seed):
             env.set_seed(seed)
