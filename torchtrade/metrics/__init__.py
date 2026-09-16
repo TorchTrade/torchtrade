@@ -13,8 +13,10 @@ from torchtrade.metrics.trading_metrics import (
     compute_portfolio_returns,
     compute_all_metrics,
 )
+from torchtrade.metrics.portfolio_metrics import portfolio_metrics
 
 __all__ = [
+    "portfolio_metrics",
     "compute_max_drawdown",
     "compute_sharpe_ratio",
     "compute_sortino_ratio",
