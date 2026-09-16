@@ -11,9 +11,6 @@ from typing import NamedTuple
 import torch
 
 MONEY_DTYPE = torch.float64
-# Cap on the μ iterations. The count depends only on the Python-float fee, never on tensor
-# values, so the function stays batched and differentiable.
-MU_ITERS = 20
 
 
 class PortfolioStep(NamedTuple):
@@ -59,7 +56,9 @@ def portfolio_step(
         return pinned + open_assets * budget[..., None]
 
     mu = torch.ones_like(open_mass)
-    iters = 0 if fee == 0 else min(MU_ITERS, math.ceil(math.log(1e-15) / math.log(fee)))
+    # The count depends only on the Python-float fee, never on tensor values, so the
+    # function stays batched and differentiable.
+    iters = 0 if fee == 0 else math.ceil(math.log(1e-15) / math.log(fee))
     for _ in range(iters):
         mu = 1 - fee * (held - mu[..., None] * assets_at(mu)).abs().sum(-1)
     assets = assets_at(mu)

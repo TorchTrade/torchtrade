@@ -75,7 +75,7 @@ def test_solution_satisfies_every_defining_condition(fee, allow_short, closed_sh
                          fee=fee, max_gross=1.0, allow_short=allow_short)
     mu, w = 1 - out.commission, out.weights
 
-    # 1. μ is the fee fixed point, reached within MU_ITERS
+    # 1. μ is the fee fixed point, reached by the fee-derived iteration count
     residual = mu - (1 - fee * (drifted[:, 1:] - mu[:, None] * w[:, 1:]).abs().sum(-1))
     assert residual.abs().max() < 1e-12
     # 2. closed assets are not traded
