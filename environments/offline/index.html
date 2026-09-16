@@ -1903,12 +1903,51 @@ trained before that fix loads without complaint. <strong>Retrain rather than rel
 </span><span id="__span-9-24"><a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="n">env</span> <span class="o">=</span> <span class="n">OneStepTradingEnv</span><span class="p">(</span><span class="n">df</span><span class="p">,</span> <span class="n">config</span><span class="p">)</span>
 </span></code></pre></div>
 <hr />
-<h2 id="visualization">Visualization<a class="headerlink" href="#visualization" title="Permanent link">&para;</a></h2>
-<p>All offline environments support <code>render_history()</code> to visualize episode performance:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">()</span>  <span class="c1"># Display after running an episode</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">fig</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">(</span><span class="n">return_fig</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># Or get the figure</span>
+<h2 id="portfoliotradingenv">PortfolioTradingEnv<a class="headerlink" href="#portfoliotradingenv" title="Permanent link">&para;</a></h2>
+<p>Allocates a portfolio across N assets and cash, with <code>N</code> read from the data. <code>VectorizedPortfolioTradingEnv</code> steps <code>num_envs</code> lanes at once, and its portfolio value matches the scalar env to 1e-9.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline</span><span class="w"> </span><span class="kn">import</span> <span class="n">PortfolioTradingEnv</span><span class="p">,</span> <span class="n">PortfolioTradingEnvConfig</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">torchtrade.envs.offline.infrastructure.utils</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_portfolio_dataset</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">bars</span><span class="p">,</span> <span class="n">instruments</span><span class="p">,</span> <span class="n">funding</span> <span class="o">=</span> <span class="n">load_portfolio_dataset</span><span class="p">(</span><span class="n">revision</span><span class="o">=</span><span class="s2">"v2026.09"</span><span class="p">)</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">config</span> <span class="o">=</span> <span class="n">PortfolioTradingEnvConfig</span><span class="p">(</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="n">time_frames</span><span class="o">=</span><span class="p">[</span><span class="s2">"1Hour"</span><span class="p">],</span> <span class="n">window_sizes</span><span class="o">=</span><span class="p">[</span><span class="mi">50</span><span class="p">],</span> <span class="n">execute_on</span><span class="o">=</span><span class="s2">"4Hour"</span><span class="p">,</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="n">transaction_fee</span><span class="o">=</span><span class="mf">0.0005</span><span class="p">,</span> <span class="n">allow_short</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="p">)</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">env</span> <span class="o">=</span> <span class="n">PortfolioTradingEnv</span><span class="p">(</span><span class="n">bars</span><span class="p">,</span> <span class="n">config</span><span class="p">,</span> <span class="n">funding</span><span class="o">=</span><span class="n">funding</span><span class="p">)</span>
 </span></code></pre></div>
-<p>All environments render 3 subplots: price + actions, portfolio vs buy-and-hold, and exposure history.</p>
+<p><strong>Data.</strong> <code>bars</code> is long format, one row per asset and bar: <code>timestamp</code> (UTC, bar open),
+<code>inst_id</code>, <code>open</code>, <code>high</code>, <code>low</code>, <code>close</code>, <code>volume</code>, optional <code>tradable</code>. A missing row means
+the asset was not tradable at that bar; its last close is carried forward. Rows that stop
+before the end of the data mean the asset was delisted: the position is closed at its last
+tradable close. <code>funding</code> (optional) has <code>timestamp</code>, <code>inst_id</code>, <code>funding_rate</code>.</p>
+<p><strong>Action.</strong> Target weights <code>[w_cash, w_1, ..., w_N]</code>. The env normalises any vector to
+<code>w_cash + Σ|w_i| = 1</code> with <code>w_cash ≥ 0</code>, clips shorts unless <code>allow_short=True</code>, and caps
+gross exposure at <code>max_gross</code> (≤ 1). Assets that are not tradable at the decision bar keep
+their holding; the rest of the budget follows the requested proportions.</p>
+<p><strong>Observation.</strong> <code>portfolio_weights</code> (N+1, drifted weights, cash first), <code>tradable</code> (N),
+and <code>market_data_{tf}_{window}</code> (N × window × 3: close, high, low divided by the window's
+latest close; zero before an asset lists).</p>
+<p><strong>Timing.</strong> The agent observes bars up to and including n, the rebalance fills at close n,
+and the step is valued at close n+1 with funding for settlements in (fill n, fill n+1].</p>
+<p><strong>Costs and assumptions.</strong></p>
+<ul>
+<li>A trade pays <code>transaction_fee × |notional traded|</code> (a perpetual swap's fee). The
+  post-trade value solves <code>μ = 1 − fee·Σ|w'_i − μ·w_i|</code> exactly.</li>
+<li>Zero slippage and zero market impact: every trade fills at the close and does not move it.</li>
+<li>Funding is charged on the weights at the end of the step, which is exact when
+  settlements fall on <code>execute_on</code> boundaries.</li>
+<li><code>transaction_fee</code> defaults to 0; set your venue's taker rate.</li>
+</ul>
+<p><strong>Dataset caveat.</strong> The 40 instruments in <code>Torch-Trade/okx-multi-asset-1h</code> were selected by
+liquidity measured at the end of the window, so backtests over that window carry selection
+bias. Choose the universe from data before the test window.</p>
+<hr />
+<h2 id="visualization">Visualization<a class="headerlink" href="#visualization" title="Permanent link">&para;</a></h2>
+<p><code>SequentialTradingEnv</code>, <code>SequentialTradingEnvSLTP</code> and <code>OneStepTradingEnv</code> support <code>render_history()</code> to visualize episode performance:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">()</span>  <span class="c1"># Display after running an episode</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">fig</span> <span class="o">=</span> <span class="n">env</span><span class="o">.</span><span class="n">render_history</span><span class="p">(</span><span class="n">return_fig</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># Or get the figure</span>
+</span></code></pre></div>
+<p>They render 3 subplots: price + actions, portfolio vs buy-and-hold, and exposure history.</p>
 <p>See <a href="../visualization/">Visualization Guide</a> for details.</p>
 <hr />
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>

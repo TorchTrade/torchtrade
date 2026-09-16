@@ -1595,7 +1595,7 @@
 </span></code></pre></div>
 <h2 id="environment-comparison">Environment Comparison<a class="headerlink" href="#environment-comparison" title="Permanent link">&para;</a></h2>
 <h3 id="offline-environments-backtesting">Offline Environments (Backtesting)<a class="headerlink" href="#offline-environments-backtesting" title="Permanent link">&para;</a></h3>
-<p>All environments support both spot and futures trading via config (<code>leverage=1</code> for spot, <code>leverage&gt;1</code> for futures with margin/liquidation mechanics).</p>
+<p>The single-asset environments support both spot and futures trading via config (<code>leverage=1</code> for spot, <code>leverage&gt;1</code> for futures with margin/liquidation mechanics).</p>
 <table>
 <thead>
 <tr>
@@ -1623,6 +1623,12 @@
 <td>✅</td>
 <td>✅</td>
 <td>GRPO, contextual bandits</td>
+</tr>
+<tr>
+<td><strong>PortfolioTradingEnv</strong></td>
+<td>❌</td>
+<td>❌</td>
+<td>Multi-asset allocation (target weights incl. cash)</td>
 </tr>
 </tbody>
 </table>
