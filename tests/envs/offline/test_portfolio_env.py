@@ -91,19 +91,26 @@ def test_step_rejects_non_finite_action(vectorized, value, column):
         assert torch.equal(now, then)
 
 
+@pytest.mark.parametrize("how", ["truncated", "wiped"])
 @pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
-def test_step_after_done_moves_nothing(vectorized):
+def test_step_after_done_moves_nothing(vectorized, how):
     """A done env stepped before its reset re-emits its terminal transition: reward 0,
-    value, weights and index unchanged, done still set."""
-    cfg = {**SMALL, "max_traj_length": 3}
-    if vectorized:
-        env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=2))
-        action = torch.tensor([[0.0, 1.0, 0.0, 0.0]] * 2)
+    value, weights and index unchanged, done still set. A wiped env sits at value 0, which
+    the default reward would reject if it were still evaluated."""
+    if how == "truncated":
+        bars, cfg, steps, action = make_portfolio_bars(), {**SMALL, "max_traj_length": 3}, 3, torch.tensor([0.0, 1.0, 0.0, 0.0])
     else:
-        env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**cfg))
-        action = torch.tensor([0.0, 1.0, 0.0, 0.0])
+        bars, asset_idx = _price_jump_bars(2.05)
+        cfg, steps, action = {**SMALL, "allow_short": True}, 1, torch.zeros(4)
+        action[asset_idx + 1] = -1.0
+    hold = torch.tensor([0.0, 1.0, 0.0, 0.0])
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(bars, VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=2))
+        action, hold = action.expand(2, -1), hold.expand(2, -1)
+    else:
+        env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**cfg))
     td = env.reset()
-    for _ in range(3):
+    for _ in range(steps):
         td["action"] = action
         td = env.step(td)["next"]
     assert td["done"].all()
@@ -114,9 +121,23 @@ def test_step_after_done_moves_nothing(vectorized):
     for now, then in zip(_money_state(env), before):
         assert torch.equal(now, then)
     td = env.reset()
-    td["action"] = action
+    td["action"] = hold
     td = env.step(td)["next"]
     assert not td["done"].any() and (td["reward"] != 0).all()  # a reset lifts the freeze
+
+
+@pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
+def test_action_spec_bounds_cash_separately(vectorized):
+    """Cash may be the whole portfolio and is never short, whatever `max_gross` allows the assets."""
+    cfg = {**SMALL, "max_gross": 0.5, "allow_short": True}
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(make_portfolio_bars(), VectorizedPortfolioTradingEnvConfig(**cfg, num_envs=2))
+    else:
+        env = PortfolioTradingEnv(make_portfolio_bars(), PortfolioTradingEnvConfig(**cfg))
+    shape = env.action_spec.shape
+    for weights, valid in [([1.0, 0.0, 0.0, 0.0], True), ([0.5, -0.5, 0.0, 0.0], True),
+                           ([-0.1, 0.0, 0.0, 0.0], False), ([0.0, 0.6, 0.0, 0.0], False)]:
+        assert env.action_spec.is_in(torch.tensor(weights).expand(shape)) == valid, weights
 
 
 @pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])

@@ -45,8 +45,8 @@ class PortfolioSampler:
         seed: Optional[int] = None,
     ):
         bars = _require(bars, BAR_COLUMNS, "bars")
-        if bars[["open", "high", "low", "close"]].isna().any().any():
-            raise ValueError("bars contain NaN prices")
+        if not np.isfinite(bars[["open", "high", "low", "close"]].to_numpy(dtype=float)).all():
+            raise ValueError("bars contain non-finite prices")
         if (bars["close"] <= 0).any():
             raise ValueError("bars contain non-positive close prices")
         if "tradable" in bars.columns and bars["tradable"].isna().any():
@@ -115,8 +115,8 @@ class PortfolioSampler:
         if funding is None:
             return torch.from_numpy(out)
         funding = _require(funding, FUNDING_COLUMNS, "funding")
-        if funding["funding_rate"].isna().any():
-            raise ValueError("funding has NaN funding_rate values")
+        if not np.isfinite(funding["funding_rate"].to_numpy(dtype=float)).all():
+            raise ValueError("funding has non-finite funding_rate values")
         unknown = sorted(set(funding["inst_id"]) - set(self.inst_ids))
         if unknown:
             raise ValueError(f"funding has unknown inst_id: {unknown}")

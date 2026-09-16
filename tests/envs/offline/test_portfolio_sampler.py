@@ -28,15 +28,16 @@ def _bad_bars(kind):
         bars["tradable"] = 1.0
         bars.loc[5, "tradable"] = np.nan
         return bars
-    if kind == "nan-price":
-        bars.loc[5, "close"] = np.nan
+    if kind in ("nan-price", "inf-price"):
+        bars.loc[5, "close"] = np.nan if kind == "nan-price" else np.inf
         return bars
 
 
 @pytest.mark.parametrize("kind,match", [
     ("missing-column", "missing required columns"),
     ("duplicate-row", "duplicate"),
-    ("nan-price", "NaN"),
+    ("nan-price", "non-finite"),
+    ("inf-price", "non-finite"),
     ("non-positive-close", "non-positive"),
     ("nan-tradable", "tradable"),
 ])
@@ -49,7 +50,8 @@ def test_invalid_bars_raise(kind, match):
     (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")], "inst_id": ["ZZZ"], "funding_rate": [0.001]}), "unknown inst_id"),
     (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")] * 2, "inst_id": ["A0"] * 2, "funding_rate": [0.001] * 2}), "duplicate"),
     (pd.DataFrame({"timestamp": pd.date_range("2026-01-06", periods=3, freq="8h"), "inst_id": "A0",
-                   "funding_rate": [0.001, np.nan, 0.001]}), "NaN"),
+                   "funding_rate": [0.001, np.nan, 0.001]}), "non-finite"),
+    (pd.DataFrame({"timestamp": [pd.Timestamp("2026-01-06")], "inst_id": ["A0"], "funding_rate": [np.inf]}), "non-finite"),
 ])
 def test_invalid_funding_raises(funding, match):
     with pytest.raises(ValueError, match=match):

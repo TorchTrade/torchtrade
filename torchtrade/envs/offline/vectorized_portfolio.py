@@ -137,7 +137,9 @@ class VectorizedPortfolioTradingEnv(EnvBase):
         )
         live = ~self._done
         new_pvs = torch.where(live, self._pvs * out.pv_factor, self._pvs)
-        rewards = torch.where(live, self.reward_function(self._pvs, new_pvs), 0.0)
+        # A frozen lane can sit at value 0, which the reward rejects: feed it placeholders.
+        rewards = self.reward_function(torch.where(live, self._pvs, 1.0), torch.where(live, new_pvs, 1.0))
+        rewards = torch.where(live, rewards, 0.0)
         self._pvs = new_pvs
         self._drifted = torch.where(live[:, None], out.drifted, self._drifted)
         self._idx = torch.where(live, n + 1, self._idx)

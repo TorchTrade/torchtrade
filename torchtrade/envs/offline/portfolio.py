@@ -60,10 +60,11 @@ def portfolio_specs(sampler: PortfolioSampler, config, batch: torch.Size = torch
     if config.random_start:
         obs.set("reset_index", Unbounded(shape=batch, dtype=torch.long))
         obs.set("state_index", Unbounded(shape=batch, dtype=torch.long))
-    action = Bounded(
-        low=-config.max_gross if config.allow_short else 0.0, high=config.max_gross,
-        shape=batch + (n + 1,), dtype=torch.float32,
-    )
+    low = torch.full((n + 1,), -config.max_gross if config.allow_short else 0.0)
+    high = torch.full((n + 1,), config.max_gross)
+    low[0], high[0] = 0.0, 1.0  # cash is never short and may be the whole portfolio
+    shape = batch + (n + 1,)
+    action = Bounded(low=low.expand(shape), high=high.expand(shape), shape=shape, dtype=torch.float32)
     return obs, action
 
 
