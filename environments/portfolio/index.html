@@ -1459,8 +1459,8 @@ Each is a callable <code>policy(td) -&gt; td</code> that writes <code>td["action
 </thead>
 <tbody>
 <tr>
-<td><code>UBAH()</code></td>
-<td>Uniform buy and hold: equal weights once, then never rebalance</td>
+<td><code>UBAH(max_gross=1.0)</code></td>
+<td>Uniform buy and hold: <code>max_gross</code>/N in each asset once it trades, then never rebalance</td>
 </tr>
 <tr>
 <td><code>UCRP()</code></td>
