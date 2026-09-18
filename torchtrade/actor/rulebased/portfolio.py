@@ -37,12 +37,20 @@ def _equal_weights(weights: torch.Tensor) -> torch.Tensor:
 
 
 class UBAH:
-    """Uniform buy and hold: equal weights once, then never rebalance."""
+    """Uniform buy and hold: 1/N in each asset at its first tradable decision, then never rebalance.
+
+    Cash is kept for the assets that are not yet tradable (a stock outside its session, an asset
+    not yet listed), so the hold does not depend on which hour the window opens. A lane that is
+    tradable and unheld is bought at 1/N, or at the cash left if that is less; nothing is sold.
+    """
 
     def __call__(self, td: TensorDictBase) -> TensorDictBase:
         w = td["portfolio_weights"].clamp(min=0)  # the float32 cash weight can be -1e-16
-        invested = w[..., 1:].sum(-1, keepdim=True) > 0
-        td["action"] = torch.where(invested, w, _equal_weights(w))
+        cash, assets = w[..., :1], w[..., 1:]
+        unheld = (td["tradable"] > 0) & (assets <= 0)
+        each = torch.minimum(torch.full_like(cash, 1.0 / assets.shape[-1]), cash / unheld.sum(-1, keepdim=True).clamp(min=1))
+        buys = unheld * each
+        td["action"] = torch.cat([cash - buys.sum(-1, keepdim=True), assets + buys], -1)
         return td
 
 

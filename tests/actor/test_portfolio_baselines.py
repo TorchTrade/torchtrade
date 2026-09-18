@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 import torch
 from tensordict import TensorDict
@@ -44,6 +45,22 @@ def test_baselines_roll_out_on_both_envs(vectorized, baseline):
     assert (action >= 0).all()
 
 
+def test_ubah_buys_each_asset_when_it_first_trades():
+    """A lane closed at the first decision is bought at 1/N when it opens; the cash for it waits."""
+    bars = make_portfolio_bars()
+    bars["tradable"] = ((bars["inst_id"] != "A2") | (bars["timestamp"] >= "2026-01-06 12:00")).astype(int)
+    env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL))
+    env.rollout(12, policy=UBAH())
+    h = env.history.to_dict()
+    opened = next(i for i, t in enumerate(h["timestamps"]) if t >= pd.Timestamp("2026-01-06 12:00"))
+    assert opened > 1, "the fixture must start with A2 closed"
+    torch.testing.assert_close(torch.tensor(h["weights"][1]), torch.tensor([1 / 3, 1 / 3, 1 / 3, 0.0]), atol=0.03, rtol=0)
+    torch.testing.assert_close(torch.tensor(h["weights"][opened + 1]), torch.full((4,), 1 / 3).index_fill(0, torch.tensor(0), 0.0), atol=0.05, rtol=0)
+    turns = torch.tensor(h["turnovers"])
+    assert turns[1] == pytest.approx(2 / 3, abs=1e-6) and turns[opened + 1] == pytest.approx(1 / 3, abs=0.03)
+    assert turns[2:opened + 1].sum() == pytest.approx(0.0, abs=1e-6) and turns[opened + 2:].sum() == pytest.approx(0.0, abs=1e-6)
+
+
 def test_ubah_buys_equal_weights_once_then_holds():
     env = _env(False, transaction_fee=0.001)
     env.rollout(6, policy=UBAH())
@@ -52,11 +69,14 @@ def test_ubah_buys_equal_weights_once_then_holds():
     assert sum(h["turnovers"][2:]) == pytest.approx(0.0, abs=1e-6)  # float32 observation round trip
     torch.testing.assert_close(torch.tensor(h["weights"][1][1:]), torch.full((3,), 1 / 3), atol=0.05, rtol=0)
     # The float32 cash weight can round below zero after a listing; the echoed action must stay in spec.
-    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([-2.2e-16, 0.5, 0.5, 0.0])}))
+    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([-2.2e-16, 0.5, 0.5, 0.0]), "tradable": torch.tensor([1.0, 1.0, 0.0])}))
     assert env.action_spec.is_in(td["action"]) and torch.equal(td["action"], torch.tensor([0.0, 0.5, 0.5, 0.0]))
     # A partially invested book (the fill under max_gross < 1) is held, not re-bought.
-    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.5, 0.25, 0.25, 0.0])}))
+    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.5, 0.25, 0.25, 0.0]), "tradable": torch.tensor([1.0, 1.0, 0.0])}))
     torch.testing.assert_close(td["action"], torch.tensor([0.5, 0.25, 0.25, 0.0]))
+    # Two lanes open at once with less cash than 2/N left: they share the cash, nothing is sold.
+    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.4, 0.6, 0.0, 0.0]), "tradable": torch.tensor([1.0, 1.0, 1.0])}))
+    torch.testing.assert_close(td["action"], torch.tensor([0.0, 0.6, 0.2, 0.2]))
 
 
 def test_ucrp_rebalances_to_the_same_target_every_step():

@@ -68,7 +68,7 @@ Each is a callable `policy(td) -> td` that writes `td["action"]`, so it runs thr
 
 | Baseline | Rule |
 |---|---|
-| `UBAH()` | Uniform buy and hold: equal weights once, then never rebalance |
+| `UBAH()` | Uniform buy and hold: 1/N in each asset at its first tradable decision, then never rebalance |
 | `UCRP()` | Uniform constant rebalanced portfolio: back to equal weights every step |
 | `OLMAR(window=5, epsilon=10.0)` | On-line moving average reversion (Li & Hoi, 2012): bet on the window mean over the latest close |
 
