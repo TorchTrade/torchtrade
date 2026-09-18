@@ -37,12 +37,32 @@ def _equal_weights(weights: torch.Tensor) -> torch.Tensor:
 
 
 class UBAH:
-    """Uniform buy and hold: equal weights once, then never rebalance."""
+    """Uniform buy and hold: `max_gross`/N in each asset once it trades, then never rebalance.
+
+    Cash is kept for the lanes that are not yet tradable (a stock outside its session, an asset
+    not yet listed), so the hold does not depend on which hour the window opens. A tradable lane
+    the book holds nothing of is bought at `max_gross`/N, or at an equal share of the headroom
+    left under `max_gross` across the lanes opening together if that share is smaller. The policy
+    never sells: a lane that opens after the held lanes drifted above the cap stays unbought.
+    Under a cap below one the env itself sells the held lanes down to the cap once they drift
+    above it, whatever the policy requests. `max_gross` must therefore match the env's: a policy
+    cap above the env's makes the env apply that same scale-down when a lane opens.
+    """
+
+    def __init__(self, max_gross: float = 1.0):
+        if not 0 < max_gross <= 1:
+            raise ValueError(f"max_gross must be in (0, 1], got {max_gross}")
+        self.max_gross = max_gross
 
     def __call__(self, td: TensorDictBase) -> TensorDictBase:
         w = td["portfolio_weights"].clamp(min=0)  # the float32 cash weight can be -1e-16
-        invested = w[..., 1:].sum(-1, keepdim=True) > 0
-        td["action"] = torch.where(invested, w, _equal_weights(w))
+        cash, assets = w[..., :1], w[..., 1:]
+        unheld = (td["tradable"] > 0) & (assets == 0)
+        headroom = (self.max_gross - assets.sum(-1, keepdim=True)).clamp(min=0)
+        fair_share = self.max_gross / assets.shape[-1]
+        buys = unheld * (headroom / unheld.sum(-1, keepdim=True).clamp(min=1)).clamp(max=fair_share)
+        # Summing the shares back can land the cash a few 1e-7 below zero in float32.
+        td["action"] = torch.cat([(cash - buys.sum(-1, keepdim=True)).clamp(min=0), assets + buys], -1)
         return td
 
 

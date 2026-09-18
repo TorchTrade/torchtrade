@@ -44,6 +44,72 @@ def test_baselines_roll_out_on_both_envs(vectorized, baseline):
     assert (action >= 0).all()
 
 
+@pytest.mark.parametrize("max_gross,ok", [(1.0, True), (1e-9, True), (0.0, False), (1.5, False)], ids=["one", "tiny", "zero", "above-one"])
+def test_ubah_max_gross_must_be_in_the_envs_range(max_gross, ok):
+    if ok:
+        assert UBAH(max_gross=max_gross).max_gross == max_gross
+    else:
+        with pytest.raises(ValueError, match="max_gross"):
+            UBAH(max_gross=max_gross)
+
+
+def _staggered_bars():
+    """A2 cannot trade until 2026-01-06 12:00; the other two lanes trade from the start."""
+    bars = make_portfolio_bars()
+    bars["tradable"] = ((bars["inst_id"] != "A2") | (bars["timestamp"] >= "2026-01-06 12:00")).astype(int)
+    return bars
+
+
+@pytest.mark.parametrize("vectorized", [False, True], ids=["scalar", "vectorized"])
+def test_ubah_buys_each_asset_when_it_first_trades(vectorized):
+    """A lane closed at the first decision is bought at 1/N when it opens; the cash for it waits."""
+    bars = _staggered_bars()
+    if vectorized:
+        env = VectorizedPortfolioTradingEnv(bars, VectorizedPortfolioTradingEnvConfig(**SMALL, num_envs=2))
+    else:
+        env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL))
+    opened = int(env.sampler.tradable_exec[:, 2].nonzero()[0])  # the first decision at which A2 trades
+    assert opened > 0, "the fixture must start with A2 closed"
+    td = env.rollout(opened + 4, policy=UBAH())
+    books = td["next", "portfolio_weights"]  # the drifted book after each decision: (T, N+1), or (B, T, N+1) vectorized
+    third = torch.tensor([1 / 3, 1 / 3, 1 / 3, 0.0]).expand_as(books[..., 0, :])
+    torch.testing.assert_close(books[..., 0, :], third, atol=0.03, rtol=0)
+    torch.testing.assert_close(books[..., opened, :], torch.tensor([0.0, 1 / 3, 1 / 3, 1 / 3]).expand_as(third), atol=0.05, rtol=0)
+    turnover = (td["action"][..., 1:] - td["portfolio_weights"][..., 1:]).abs().sum(-1)  # requested minus drifted
+    assert turnover[..., 0].allclose(torch.full_like(turnover[..., 0], 2 / 3))
+    assert turnover[..., opened].allclose(torch.full_like(turnover[..., opened], 1 / 3), atol=0.03, rtol=0)
+    assert turnover[..., 1:opened].sum() == pytest.approx(0.0, abs=1e-6)
+    assert turnover[..., opened + 1:].sum() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_ubah_under_a_gross_cap_keeps_the_held_lanes_when_a_lane_opens():
+    """With max_gross below one, opening A2 must not make the env scale A0 and A1 down."""
+    env = PortfolioTradingEnv(_staggered_bars(), PortfolioTradingEnvConfig(**SMALL, max_gross=0.5))
+    opened = int(env.sampler.tradable_exec[:, 2].nonzero()[0])
+    td = env.rollout(opened + 3, policy=UBAH(max_gross=0.5))
+    books = td["next", "portfolio_weights"]
+    torch.testing.assert_close(books[0], torch.tensor([2 / 3, 1 / 6, 1 / 6, 0.0]), atol=0.02, rtol=0)
+    torch.testing.assert_close(books[opened, 1:3], books[opened - 1, 1:3], atol=0.01, rtol=0)  # held lanes drift only
+    assert books[opened, 3] == pytest.approx(1 / 6, abs=0.02)
+    assert td["action"][opened, 1:].sum() <= 0.5 + 1e-6  # the request respects the cap; the drifted book may not
+
+
+def test_ubah_over_the_cap_is_sold_down_by_the_env_not_the_policy():
+    """Two lanes rally past a cap below one: the policy echoes its book, the env trades it down to the cap."""
+    bars = make_portfolio_bars()
+    hours = bars.groupby("inst_id").cumcount()
+    rally = (bars["inst_id"] != "A2") * 0.03 * hours  # A0 and A1 climb 3% an hour, A2 is flat
+    for col in ("open", "high", "low", "close"):
+        bars[col] = 100.0 * (1 + rally)
+    env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL, max_gross=0.5))
+    td = env.rollout(4, policy=UBAH(max_gross=0.5))
+    torch.testing.assert_close(td["action"][1:], td["portfolio_weights"][1:])  # after the first fill, the policy only echoes
+    excess = td["portfolio_weights"][1:, 1:].sum(-1) - 0.5
+    assert (excess > 0.01).all()  # the book drifts above the cap every period
+    torch.testing.assert_close(torch.tensor(env.history.turnovers[2:], dtype=torch.float64), excess.double(), atol=1e-3, rtol=0)  # the env sells exactly the excess
+    assert (td["action"] >= 0).all()
+
+
 def test_ubah_buys_equal_weights_once_then_holds():
     env = _env(False, transaction_fee=0.001)
     env.rollout(6, policy=UBAH())
@@ -52,11 +118,22 @@ def test_ubah_buys_equal_weights_once_then_holds():
     assert sum(h["turnovers"][2:]) == pytest.approx(0.0, abs=1e-6)  # float32 observation round trip
     torch.testing.assert_close(torch.tensor(h["weights"][1][1:]), torch.full((3,), 1 / 3), atol=0.05, rtol=0)
     # The float32 cash weight can round below zero after a listing; the echoed action must stay in spec.
-    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([-2.2e-16, 0.5, 0.5, 0.0])}))
+    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([-2.2e-16, 0.5, 0.5, 0.0]), "tradable": torch.tensor([1.0, 1.0, 0.0])}))
     assert env.action_spec.is_in(td["action"]) and torch.equal(td["action"], torch.tensor([0.0, 0.5, 0.5, 0.0]))
     # A partially invested book (the fill under max_gross < 1) is held, not re-bought.
-    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.5, 0.25, 0.25, 0.0])}))
+    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.5, 0.25, 0.25, 0.0]), "tradable": torch.tensor([1.0, 1.0, 0.0])}))
     torch.testing.assert_close(td["action"], torch.tensor([0.5, 0.25, 0.25, 0.0]))
+    # Two lanes open at once with less cash than 2/N left: they share the cash, nothing is sold.
+    td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.4, 0.6, 0.0, 0.0]), "tradable": torch.tensor([1.0, 1.0, 1.0])}))
+    torch.testing.assert_close(td["action"], torch.tensor([0.0, 0.6, 0.2, 0.2]))
+    # Held lanes at or above the cap: the lane that opens stays unbought, nothing is sold or negative.
+    for cap, book in ((0.5, [0.4, 0.3, 0.3, 0.0]), (1.0, [0.0, 0.5, 0.5, 0.0])):
+        td = UBAH(max_gross=cap)(TensorDict({"portfolio_weights": torch.tensor(book), "tradable": torch.ones(3)}))
+        torch.testing.assert_close(td["action"], torch.tensor(book))
+    # A real book (sums to one) whose thirteen shares sum back to 2.4e-7 more than the cash in float32.
+    w = torch.zeros(16); w[:3] = torch.tensor([0.843706429, 0.0434619002, 0.112831645])
+    td = UBAH()(TensorDict({"portfolio_weights": w, "tradable": torch.ones(15)}))
+    assert td["action"][0] == 0 and td["action"].sum() == pytest.approx(1.0, abs=1e-6)
 
 
 def test_ucrp_rebalances_to_the_same_target_every_step():
