@@ -44,9 +44,9 @@ class UBAH:
     the book holds nothing of is bought at `max_gross`/N, or at an equal share of the headroom
     left under `max_gross` across the lanes opening together if that share is smaller. The policy
     never sells: a lane that opens after the held lanes drifted above the cap stays unbought.
-    `max_gross` must match the env's, or the env's cap would scale the held lanes down when a
-    lane opens; and under a cap below one the env itself sells the held lanes down to the cap
-    once they drift above it, whatever the policy requests.
+    Under a cap below one the env itself sells the held lanes down to the cap once they drift
+    above it, whatever the policy requests. `max_gross` must therefore match the env's: a policy
+    cap above the env's makes the env apply that same scale-down when a lane opens.
     """
 
     def __init__(self, max_gross: float = 1.0):

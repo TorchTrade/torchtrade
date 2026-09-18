@@ -5,7 +5,6 @@ from tensordict import TensorDict
 from tests.conftest import make_portfolio_bars
 from torchtrade.actor import OLMAR, UBAH, UCRP
 from torchtrade.actor.rulebased.portfolio import project_simplex
-from torchtrade.envs.offline.infrastructure.portfolio_math import portfolio_step
 from torchtrade.envs.offline import (
     PortfolioTradingEnv,
     PortfolioTradingEnvConfig,
@@ -43,6 +42,15 @@ def test_baselines_roll_out_on_both_envs(vectorized, baseline):
     assert env.action_spec.is_in(action[..., 0, :])
     torch.testing.assert_close(action.sum(-1), torch.ones_like(action.sum(-1)))
     assert (action >= 0).all()
+
+
+@pytest.mark.parametrize("max_gross,ok", [(1.0, True), (1e-9, True), (0.0, False), (1.5, False)], ids=["one", "tiny", "zero", "above-one"])
+def test_ubah_max_gross_must_be_in_the_envs_range(max_gross, ok):
+    if ok:
+        assert UBAH(max_gross=max_gross).max_gross == max_gross
+    else:
+        with pytest.raises(ValueError, match="max_gross"):
+            UBAH(max_gross=max_gross)
 
 
 def _staggered_bars():
@@ -86,6 +94,22 @@ def test_ubah_under_a_gross_cap_keeps_the_held_lanes_when_a_lane_opens():
     assert td["action"][opened, 1:].sum() <= 0.5 + 1e-6  # the request respects the cap; the drifted book may not
 
 
+def test_ubah_over_the_cap_is_sold_down_by_the_env_not_the_policy():
+    """Two lanes rally past a cap below one: the policy echoes its book, the env trades it down to the cap."""
+    bars = make_portfolio_bars()
+    hours = bars.groupby("inst_id").cumcount()
+    rally = (bars["inst_id"] != "A2") * 0.03 * hours  # A0 and A1 climb 3% an hour, A2 is flat
+    for col in ("open", "high", "low", "close"):
+        bars[col] = 100.0 * (1 + rally)
+    env = PortfolioTradingEnv(bars, PortfolioTradingEnvConfig(**SMALL, max_gross=0.5))
+    td = env.rollout(4, policy=UBAH(max_gross=0.5))
+    torch.testing.assert_close(td["action"][1:], td["portfolio_weights"][1:])  # after the first fill, the policy only echoes
+    excess = td["portfolio_weights"][1:, 1:].sum(-1) - 0.5
+    assert (excess > 0.01).all()  # the book drifts above the cap every period
+    torch.testing.assert_close(torch.tensor(env.history.turnovers[2:], dtype=torch.float64), excess.double(), atol=1e-3, rtol=0)  # the env sells exactly the excess
+    assert (td["action"] >= 0).all()
+
+
 def test_ubah_buys_equal_weights_once_then_holds():
     env = _env(False, transaction_fee=0.001)
     env.rollout(6, policy=UBAH())
@@ -102,16 +126,10 @@ def test_ubah_buys_equal_weights_once_then_holds():
     # Two lanes open at once with less cash than 2/N left: they share the cash, nothing is sold.
     td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.4, 0.6, 0.0, 0.0]), "tradable": torch.tensor([1.0, 1.0, 1.0])}))
     torch.testing.assert_close(td["action"], torch.tensor([0.0, 0.6, 0.2, 0.2]))
-    # Held lanes drifted above the cap: the policy leaves the opening lane unbought and sells nothing,
-    # and the env then scales the held lanes down to its cap, which the docstring states.
-    td = UBAH(max_gross=0.5)(TensorDict({"portfolio_weights": torch.tensor([0.4, 0.3, 0.3, 0.0]), "tradable": torch.ones(3)}))
-    torch.testing.assert_close(td["action"], torch.tensor([0.4, 0.3, 0.3, 0.0]))
-    filled = portfolio_step(td["portfolio_weights"].double()[None], td["action"].double()[None], torch.ones(1, 3, dtype=torch.bool),
-                            torch.zeros(1, 3, dtype=torch.bool), torch.ones(1, 3, dtype=torch.float64), torch.zeros(1, 3, dtype=torch.float64),
-                            fee=0.0, max_gross=0.5, allow_short=False).weights[0]
-    torch.testing.assert_close(filled, torch.tensor([0.5, 0.25, 0.25, 0.0], dtype=torch.float64))
-    with pytest.raises(ValueError, match="max_gross"):
-        UBAH(max_gross=-0.5)
+    # Held lanes at or above the cap: the lane that opens stays unbought, nothing is sold or negative.
+    for cap, book in ((0.5, [0.4, 0.3, 0.3, 0.0]), (1.0, [0.0, 0.5, 0.5, 0.0])):
+        td = UBAH(max_gross=cap)(TensorDict({"portfolio_weights": torch.tensor(book), "tradable": torch.ones(3)}))
+        torch.testing.assert_close(td["action"], torch.tensor(book))
     # A real book (sums to one) whose thirteen shares sum back to 2.4e-7 more than the cash in float32.
     w = torch.zeros(16); w[:3] = torch.tensor([0.843706429, 0.0434619002, 0.112831645])
     td = UBAH()(TensorDict({"portfolio_weights": w, "tradable": torch.ones(15)}))
