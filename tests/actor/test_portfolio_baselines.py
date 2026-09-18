@@ -101,6 +101,9 @@ def test_ubah_buys_equal_weights_once_then_holds():
     # Two lanes open at once with less cash than 2/N left: they share the cash, nothing is sold.
     td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.4, 0.6, 0.0, 0.0]), "tradable": torch.tensor([1.0, 1.0, 1.0])}))
     torch.testing.assert_close(td["action"], torch.tensor([0.0, 0.6, 0.2, 0.2]))
+    # Held lanes drifted above the cap: the lane that opens stays unbought, nothing goes negative.
+    td = UBAH(max_gross=0.5)(TensorDict({"portfolio_weights": torch.tensor([0.4, 0.3, 0.3, 0.0]), "tradable": torch.ones(3)}))
+    torch.testing.assert_close(td["action"], torch.tensor([0.4, 0.3, 0.3, 0.0]))
     # A real book (sums to one) whose thirteen shares sum back to 2.4e-7 more than the cash in float32.
     w = torch.zeros(16); w[:3] = torch.tensor([0.843706429, 0.0434619002, 0.112831645])
     td = UBAH()(TensorDict({"portfolio_weights": w, "tradable": torch.ones(15)}))
