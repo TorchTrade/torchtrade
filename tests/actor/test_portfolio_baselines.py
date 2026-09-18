@@ -5,6 +5,7 @@ from tensordict import TensorDict
 from tests.conftest import make_portfolio_bars
 from torchtrade.actor import OLMAR, UBAH, UCRP
 from torchtrade.actor.rulebased.portfolio import project_simplex
+from torchtrade.envs.offline.infrastructure.portfolio_math import portfolio_step
 from torchtrade.envs.offline import (
     PortfolioTradingEnv,
     PortfolioTradingEnvConfig,
@@ -101,9 +102,16 @@ def test_ubah_buys_equal_weights_once_then_holds():
     # Two lanes open at once with less cash than 2/N left: they share the cash, nothing is sold.
     td = UBAH()(TensorDict({"portfolio_weights": torch.tensor([0.4, 0.6, 0.0, 0.0]), "tradable": torch.tensor([1.0, 1.0, 1.0])}))
     torch.testing.assert_close(td["action"], torch.tensor([0.0, 0.6, 0.2, 0.2]))
-    # Held lanes drifted above the cap: the lane that opens stays unbought, nothing goes negative.
+    # Held lanes drifted above the cap: the policy leaves the opening lane unbought and sells nothing,
+    # and the env then scales the held lanes down to its cap, which the docstring states.
     td = UBAH(max_gross=0.5)(TensorDict({"portfolio_weights": torch.tensor([0.4, 0.3, 0.3, 0.0]), "tradable": torch.ones(3)}))
     torch.testing.assert_close(td["action"], torch.tensor([0.4, 0.3, 0.3, 0.0]))
+    filled = portfolio_step(td["portfolio_weights"].double()[None], td["action"].double()[None], torch.ones(1, 3, dtype=torch.bool),
+                            torch.zeros(1, 3, dtype=torch.bool), torch.ones(1, 3, dtype=torch.float64), torch.zeros(1, 3, dtype=torch.float64),
+                            fee=0.0, max_gross=0.5, allow_short=False).weights[0]
+    torch.testing.assert_close(filled, torch.tensor([0.5, 0.25, 0.25, 0.0], dtype=torch.float64))
+    with pytest.raises(ValueError, match="max_gross"):
+        UBAH(max_gross=-0.5)
     # A real book (sums to one) whose thirteen shares sum back to 2.4e-7 more than the cash in float32.
     w = torch.zeros(16); w[:3] = torch.tensor([0.843706429, 0.0434619002, 0.112831645])
     td = UBAH()(TensorDict({"portfolio_weights": w, "tradable": torch.ones(15)}))
