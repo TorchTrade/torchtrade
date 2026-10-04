@@ -26,12 +26,17 @@ def _with_cash(assets: torch.Tensor) -> torch.Tensor:
 
 
 def normalise_request(request, force_close, max_gross, allow_short):
-    """Any action -> valid target weights: cash ≥ 0, gross ≤ max_gross, all-zero -> cash."""
+    """Any action -> valid target weights: cash ≥ 0, gross ≤ max_gross, all-zero -> cash.
+
+    The two divisions are floored, not guarded: a request whose mass is below 1e-12 (float32
+    denormals left on open lanes once a force-closed lane is zeroed) reads as cash instead of
+    being blown up to a full book, and the gradient through the division stays finite in
+    float32, which a `torch.where` guard does not give (1 / total² at a denormal total).
+    """
     cash = request[..., 0].clamp(min=0)
     assets = request[..., 1:] if allow_short else request[..., 1:].clamp(min=0)
     assets = torch.where(force_close, 0.0, assets)
-    total = cash + assets.abs().sum(-1)
-    assets = assets / torch.where(total > 0, total, 1.0)[..., None]
+    assets = assets / (cash + assets.abs().sum(-1)).clamp(min=1e-12)[..., None]
     gross = assets.abs().sum(-1)
     assets = assets * (max_gross / gross.clamp(min=1e-12)).clamp(max=1.0)[..., None]
     return _with_cash(assets)
@@ -45,7 +50,7 @@ def portfolio_step(
     target = normalise_request(request, force_close, max_gross, allow_short)
     open_assets = torch.where(tradable, target[..., 1:], 0.0)
     open_mass = target[..., 0] + open_assets.abs().sum(-1)
-    open_mass = torch.where(open_mass > 0, open_mass, 1.0)
+    open_mass = open_mass.clamp(min=1e-12)  # floored for the same reason as in normalise_request
     held = drifted[..., 1:]
     closed_held = torch.where(tradable, 0.0, held)
 

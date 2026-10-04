@@ -38,7 +38,8 @@ def _step(drifted, request, tradable=None, force_close=None, y=None, rate=None,
     ([[-1.0, 0.0, 0.0]], [[False, False]], 1.0, True, [[1.0, 0.0, 0.0]]),         # all-zero -> cash
     ([[-0.5, 0.25, 0.25]], [[False, False]], 1.0, True, [[0.0, 0.5, 0.5]]),       # negative cash clipped
     ([[0.0, 1.0, 1.0]], [[True, False]], 1.0, False, [[0.0, 0.0, 1.0]]),          # force close
-], ids=["valid", "rescale", "gross-cap", "long-only-clip", "short", "empty-to-cash", "negative-cash", "force-close"])
+    ([[0.0, 1.0, 1e-45]], [[True, False]], 1.0, False, [[1.0, 0.0, 0.0]]),        # a denormal remainder is cash, not a full book
+], ids=["valid", "rescale", "gross-cap", "long-only-clip", "short", "empty-to-cash", "negative-cash", "force-close", "tiny-remainder"])
 def test_normalise_request(request_, force_close, max_gross, allow_short, expected):
     out = normalise_request(_t(request_), torch.tensor(force_close), max_gross, allow_short)
     torch.testing.assert_close(out, _t(expected))
@@ -139,3 +140,21 @@ def test_pv_factor_is_differentiable_in_the_request():
     )
     out.pv_factor.sum().backward()
     assert torch.isfinite(request.grad).all() and request.grad.abs().sum() > 0
+
+
+def test_gradient_stays_finite_when_the_book_sits_on_a_force_closed_lane():
+    """A saturated float32 softmax puts 1.0 on a lane that is force-closed this period and
+    float32 denormals (1.4e-45) elsewhere. Dividing by that remainder gave a 1e41 gradient that
+    turned to inf in float32 and NaN in the softmax backward (a Sharpe-loss DPM seed died on
+    LUNA's delisting bar); the floored division keeps it finite."""
+    logits = torch.tensor([[0.0, 100.0, 0.0, 0.0]], requires_grad=True)  # float32, like a policy's output
+    request = torch.softmax(logits, -1)
+    assert request[0, 2].item() == pytest.approx(0.0, abs=1e-40) and request[0, 2].item() > 0  # a denormal, not zero
+    out = portfolio_step(
+        _t([[1.0, 0.0, 0.0, 0.0]]), request.double(),
+        torch.tensor([[True, True, True]]), torch.tensor([[True, False, False]]),
+        _t([[1.0, 1.1, 0.9]]), _t([[0.0, 0.0, 0.0]]), fee=0.001, max_gross=1.0, allow_short=False,
+    )
+    torch.log(out.pv_factor).sum().backward()
+    assert torch.isfinite(logits.grad).all()
+    torch.testing.assert_close(out.weights, _t([[1.0, 0.0, 0.0, 0.0]]))  # the request reads as cash
