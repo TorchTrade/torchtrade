@@ -26,7 +26,7 @@ def _with_cash(assets: torch.Tensor) -> torch.Tensor:
 
 
 def normalise_request(request, force_close, max_gross, allow_short):
-    """Any action -> valid target weights: cash ≥ 0, gross ≤ max_gross, mass below 1e-12 -> cash."""
+    """Any action -> valid target weights: cash ≥ 0, gross ≤ max_gross, mass below 1e-12 shrinks toward cash."""
     cash = request[..., 0].clamp(min=0)
     assets = request[..., 1:] if allow_short else request[..., 1:].clamp(min=0)
     assets = torch.where(force_close, 0.0, assets)
