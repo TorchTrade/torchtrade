@@ -38,7 +38,9 @@ def _step(drifted, request, tradable=None, force_close=None, y=None, rate=None,
     ([[-1.0, 0.0, 0.0]], [[False, False]], 1.0, True, [[1.0, 0.0, 0.0]]),         # all-zero -> cash
     ([[-0.5, 0.25, 0.25]], [[False, False]], 1.0, True, [[0.0, 0.5, 0.5]]),       # negative cash clipped
     ([[0.0, 1.0, 1.0]], [[True, False]], 1.0, False, [[0.0, 0.0, 1.0]]),          # force close
-], ids=["valid", "rescale", "gross-cap", "long-only-clip", "short", "empty-to-cash", "negative-cash", "force-close"])
+    ([[0.0, 1.0, 1e-45]], [[True, False]], 1.0, False, [[1.0, 0.0, 0.0]]),        # a denormal remainder is cash, not a full book
+    ([[0.0, 1e-12, 0.0]], [[False, False]], 1.0, False, [[0.0, 1.0, 0.0]]),       # the floor's edge: still a full book
+], ids=["valid", "rescale", "gross-cap", "long-only-clip", "short", "empty-to-cash", "negative-cash", "force-close", "tiny-remainder", "floor-edge"])
 def test_normalise_request(request_, force_close, max_gross, allow_short, expected):
     out = normalise_request(_t(request_), torch.tensor(force_close), max_gross, allow_short)
     torch.testing.assert_close(out, _t(expected))
@@ -139,3 +141,19 @@ def test_pv_factor_is_differentiable_in_the_request():
     )
     out.pv_factor.sum().backward()
     assert torch.isfinite(request.grad).all() and request.grad.abs().sum() > 0
+
+
+@pytest.mark.parametrize("drifted,tradable,force_close", [
+    ([[1.0, 0.0, 0.0, 0.0]], [[True, True, True]], [[True, False, False]]),
+    ([[0.2, 0.8, 0.0, 0.0]], [[False, True, True]], [[False, False, False]]),
+], ids=["force-closed-lane", "closed-lane-holding-the-book"])
+def test_saturated_softmax_on_a_closed_lane_is_a_no_trade(drifted, tradable, force_close):
+    logits = torch.tensor([[0.0, 100.0, 0.0, 0.0]], requires_grad=True)
+    request = torch.softmax(logits, -1).double()  # float32 softmax: 1.0 on lane 1, denormals elsewhere
+    out = portfolio_step(
+        _t(drifted), request, torch.tensor(tradable), torch.tensor(force_close),
+        _t([[1.0, 1.1, 0.9]]), _t([[0.0, 0.0, 0.0]]), fee=0.001, max_gross=1.0, allow_short=False,
+    )
+    torch.log(out.pv_factor).sum().backward()
+    assert torch.isfinite(logits.grad).all()
+    torch.testing.assert_close(out.weights, _t(drifted))
